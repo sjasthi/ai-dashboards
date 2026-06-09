@@ -1,0 +1,18 @@
+
+Technology Stack:   Front End (HTML, CSS, JS, JQuery, Bootstrap)
+                    Server (PHP)
+                    Backend (MySQL)
+
+
+Requirements
+
+1. Users will give 1 or more excel or CSV files.
+2. Our system analyzes those files and produces visualizations, reports, summaries, recommendations, etc.
+3. users can download those reports as PDF or HTML or send those reports to themselves or to others through email.
+
+You should NOT take any assumption on the number of files, number of columns, number of rows and the format (can be CSV or excel).
+
+
+
+FP2: requirements.md file Requirements Elaboration
+FP3:  what is your 8 week plan to wrap up the projects. What is coming in FP3? You should demonstrate it
