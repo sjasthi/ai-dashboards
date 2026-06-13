@@ -46,7 +46,7 @@ Reports can be downloaded as PDF/HTML or sent via email.
    poetry run python app/main.py
 ```
 ```bash
-   poetry run python app/data/data_main.py
+   poetry run python app/data_main.py
 ```
 
 ## Running Tests
