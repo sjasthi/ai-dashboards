@@ -82,13 +82,13 @@ def build_prompt(data_loader, report_goal=""):
     """
     all_profiles = []
 
-    for file_path, df in data_loader.get_files():
+    for file_path, df in data_loader.files:
         filename = os.path.basename(file_path)
         profile, _ = profile_df(filename, df)
         all_profiles.append(profile)
 
     shared = find_shared_columns(all_profiles)
-
+    # TODO: Update prompt
     prompt = "You are a data analyst. I have the following CSV files I want to build a report from.\n\n"
 
     if report_goal:
@@ -118,7 +118,7 @@ def build_prompt(data_loader, report_goal=""):
         for col, files in shared.items():
             prompt += f"  - '{col}' appears in: {', '.join(files)}\n"
         prompt += "\n"
-
+    # TODO: Update prompt
     prompt += (
         "Based on this data, suggest at least 3 meaningful ways to build a report. "
         "For each suggestion, describe: what question it answers, which files/columns to use, "
