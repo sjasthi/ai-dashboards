@@ -1,23 +1,26 @@
-import numpy as np
-import pandas as pd
-from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog
-
 from data.data_loader import DataLoader
-import app.data.data_info as explore
+import data.data_info as info
+import data.csv_prompt_builder as prompt
 
-# Current Dataframe
-df = None
+# TODO: Figure out how to best import multiple files
+filenames = ["students.csv", "grades.csv", "courses.csv"]
 
-# TODO: Implement importing filepath
-file_path = "test_data_1.csv"
+# Loads each file from list
+loader = DataLoader()
+for file in filenames:
+    loader.add_file(file)
 
-# Loading CSV File
-test_load = DataLoader()
-test_load.set_df(file_path)
-df = test_load.get_df()
 
-output = explore.get_columns(df)
-print(output)
+# Dataloader Tuple Example: file_name, dataframe
 
+print(f"\nFiles Uploaded \n ------")
+for filename, df in loader.files:
+    print(f"{filename}")
+
+print(f"\nColumns \n ------")
+for filename, df in loader.files:
+    print(f"{info.get_columns(df)}")
+
+
+prompt = prompt.build_prompt(loader, report_goal="<TBD>")
+print(prompt)

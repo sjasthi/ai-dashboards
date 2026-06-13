@@ -11,4 +11,5 @@ def get_stats(df):
     return df.describe()
 
 def get_columns(df):
-    return df.columns
+    columns = np.array(df.columns, dtype=str)
+    return columns
