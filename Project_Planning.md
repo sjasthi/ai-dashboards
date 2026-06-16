@@ -25,9 +25,10 @@ The project will be completed through multiple iterations from FP3 through FP10,
 - Establish project requirements
 - Create repository and folder structure
 - Set up development environment
-- Create starter page (`index.php`)
 - Build initial CSV loading prototype
-- Research and test Anthropic API integration
+- Build CSV file processing functionality
+- Support multiple CSV uploads
+
 
 ### Deliverables
 
@@ -42,10 +43,10 @@ The project will be completed through multiple iterations from FP3 through FP10,
 
 ### Goals
 
-- Build CSV file processing functionality
-- Support multiple CSV uploads
+- Create starter page (`index.php`)
 - Generate dataset summaries
 - Add validation and error handling
+- Research and test Anthropic API integration
 
 ### Deliverables
 
