@@ -1,0 +1,18 @@
+# Project File Structure
+
+```text
+ai-dashboards/
+|   └── app/
+│       ├── data/ [backend logic]
+|       └── web/  [webapp data]
+├── datasets/ [test datasets]
+├── docs/ [design docs]
+│   └── website mockup.png
+├── LICENSE
+├── Project_Planning.md
+├── README.MD
+├── poetry.lock
+├── pyproject.toml
+├── requirements.txt
+└── weekly_deliverables_plan.md
+```
