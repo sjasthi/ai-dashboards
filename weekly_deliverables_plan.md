@@ -8,8 +8,8 @@
 | **8**  | July 6, 2026    | **FP6**      |   Implement file upload functionality <BR> Show AI recommendations in the browser    | Design dashboard interface <BR> Show AI recommendations in the browser    | Integration; promote to GitHub; all repositories are in sync |
 | **9**  | July 13, 2026   | **FP7**      | Generate reports from uploaded data <BR> Export reports as CSV files      | Allow users to select report recommendations    | Integration; promote to GitHub; all repositories are in sync |
 | **10** | July 20, 2026   | **FP8**      | Create charts and graphs, <BR> Display trends visually       | Integrate analytics dashboards    | Integration; promote to GitHub; all repositories are in sync |
-| **11** | July 27, 2026   | **FP9**      | ?       | ?    | Perform system testing, <BR> Fix bugs, <BR> Improve usability and performance |
-| **12** | August 3, 2026  | **FP10**     | Create documentation       | ?    | Complete system integration, <BR> Final testing, <BR> Prepare final presentation  |
+| **11** | July 27, 2026   | **FP9**      | Peform system testing and fix bugs       | Improve usability and performance   | Perform system testing, <BR> Fix bugs, <BR> Improve usability and performance |
+| **12** | August 3, 2026  | **FP10**     | Create documentation       | Complete system integration. Complete final testing.    | Create documentation and prepare final presentation <BR> Final testing, <BR> Prepare final presentation  |
 | **13** | August 10, 2026 | **FP-Final** | ?       | ?    | Integration; promote to GitHub; all repositories are in sync |
 
 ---
