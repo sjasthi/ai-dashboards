@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DataLens — AI Report Builder</title>
+  <style>
+    /* ============================================================
+       DESIGN TOKENS — edit here to restyle the entire app
+       ============================================================ */
+    :root {
+      /* Palette */
+      --color-bg:           #F8F9FA;
+      --color-surface:      #FFFFFF;
+      --color-border:       #DEE2E6;
+      --color-border-focus: #6C757D;
+      --color-accent:       #2563EB;
+      --color-accent-hover: #1D4ED8;
+      --color-accent-muted: #EFF6FF;
+      --color-text-primary: #111827;
+      --color-text-secondary: #6B7280;
+      --color-text-muted:   #9CA3AF;
+      --color-success:      #16A34A;
+      --color-warning:      #D97706;
+      --color-danger:       #DC2626;
+      --color-danger-muted: #FEF2F2;
+
+      /* Typography */
+      --font-ui:      'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono:    'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+      --size-xs:      0.75rem;
+      --size-sm:      0.875rem;
+      --size-base:    1rem;
+      --size-lg:      1.125rem;
+      --size-xl:      1.25rem;
+      --size-2xl:     1.5rem;
+      --weight-normal: 400;
+      --weight-medium: 500;
+      --weight-semibold: 600;
+      --weight-bold:  700;
+
+      /* Layout */
+      --radius-sm:    4px;
+      --radius-md:    8px;
+      --radius-lg:    12px;
+      --shadow-card:  0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-elevated: 0 4px 12px rgba(0,0,0,0.1);
+      --nav-height:   56px;
+      --content-max:  900px;
+      --content-pad:  24px;
+    }
+
+    /* ============================================================
+       RESET & BASE
+       ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body {
+      font-family: var(--font-ui);
+      font-size: var(--size-base);
+      color: var(--color-text-primary);
+      background: var(--color-bg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    button { cursor: pointer; font-family: inherit; }
+    input, label { font-family: inherit; }
+    ul { list-style: none; }
+    a { text-decoration: none; color: inherit; }
+
+    /* ============================================================
+       NAVBAR
+       ============================================================ */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: var(--nav-height);
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--content-pad);
+    }
+    .navbar__inner {
+      max-width: var(--content-max);
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+    .navbar__logo {
+      font-size: var(--size-lg);
+      font-weight: var(--weight-bold);
+      color: var(--color-accent);
+      letter-spacing: -0.5px;
+      margin-right: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .navbar__logo-icon {
+      width: 28px;
+      height: 28px;
+      background: var(--color-accent);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .navbar__logo-icon svg { width: 16px; height: 16px; fill: white; }
+    .navbar__nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-size: var(--size-sm);
+      font-weight: var(--weight-medium);
+      color: var(--color-text-secondary);
+      background: none;
+      border: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover {
+      background: var(--color-bg);
+      color: var(--color-text-primary);
+    }
+    .nav-link.active {
+      background: var(--color-accent-muted);
+      color: var(--color-accent);
+    }
+    .nav-link.disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+    .navbar__user {
+      margin-left: 16px;
+      position: relative;
+    }
+    .user-btn {
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-size: var(--size-sm);
+      font-weight: var(--weight-medium);
+      background: none;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .user-btn:hover { border-color: var(--color-border-focus); background: var(--color-bg); }
+    .user-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-elevated);
+      min-width: 160px;
+      overflow: hidden;
+    }
+    .user-dropdown.open { display: block; }
+    .user-dropdown__item {
+      display: block;
+      width: 100%;
+      padding: 10px 16px;
+      font-size: var(--size-sm);
+      text-align: left;
+      background: none;
+      border: none;
+      color: var(--color-text-primary);
+      transition: background 0.1s;
+    }
+    .user-dropdown__item:hover { background: var(--color-bg); }
+    .user-dropdown__item.danger { color: var(--color-danger); }
+    .user-dropdown__item.danger:hover { background: var(--color-danger-muted); }
+    .user-dropdown__divider {
+      border: none;
+      border-top: 1px solid var(--color-border);
+      margin: 4px 0;
+    }
+
+    /* ============================================================
+       MAIN LAYOUT
+       ============================================================ */
+    .main {
+      flex: 1;
+      padding: 32px var(--content-pad) 48px;
+    }
+    .page {
+      display: none;
+      max-width: var(--content-max);
+      margin: 0 auto;
+    }
+    .page.visible { display: block; }
+
+    .step-label {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-semibold);
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+    }
+    .step-label span {
+      color: var(--color-accent);
+    }
+
+    /* ============================================================
+       CARDS & SURFACES
+       ============================================================ */
+    .card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+    }
+    .card--pad { padding: 24px; }
+
+    /* ============================================================
+       BUTTONS
+       ============================================================ */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: var(--radius-md);
+      font-size: var(--size-sm);
+      font-weight: var(--weight-medium);
+      border: none;
+      transition: background 0.15s, opacity 0.15s, box-shadow 0.15s;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--color-accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--color-accent-hover); }
+    .btn-primary:disabled {
+      background: var(--color-border);
+      color: var(--color-text-muted);
+      cursor: not-allowed;
+    }
+    .btn-outline {
+      background: none;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-primary);
+    }
+    .btn-outline:hover { border-color: var(--color-border-focus); background: var(--color-bg); }
+    .btn-ghost {
+      background: none;
+      color: var(--color-text-secondary);
+      padding: 4px 8px;
+      font-size: var(--size-xs);
+    }
+    .btn-ghost:hover { color: var(--color-danger); background: var(--color-danger-muted); }
+    .btn-sm { padding: 5px 12px; font-size: var(--size-xs); }
+
+    /* ============================================================
+       PAGE 1 — UPLOAD
+       ============================================================ */
+    .dropzone {
+      border: 2px dashed var(--color-border);
+      border-radius: var(--radius-lg);
+      background: var(--color-surface);
+      padding: 48px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      cursor: pointer;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--color-accent);
+      background: var(--color-accent-muted);
+    }
+    .dropzone__icon {
+      width: 48px;
+      height: 48px;
+      color: var(--color-text-muted);
+    }
+    .dropzone__title {
+      font-size: var(--size-base);
+      font-weight: var(--weight-medium);
+      color: var(--color-text-primary);
+    }
+    .dropzone__hint {
+      font-size: var(--size-sm);
+      color: var(--color-text-secondary);
+    }
+    .dropzone__formats {
+      font-size: var(--size-xs);
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+    }
+    #fileInput { display: none; }
+
+    .file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-card);
+    }
+    .file-item__info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .file-item__icon {
+      width: 32px;
+      height: 32px;
+      background: var(--color-accent-muted);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .file-item__icon svg { width: 16px; height: 16px; color: var(--color-accent); }
+    .file-item__name {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-medium);
+    }
+    .file-item__meta {
+      font-size: var(--size-xs);
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .analyze-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-card);
+      margin-top: 16px;
+    }
+    .analyze-bar__info {}
+    .analyze-bar__count {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-semibold);
+    }
+    .analyze-bar__sub {
+      font-size: var(--size-xs);
+      color: var(--color-text-secondary);
+      margin-top: 2px;
+    }
+
+    /* ============================================================
+       PAGE 2 — ANALYSIS
+       ============================================================ */
+    .analysis-prompt {
+      padding: 14px 20px;
+      background: var(--color-accent-muted);
+      border: 1px solid #BFDBFE;
+      border-radius: var(--radius-md);
+      font-size: var(--size-sm);
+      color: var(--color-accent);
+      font-weight: var(--weight-medium);
+      margin-bottom: 24px;
+    }
+
+    .report-options {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .report-card {
+      background: var(--color-surface);
+      border: 2px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      cursor: pointer;
+    }
+    .report-card:hover {
+      border-color: var(--color-accent);
+      box-shadow: var(--shadow-elevated);
+    }
+    .report-card.selected {
+      border-color: var(--color-accent);
+      background: var(--color-accent-muted);
+    }
+    .report-card__label {
+      font-size: var(--size-xs);
+      font-weight: var(--weight-semibold);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-text-muted);
+    }
+    .report-card__title {
+      font-size: var(--size-base);
+      font-weight: var(--weight-semibold);
+    }
+    .report-card__rationale {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 12px;
+      background: var(--color-bg);
+      border-radius: var(--radius-sm);
+      border-top: 1px dashed var(--color-border);
+      margin-top: 4px;
+    }
+    .rationale-line {
+      font-size: var(--size-xs);
+      color: var(--color-text-secondary);
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .rationale-line::before {
+      content: '·';
+      color: var(--color-accent);
+      font-weight: bold;
+      flex-shrink: 0;
+      margin-top: -1px;
+    }
+    .report-card__select {
+      margin-top: auto;
+      padding-top: 12px;
+    }
+    .btn-select {
+      width: 100%;
+      padding: 9px;
+      border-radius: var(--radius-md);
+      font-size: var(--size-sm);
+      font-weight: var(--weight-medium);
+      border: 1px solid var(--color-border);
+      background: none;
+      color: var(--color-text-primary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-select:hover {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+    .report-card.selected .btn-select {
+      background: var(--color-accent);
+      color: white;
+      border-color: var(--color-accent);
+    }
+
+    .generate-row {
+      display: flex;
+      justify-content: center;
+    }
+
+    /* ============================================================
+       PAGE 3 — RESULTS
+       ============================================================ */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-card);
+    }
+    .metric-card__label {
+      font-size: var(--size-xs);
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: var(--weight-semibold);
+      margin-bottom: 6px;
+    }
+    .metric-card__value {
+      font-size: var(--size-2xl);
+      font-weight: var(--weight-bold);
+      font-family: var(--font-mono);
+      color: var(--color-text-primary);
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .chart-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-card);
+    }
+    .chart-card__title {
+      font-size: var(--size-base);
+      font-weight: var(--weight-semibold);
+      margin-bottom: 20px;
+      color: var(--color-text-primary);
+    }
+    .chart-placeholder {
+      width: 100%;
+      height: 200px;
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      padding-top: 12px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .chart-bar {
+      flex: 1;
+      background: var(--color-accent);
+      opacity: 0.15;
+      border-radius: 3px 3px 0 0;
+    }
+    .chart-bar:nth-child(2) { opacity: 0.25; }
+    .chart-bar:nth-child(3) { opacity: 0.6; }
+    .chart-bar:nth-child(4) { opacity: 0.35; }
+    .chart-bar:nth-child(5) { opacity: 0.45; }
+    .chart-bar:nth-child(6) { opacity: 0.8; }
+    .chart-bar:nth-child(7) { opacity: 0.2; }
+
+    .insights-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .insight-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow-card);
+    }
+    .insight-card__type {
+      font-size: var(--size-xs);
+      font-weight: var(--weight-semibold);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 6px;
+    }
+    .insight-card.anomaly .insight-card__type { color: var(--color-warning); }
+    .insight-card.recommendation .insight-card__type { color: var(--color-success); }
+    .insight-card__text {
+      font-size: var(--size-sm);
+      color: var(--color-text-primary);
+      line-height: 1.5;
+    }
+
+    /* ============================================================
+       EXPORT SECTION
+       ============================================================ */
+    .export-section {
+      margin-top: 32px;
+    }
+    .export-section__title {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-semibold);
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 12px;
+    }
+    .export-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .export-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-card);
+    }
+    .export-card__title {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-semibold);
+      margin-bottom: 12px;
+    }
+    .export-card__btns {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* ============================================================
+       SETTINGS PAGE
+       ============================================================ */
+    .settings-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 320px;
+      gap: 16px;
+      color: var(--color-text-muted);
+    }
+    .settings-placeholder svg {
+      width: 48px;
+      height: 48px;
+      opacity: 0.3;
+    }
+    .settings-placeholder__title {
+      font-size: var(--size-lg);
+      font-weight: var(--weight-semibold);
+      color: var(--color-text-secondary);
+    }
+    .settings-placeholder__sub {
+      font-size: var(--size-sm);
+    }
+
+    /* ============================================================
+       STEP CONNECTOR
+       ============================================================ */
+    .step-divider {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 32px;
+      color: var(--color-border);
+      margin: 4px 0;
+    }
+    .step-divider svg { width: 20px; height: 20px; }
+
+    /* ============================================================
+       FOOTER
+       ============================================================ */
+    .footer {
+      background: var(--color-surface);
+      border-top: 1px solid var(--color-border);
+      padding: 20px var(--content-pad);
+    }
+    .footer__inner {
+      max-width: var(--content-max);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer__brand {
+      font-size: var(--size-sm);
+      font-weight: var(--weight-semibold);
+      color: var(--color-text-secondary);
+    }
+    .footer__links {
+      display: flex;
+      gap: 20px;
+    }
+    .footer__link {
+      font-size: var(--size-xs);
+      color: var(--color-text-muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .footer__link:hover { color: var(--color-text-primary); }
+    .footer__copy {
+      font-size: var(--size-xs);
+      color: var(--color-text-muted);
+    }
+
+    /* ============================================================
+       RESPONSIVE
+       ============================================================ */
+    @media (max-width: 700px) {
+      .report-options { grid-template-columns: 1fr; }
+      .metrics-row { grid-template-columns: repeat(2, 1fr); }
+      .results-grid { grid-template-columns: 1fr; }
+      .export-grid { grid-template-columns: 1fr; }
+      .navbar__nav .nav-link { padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     NAVBAR
+     ============================================================ -->
+<nav class="navbar">
+  <div class="navbar__inner">
+    <div class="navbar__logo">
+      <div class="navbar__logo-icon">
+        <!-- Logo placeholder — replace svg with <img src="logo.png"> when ready -->
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="7" width="3" height="8" rx="1"/>
+          <rect x="6" y="4" width="3" height="11" rx="1"/>
+          <rect x="11" y="1" width="3" height="14" rx="1"/>
+        </svg>
+      </div>
+      DataLens
+    </div>
+
+    <nav class="navbar__nav">
+      <button class="nav-link active" onclick="navigate('upload')">Upload</button>
+      <button class="nav-link disabled" id="nav-analysis" onclick="navigate('analysis')">Analysis</button>
+      <button class="nav-link disabled" id="nav-reports" onclick="navigate('reports')">Reports</button>
+      <button class="nav-link" onclick="navigate('settings')">Settings</button>
+    </nav>
+
+    <div class="navbar__user">
+      <button class="user-btn" id="userBtn" onclick="toggleUserMenu()">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 8a3 3 0 100-6 3 3 0 000 6zM2 14s-1 0-1-1 1-4 7-4 7 3 7 4-1 1-1 1H2z"/>
+        </svg>
+        <span id="userLabel">Sign in</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style="opacity:0.5">
+          <path d="M1 3l4 4 4-4"/>
+        </svg>
+      </button>
+      <div class="user-dropdown" id="userDropdown">
+        <div id="userDropdownContent">
+          <!-- Populated by JS based on auth state -->
+        </div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ============================================================
+     MAIN
+     ============================================================ -->
+<main class="main">
+
+  <!-- PAGE: UPLOAD -->
+  <section class="page visible" id="page-upload">
+    <div class="step-label"><span>Step 1</span> — Upload files</div>
+
+    <!-- Drop zone -->
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()"
+         ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+      <svg class="dropzone__icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="6" y="10" width="36" height="28" rx="4" stroke-dasharray="4 3"/>
+        <polyline points="24,16 24,30"/>
+        <polyline points="18,22 24,16 30,22"/>
+      </svg>
+      <div class="dropzone__title">Drag &amp; drop files here</div>
+      <div class="dropzone__hint">or click to browse</div>
+      <div class="dropzone__formats">.xlsx · .xls · .csv — multiple files supported</div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple onchange="handleFileInput(event)" />
+    </div>
+
+    <!-- File list -->
+    <ul class="file-list" id="fileList"></ul>
+
+    <!-- Analyze bar -->
+    <div class="analyze-bar" id="analyzeBar" style="display:none">
+      <div class="analyze-bar__info">
+        <div class="analyze-bar__count" id="analyzeCount">0 files ready</div>
+        <div class="analyze-bar__sub" id="analyzeDetail">Add files above to continue</div>
+      </div>
+      <button class="btn btn-primary" onclick="navigate('analysis')">
+        Analyze files →
+      </button>
+    </div>
+  </section>
+
+  <!-- PAGE: ANALYSIS -->
+  <section class="page" id="page-analysis">
+    <div class="step-label"><span>Step 2</span> — Select a report type</div>
+
+    <div class="analysis-prompt">
+      AI analyzed your files — select a report type to generate:
+    </div>
+
+    <div class="report-options">
+      <!-- Option A -->
+      <div class="report-card" id="option-A" onclick="selectReport('A')">
+        <div class="report-card__label">Option A</div>
+        <div class="report-card__title">Sales Performance Summary</div>
+        <div class="report-card__rationale">
+          <div class="rationale-line">Aggregates total revenue and units by period</div>
+          <div class="rationale-line">Highlights top-performing products and regions</div>
+          <div class="rationale-line">Ideal for weekly or monthly business reviews</div>
+        </div>
+        <div class="report-card__select">
+          <button class="btn-select" id="select-A">Select this report</button>
+        </div>
+      </div>
+
+      <!-- Option B -->
+      <div class="report-card" id="option-B" onclick="selectReport('B')">
+        <div class="report-card__label">Option B</div>
+        <div class="report-card__title">Regional Breakdown with Anomaly Report</div>
+        <div class="report-card__rationale">
+          <div class="rationale-line">Segments data by geographic region and territory</div>
+          <div class="rationale-line">Flags statistical outliers and unusual patterns</div>
+          <div class="rationale-line">Best for teams investigating regional discrepancies</div>
+        </div>
+        <div class="report-card__select">
+          <button class="btn-select" id="select-B">Select this report</button>
+        </div>
+      </div>
+
+      <!-- Option C -->
+      <div class="report-card" id="option-C" onclick="selectReport('C')">
+        <div class="report-card__label">Option C</div>
+        <div class="report-card__title">Executive Overview with Recommendations</div>
+        <div class="report-card__rationale">
+          <div class="rationale-line">Concise snapshot of key business metrics</div>
+          <div class="rationale-line">AI-generated strategic recommendations included</div>
+          <div class="rationale-line">Designed for C-suite and leadership presentations</div>
+        </div>
+        <div class="report-card__select">
+          <button class="btn-select" id="select-C">Select this report</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="generate-row">
+      <button class="btn btn-primary" id="generateBtn" disabled onclick="navigate('reports')" style="padding: 11px 32px; font-size: var(--size-base);">
+        Generate report →
+      </button>
+    </div>
+  </section>
+
+  <!-- PAGE: REPORTS -->
+  <section class="page" id="page-reports">
+    <div class="step-label"><span>Step 3</span> — Results</div>
+
+    <!-- Metrics row -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-card__label">Total Revenue</div>
+        <div class="metric-card__value">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">Records Analyzed</div>
+        <div class="metric-card__value">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">Regions Covered</div>
+        <div class="metric-card__value">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card__label">Anomalies Detected</div>
+        <div class="metric-card__value">—</div>
+      </div>
+    </div>
+
+    <!-- Chart + Insights -->
+    <div class="results-grid">
+      <div class="chart-card">
+        <div class="chart-card__title">Performance by Region — Chart title placeholder</div>
+        <div class="chart-placeholder">
+          <div class="chart-bar" style="height: 55%"></div>
+          <div class="chart-bar" style="height: 70%"></div>
+          <div class="chart-bar" style="height: 90%"></div>
+          <div class="chart-bar" style="height: 60%"></div>
+          <div class="chart-bar" style="height: 75%"></div>
+          <div class="chart-bar" style="height: 100%"></div>
+          <div class="chart-bar" style="height: 40%"></div>
+        </div>
+        <div style="margin-top:10px; font-size: var(--size-xs); color: var(--color-text-muted); font-family: var(--font-mono);">
+          Chart data placeholder — connect your data source to populate
+        </div>
+      </div>
+
+      <div class="insights-col">
+        <div class="insight-card">
+          <div class="insight-card__type">Top Insight</div>
+          <div class="insight-card__text">
+            [ Top finding placeholder ] — AI-generated key finding will appear here once report is generated.
+          </div>
+        </div>
+        <div class="insight-card anomaly">
+          <div class="insight-card__type">⚠ Anomaly Detected</div>
+          <div class="insight-card__text">
+            [ Flag / warning placeholder ] — Unusual patterns or statistical outliers will be surfaced here.
+          </div>
+        </div>
+        <div class="insight-card recommendation">
+          <div class="insight-card__type">✓ Recommendation</div>
+          <div class="insight-card__text">
+            [ Suggested action placeholder ] — Strategic recommendations based on your data will appear here.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="export-section">
+      <div class="export-section__title">Export</div>
+      <div class="export-grid">
+        <div class="export-card">
+          <div class="export-card__title">Summary Report</div>
+          <div class="export-card__btns">
+            <button class="btn btn-outline btn-sm" onclick="handleExport('summary','pdf')">PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('summary','html')">HTML</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('summary','email')">Email</button>
+          </div>
+        </div>
+        <div class="export-card">
+          <div class="export-card__title">Full Analysis</div>
+          <div class="export-card__btns">
+            <button class="btn btn-outline btn-sm" onclick="handleExport('full','pdf')">PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('full','html')">HTML</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('full','email')">Email</button>
+          </div>
+        </div>
+        <div class="export-card">
+          <div class="export-card__title">Recommendations</div>
+          <div class="export-card__btns">
+            <button class="btn btn-outline btn-sm" onclick="handleExport('recommendations','pdf')">PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('recommendations','html')">HTML</button>
+            <button class="btn btn-outline btn-sm" onclick="handleExport('recommendations','email')">Email</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGE: SETTINGS -->
+  <section class="page" id="page-settings">
+    <div class="step-label">Settings</div>
+    <div class="card card--pad">
+      <div class="settings-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+        <div class="settings-placeholder__title">Settings</div>
+        <div class="settings-placeholder__sub">This section is coming soon. Configuration options will appear here.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================================================
+     FOOTER
+     ============================================================ -->
+<footer class="footer">
+  <div class="footer__inner">
+    <div class="footer__brand">DataLens</div>
+    <div class="footer__links">
+      <button class="footer__link">Privacy</button>
+      <button class="footer__link">Terms</button>
+      <button class="footer__link">Documentation</button>
+      <button class="footer__link">Support</button>
+    </div>
+    <div class="footer__copy">© 2025 DataLens. All rights reserved.</div>
+  </div>
+</footer>
+
+<!-- ============================================================
+     JAVASCRIPT
+     ============================================================ -->
+<script>
+  /* ---- State ---- */
+  const state = {
+    currentPage: 'upload',
+    files: [],          // { name, rows, sheets }
+    selectedReport: null,
+    isLoggedIn: false,
+    user: null,
+  };
+
+  /* ---- Fake file parser (generates placeholder row/sheet counts) ---- */
+  function parseFileMeta(file) {
+    // In production, replace with actual xlsx/csv parsing logic
+    const ext = file.name.split('.').pop().toLowerCase();
+    const fakeRows = Math.floor(Math.random() * 20000) + 500;
+    const fakeSheets = ext === 'csv' ? 1 : Math.floor(Math.random() * 4) + 1;
+    return { name: file.name, rows: fakeRows, sheets: fakeSheets };
+  }
+
+  /* ---- Navigation ---- */
+  function navigate(page) {
+    // Guard: don't allow analysis/reports unless files are uploaded
+    if (page === 'analysis' && state.files.length === 0) return;
+    if (page === 'reports' && !state.selectedReport) return;
+
+    state.currentPage = page;
+
+    // Show/hide pages
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('visible'));
+    document.getElementById('page-' + page).classList.add('visible');
+
+    // Update nav links
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    const map = { upload: 0, analysis: 1, reports: 2, settings: 3 };
+    document.querySelectorAll('.nav-link')[map[page]]?.classList.add('active');
+
+    // Close user dropdown
+    closeUserMenu();
+  }
+
+  /* ---- File handling ---- */
+  function addFiles(files) {
+    Array.from(files).forEach(file => {
+      const allowed = ['xlsx','xls','csv'];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!allowed.includes(ext)) return;
+      // Avoid duplicates
+      if (state.files.find(f => f.name === file.name)) return;
+      state.files.push(parseFileMeta(file));
+    });
+    renderFileList();
+  }
+
+  function removeFile(index) {
+    state.files.splice(index, 1);
+    renderFileList();
+  }
+
+  function renderFileList() {
+    const list = document.getElementById('fileList');
+    const bar  = document.getElementById('analyzeBar');
+    const navAnalysis = document.getElementById('nav-analysis');
+
+    list.innerHTML = '';
+    state.files.forEach((f, i) => {
+      const li = document.createElement('li');
+      li.className = 'file-item';
+      li.innerHTML = `
+        <div class="file-item__info">
+          <div class="file-item__icon">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M4 1h5l4 4v10H4V1z"/><path d="M9 1v4h4"/>
+            </svg>
+          </div>
+          <div>
+            <div class="file-item__name">${escHtml(f.name)}</div>
+            <div class="file-item__meta">${f.rows.toLocaleString()} rows · ${f.sheets} sheet${f.sheets !== 1 ? 's' : ''}</div>
+          </div>
+        </div>
+        <button class="btn btn-ghost" onclick="removeFile(${i})">✕ Remove</button>
+      `;
+      list.appendChild(li);
+    });
+
+    // Update analyze bar
+    if (state.files.length > 0) {
+      bar.style.display = 'flex';
+      const totalRows   = state.files.reduce((a, f) => a + f.rows, 0);
+      const totalSheets = state.files.reduce((a, f) => a + f.sheets, 0);
+      document.getElementById('analyzeCount').textContent =
+        `${state.files.length} file${state.files.length !== 1 ? 's' : ''} ready · ${totalRows.toLocaleString()} total rows · ${totalSheets} sheet${totalSheets !== 1 ? 's' : ''}`;
+      document.getElementById('analyzeDetail').textContent = 'Add more files or continue to analysis';
+      navAnalysis.classList.remove('disabled');
+    } else {
+      bar.style.display = 'none';
+      navAnalysis.classList.add('disabled');
+    }
+  }
+
+  function handleFileInput(e) { addFiles(e.target.files); e.target.value = ''; }
+  function handleDragOver(e)  { e.preventDefault(); document.getElementById('dropzone').classList.add('dragover'); }
+  function handleDragLeave()  { document.getElementById('dropzone').classList.remove('dragover'); }
+  function handleDrop(e)      { e.preventDefault(); handleDragLeave(); addFiles(e.dataTransfer.files); }
+
+  /* ---- Report selection ---- */
+  function selectReport(option) {
+    state.selectedReport = option;
+
+    // Reset all cards
+    ['A','B','C'].forEach(o => {
+      document.getElementById('option-' + o).classList.remove('selected');
+      document.getElementById('select-' + o).textContent = 'Select this report';
+    });
+
+    // Highlight selected
+    document.getElementById('option-' + option).classList.add('selected');
+    document.getElementById('select-' + option).textContent = '✓ Selected';
+
+    // Enable generate button
+    document.getElementById('generateBtn').disabled = false;
+
+    // Unlock Reports nav
+    document.getElementById('nav-reports').classList.remove('disabled');
+  }
+
+  /* ---- Export ---- */
+  function handleExport(type, format) {
+    // Not yet implemented — placeholder action
+    alert(`Export: ${type} as ${format.toUpperCase()} — not yet implemented.`);
+  }
+
+  /* ---- User menu ---- */
+  function toggleUserMenu() {
+    const dropdown = document.getElementById('userDropdown');
+    const isOpen = dropdown.classList.contains('open');
+    if (isOpen) {
+      closeUserMenu();
+    } else {
+      renderUserDropdown();
+      dropdown.classList.add('open');
+    }
+  }
+
+  function closeUserMenu() {
+    document.getElementById('userDropdown').classList.remove('open');
+  }
+
+  function renderUserDropdown() {
+    const content = document.getElementById('userDropdownContent');
+    if (state.isLoggedIn) {
+      content.innerHTML = `
+        <div style="padding: 10px 16px; font-size: 0.75rem; color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);">
+          Signed in as <strong>${escHtml(state.user)}</strong>
+        </div>
+        <button class="user-dropdown__item" onclick="fakeSignOut()">Account settings</button>
+        <hr class="user-dropdown__divider">
+        <button class="user-dropdown__item danger" onclick="fakeSignOut()">Sign out</button>
+      `;
+    } else {
+      content.innerHTML = `
+        <button class="user-dropdown__item" onclick="fakeSignIn()">Sign in</button>
+        <button class="user-dropdown__item" onclick="fakeSignIn()">Create account</button>
+      `;
+    }
+  }
+
+  function fakeSignIn() {
+    // Placeholder — replace with real auth flow
+    state.isLoggedIn = true;
+    state.user = 'user@example.com';
+    document.getElementById('userLabel').textContent = 'user@example.com';
+    closeUserMenu();
+  }
+
+  function fakeSignOut() {
+    state.isLoggedIn = false;
+    state.user = null;
+    document.getElementById('userLabel').textContent = 'Sign in';
+    closeUserMenu();
+  }
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', e => {
+    if (!document.querySelector('.navbar__user').contains(e.target)) {
+      closeUserMenu();
+    }
+  });
+
+  /* ---- Utilities ---- */
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
