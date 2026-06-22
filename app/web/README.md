@@ -14,7 +14,7 @@ This makes editing CSS and JS feel nearly instantaneous.
 
 **2. At build time** — bundles your source files into an optimized `dist/` folder.
 CSS gets combined and minified. JS gets bundled and fingerprinted for cache-busting.
-That `dist/` folder is what you deploy to Vercel (or anywhere else).
+That `dist/` folder is what you deploy to your hosting provider.
 
 You write in many small, readable files. Your users receive one fast, optimized file.
 
@@ -65,30 +65,31 @@ npm run preview
 
 ---
 
-## Deploying to Vercel
+## Deploying
 
-Vercel reads `vercel.json` and knows to run `npm run build` and serve the `dist/` folder.
+Build produces a `dist/` folder containing the production-ready static site. You can deploy `dist/` to any static hosting provider (Netlify, GitHub Pages, S3, Cloudflare Pages, etc.) or serve it from your own server.
 
-### Option A — GitHub (recommended, auto-deploys on every push)
+Option A — Static hosts (Netlify / Cloudflare Pages / S3)
 
-1. Push this project to a GitHub repository.
-2. Go to [vercel.com](https://vercel.com) → **Add New → Project** → **Import Git Repository**.
-3. Select your repo. Vercel auto-detects Vite — no configuration needed.
-4. Click **Deploy**.
+1. Push this project to a Git repository.
+2. Connect the repo in your host's dashboard and configure the build command `npm run build` and publish directory `dist/`.
 
-Every future `git push` to `main` triggers an automatic redeploy.
+Option B — Serve locally or on a VM
 
-### Option B — Vercel CLI
+Build locally then serve the `dist/` folder with any static file server:
 
 ```bash
-npm install -g vercel
-vercel          # first deploy (follow the prompts)
-vercel --prod   # subsequent production deploys
+# build
+npm --prefix app/web run build
+
+# serve (example using a simple static server)
+npm install -g serve
+serve -s app/web/dist -l 8080
 ```
 
-### Option C — Drag & drop
+Option C — Manual upload
 
-Run `npm run build` locally, then drag the `dist/` folder into the Vercel dashboard.
+Run `npm run build` locally, then upload the `dist/` folder to your hosting provider.
 
 ---
 
@@ -97,7 +98,6 @@ Run `npm run build` locally, then drag the `dist/` folder into the Vercel dashbo
 ```
 datalens/
 ├── index.html              ← App shell: navbar, page sections, footer
-├── vercel.json             ← Vercel build config
 ├── package.json            ← Project metadata and npm scripts
 ├── vite.config.js          ← Vite configuration (if needed)
 │
