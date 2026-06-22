@@ -1,0 +1,31 @@
+/* ============================================================
+   PAGE: SETTINGS
+   ============================================================ */
+
+#page-settings {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+.settings-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  gap: 16px;
+  color: var(--color-text-muted);
+}
+.settings-placeholder svg {
+  width: 48px;
+  height: 48px;
+  opacity: 0.3;
+}
+.settings-placeholder__title {
+  font-size: var(--size-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+.settings-placeholder__sub {
+  font-size: var(--size-sm);
+}

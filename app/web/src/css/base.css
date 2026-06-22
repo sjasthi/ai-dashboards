@@ -1,0 +1,94 @@
+/* ============================================================
+   BASE — reset, body, shared primitives
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--size-base);
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+button  { cursor: pointer; font-family: inherit; }
+input   { font-family: inherit; }
+ul      { list-style: none; }
+a       { text-decoration: none; color: inherit; }
+
+/* ---- Page visibility (controlled by router.js) ---- */
+main section        { display: none; }
+main section.visible { display: block; }
+
+/* ---- Shared layout ---- */
+.main {
+  flex: 1;
+  padding: 32px var(--content-pad) 48px;
+}
+
+.step-label {
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 16px;
+}
+.step-label span { color: var(--color-accent); }
+
+/* ---- Cards ---- */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.card--pad { padding: 24px; }
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: var(--radius-md);
+  font-size: var(--size-sm);
+  font-weight: var(--weight-medium);
+  border: none;
+  transition: background 0.15s, opacity 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-primary:disabled {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+.btn-outline {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.btn-outline:hover {
+  border-color: var(--color-border-focus);
+  background: var(--color-bg);
+}
+.btn-ghost {
+  background: none;
+  color: var(--color-text-secondary);
+  padding: 4px 8px;
+  font-size: var(--size-xs);
+}
+.btn-ghost:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+.btn-sm { padding: 5px 12px; font-size: var(--size-xs); }
