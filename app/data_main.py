@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import filedialog
 
 from data.data_loader import DataLoader
-import data.data_info as info
 import data.csv_prompt_builder as prompt
 
 def select_files():
