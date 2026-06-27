@@ -2,8 +2,8 @@ import tkinter as tk
 from tkinter import filedialog
 
 from data.data_loader import DataLoader
-import data.data_info as info
-import data.csv_prompt_builder as prompt
+import data.prompt_builder as builder
+import data.AI_Engine as ai
 
 def select_files():
     root = tk.Tk()
@@ -30,6 +30,9 @@ print(f"\nFiles Uploaded \n ------")
 for filename, df in loader.files:
     print(f"{filename}")
 
-# Prompt Builder Example:
-prompt = prompt.build_prompt(loader, report_goal="<TBD>")
-print(prompt)
+# Prompt Builder:
+prompt = builder.build_prompt(loader, report_goal="<TBD>")
+
+# Interact with AI Agent:
+response = ai.send_prompt(prompt)
+print(response)

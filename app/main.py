@@ -1,4 +1,4 @@
-import data.csv_prompt_builder as prompt
+import app.data.prompt_builder as prompt
 from data.data_loader import DataLoader
 import data.AI_Engine
 
