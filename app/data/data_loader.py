@@ -3,7 +3,6 @@ import pandas as pd
 class DataLoader:
     
     def __init__(self):
-        """test"""
         self.files = []
 
     def add_files(self, file_paths):
@@ -12,7 +11,6 @@ class DataLoader:
             self.files.append((file_path, df))
 
     def clear(self):
-        """Reset loaded files."""
         self.files = []
 
 
