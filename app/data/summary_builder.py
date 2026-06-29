@@ -5,7 +5,6 @@ from typing import List, Dict
 from dataclasses import dataclass, asdict
 import warnings
 import os
-# from pathlib import Path
 
 # Suppress the deprecation warning
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -33,9 +32,6 @@ class FileProfile:
 class SummaryGenerator:
     """Handles summary generation + optional persistence."""
     
-    # def __init__(self, cache_dir="session_data/summaries"):
-    #     self.cache_dir = Path(cache_dir)
-    
     def profile_all_files(self, data_loader) -> List[FileProfile]:
         """Generate profiles for all files."""
         profiles = []
@@ -44,17 +40,7 @@ class SummaryGenerator:
             profile = self.profile_df_with_ydata(filename, df)
             profiles.append(profile)
         return profiles
-    
-    # def save_profiles(self, profiles: List[FileProfile]) -> None:
-    #     """Explicitly save profiles to JSON files."""
-    #     self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-    #     for profile in profiles:
-    #         output_file = self.cache_dir / f"{profile.filename.replace('.csv', '')}_profile.json"
-    #         with open(output_file, 'w') as f:
-    #             json.dump(asdict(profile), f, indent=2, default=str)
-    #         print(f"✓ Saved: {output_file}")
-       
+          
     def profile_df_with_ydata(self, filename, df) -> FileProfile:
         """Profile a single file."""
         # Generate ydata profile

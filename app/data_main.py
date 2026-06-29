@@ -51,10 +51,6 @@ try:
     print("\n✓ Response is valid JSON")
     print(f"✓ Found {len(response_data.get('recommendations', []))} recommendations")
     
-    # Optional: Validate against Pydantic schema
-    # recommendations = RecommendationsResponse(**response_data)
-    # print("✓ Response matches expected schema")
-    
 except json.JSONDecodeError as e:
     print(f"\n✗ Response is not valid JSON: {e}")
     print("Raw response:", response)

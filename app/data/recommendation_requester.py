@@ -1,7 +1,6 @@
 import json
 from typing import List
 from data.summary_builder import FileProfile
-# from pathlib import Path
 
 class RecommendationRequester:
     """Handles request for report recommendations from LLM."""
@@ -123,12 +122,3 @@ Return ONLY valid JSON. No markdown formatting, no code blocks, no explanations 
             "quality_flags": profile.quality_flags
         }
     
-    # def save_prompt(self, prompt: str, filename: str = "request.txt", dir: str = "session_data/logs") -> None:
-    #     """Save prompt to log file for debugging/inspection."""
-    #     log_dir = Path(dir)
-    #     log_dir.mkdir(parents=True, exist_ok=True)
-    #     log_file = log_dir / filename
-    #     with open(log_file, 'w') as f:
-    #         f.write(prompt)
-        
-    #     print(f"✓ Prompt saved: {log_file}")
