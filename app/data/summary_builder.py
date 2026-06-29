@@ -4,6 +4,8 @@ import json
 from typing import List, Dict
 from dataclasses import dataclass, asdict
 import warnings
+import os
+# from pathlib import Path
 
 # Suppress the deprecation warning
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -27,6 +29,86 @@ class FileProfile:
     columns: List[ColumnProfile]
     quality_flags: List[str]
     sample_rows: List[Dict]
+
+class SummaryGenerator:
+    """Handles summary generation + optional persistence."""
+    
+    # def __init__(self, cache_dir="session_data/summaries"):
+    #     self.cache_dir = Path(cache_dir)
+    
+    def profile_all_files(self, data_loader) -> List[FileProfile]:
+        """Generate profiles for all files."""
+        profiles = []
+        for file_path, df in data_loader.files:
+            filename = os.path.basename(file_path)
+            profile = self.profile_df_with_ydata(filename, df)
+            profiles.append(profile)
+        return profiles
+    
+    # def save_profiles(self, profiles: List[FileProfile]) -> None:
+    #     """Explicitly save profiles to JSON files."""
+    #     self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+    #     for profile in profiles:
+    #         output_file = self.cache_dir / f"{profile.filename.replace('.csv', '')}_profile.json"
+    #         with open(output_file, 'w') as f:
+    #             json.dump(asdict(profile), f, indent=2, default=str)
+    #         print(f"✓ Saved: {output_file}")
+       
+    def profile_df_with_ydata(self, filename, df) -> FileProfile:
+        """Profile a single file."""
+        # Generate ydata profile
+        profile = ProfileReport(df, minimal=True)  # minimal=True for speed
+        profile_dict = json.loads(profile.to_json())
+        
+        # Extract column profiles
+        columns_data = profile_dict.get('variables', {})
+        col_profiles = []
+        
+        for col_name, col_stats in columns_data.items():
+            dtype = str(df[col_name].dtype)
+            unique_count = col_stats.get('n_unique', df[col_name].nunique())
+            null_count = col_stats.get('n_missing', df[col_name].isnull().sum())
+            null_percent = (null_count / len(df)) * 100
+            
+            # Detect role
+            role = detect_column_role(col_name, dtype, unique_count, len(df))
+            
+            # Extract numeric stats if available
+            min_val = col_stats.get('min')
+            max_val = col_stats.get('max')
+            mean_val = col_stats.get('mean')
+            
+            col_profiles.append(ColumnProfile(
+                name=col_name,
+                dtype=dtype,
+                unique_values=unique_count,
+                null_count=null_count,
+                null_percent=round(null_percent, 2),
+                role=role,
+                min_value=str(min_val) if min_val else None,
+                max_value=str(max_val) if max_val else None,
+                mean_value=mean_val
+            ))
+        
+        # Sample rows
+        sample_rows = df.head(3).to_dict('records')
+        
+        # Quality flags
+        quality_flags = detect_quality_flags(df)
+        
+        return FileProfile(
+            filename=filename,
+            row_count=len(df),
+            columns=col_profiles,
+            quality_flags=quality_flags,
+            sample_rows=sample_rows
+        )
+    
+    def detect_relationships(self, profiles: List[FileProfile]) -> List[Dict]:
+        """Detect joins across files."""
+        # Cross-file analysis
+        pass
 
 def detect_column_role(col_name: str, dtype: str, unique_count: int, total_rows: int) -> str:
     """Infer column role from name and stats."""
@@ -69,63 +151,3 @@ def detect_quality_flags(df: pd.DataFrame) -> List[str]:
             flags.append(f"outliers_in_{col}")
     
     return flags
-
-def profile_df_with_ydata(filename: str, df: pd.DataFrame) -> FileProfile:
-    """Generate profile using ydata-profiling + custom logic."""
-    
-    # Generate ydata profile
-    profile = ProfileReport(df, minimal=True)  # minimal=True for speed
-    profile_dict = json.loads(profile.to_json())
-    
-    # Extract column profiles
-    columns_data = profile_dict.get('variables', {})
-    col_profiles = []
-    
-    for col_name, col_stats in columns_data.items():
-        dtype = str(df[col_name].dtype)
-        unique_count = col_stats.get('n_unique', df[col_name].nunique())
-        null_count = col_stats.get('n_missing', df[col_name].isnull().sum())
-        null_percent = (null_count / len(df)) * 100
-        
-        # Detect role
-        role = detect_column_role(col_name, dtype, unique_count, len(df))
-        
-        # Extract numeric stats if available
-        min_val = col_stats.get('min')
-        max_val = col_stats.get('max')
-        mean_val = col_stats.get('mean')
-        
-        col_profiles.append(ColumnProfile(
-            name=col_name,
-            dtype=dtype,
-            unique_values=unique_count,
-            null_count=null_count,
-            null_percent=round(null_percent, 2),
-            role=role,
-            min_value=str(min_val) if min_val else None,
-            max_value=str(max_val) if max_val else None,
-            mean_value=mean_val
-        ))
-    
-    # Sample rows
-    sample_rows = df.head(3).to_dict('records')
-    
-    # Quality flags
-    quality_flags = detect_quality_flags(df)
-    
-    return FileProfile(
-        filename=filename,
-        row_count=len(df),
-        columns=col_profiles,
-        quality_flags=quality_flags,
-        sample_rows=sample_rows
-    )
-
-# Usage
-df_sets = pd.read_csv('datasets/lego/sets.csv')
-profile = profile_df_with_ydata('sets.csv', df_sets)
-
-# Convert to JSON for LLM
-import json
-profile_json = json.dumps(asdict(profile), default=str)
-print(profile_json)

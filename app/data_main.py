@@ -2,8 +2,11 @@ import tkinter as tk
 from tkinter import filedialog
 
 from data.data_loader import DataLoader
-import data.prompt_builder as builder
+from data.summary_builder import SummaryGenerator
+from data.recommendation_requester import RecommendationRequester
+from data.session_manager import SessionManager
 import data.AI_Engine as ai
+import json
 
 def select_files():
     root = tk.Tk()
@@ -17,24 +20,48 @@ def select_files():
 
     return list(file_paths)
 
-# Loads each file from list
+# Load Files
 loader = DataLoader()
 loader.add_files(select_files())
 
-if not loader.files:
-    print("No files selected. Exiting.")
-    exit()
+# Generate summaries
+summary_gen = SummaryGenerator()
+file_profiles = summary_gen.profile_all_files(loader)
 
-# List uploaded files
-print(f"\nFiles Uploaded \n ------")
-for filename, df in loader.files:
-    print(f"{filename}")
+# Build recommendation prompt for LLM
+requester = RecommendationRequester()
+prompt = requester.build_request_prompt(file_profiles)
 
-# TODO: ADD TESTING FOR SAVING & VIEWING JSON SUMMARY FILES
+print("\n" + "="*60)
+print("SENDING PROMPT TO AI AGENT")
+print("="*60 + "\n")
 
-# Prompt Builder:
-prompt = builder.build_prompt(loader, report_goal="<TBD>")
-
-# Interact with AI Agent:
+# Get response from LLM
 response = ai.send_prompt(prompt)
+
+# Validate and parse response
+print("\n" + "="*60)
+print("RESPONSE FROM AI AGENT")
+print("="*60 + "\n")
 print(response)
+
+# Try validating JSON structure
+try:
+    response_data = json.loads(response)
+    print("\n✓ Response is valid JSON")
+    print(f"✓ Found {len(response_data.get('recommendations', []))} recommendations")
+    
+    # Optional: Validate against Pydantic schema
+    # recommendations = RecommendationsResponse(**response_data)
+    # print("✓ Response matches expected schema")
+    
+except json.JSONDecodeError as e:
+    print(f"\n✗ Response is not valid JSON: {e}")
+    print("Raw response:", response)
+
+### Save files for review ###
+session = SessionManager()
+# TODO: FIX SAVE LOCATIONS 
+session.save_profiles(file_profiles)
+session.save_prompt(prompt)
+session.save_response(response)
