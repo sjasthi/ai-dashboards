@@ -57,7 +57,7 @@ except json.JSONDecodeError as e:
 
 ### Save files for review ###
 session = SessionManager()
-# TODO: FIX SAVE LOCATIONS 
+
 session.save_profiles(file_profiles)
 session.save_prompt(prompt)
 session.save_response(response)
