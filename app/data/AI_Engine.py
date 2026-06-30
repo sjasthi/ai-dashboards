@@ -10,4 +10,3 @@ def send_prompt(prompt):
     ])
 
     return response.message.content
-
