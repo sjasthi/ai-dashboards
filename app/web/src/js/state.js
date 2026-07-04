@@ -9,6 +9,7 @@ export const state = {
   files:          [],       // Array of { name, rows, sheets }
   fileObjects:    [],       // Array of actual File objects (for uploading)
   reportOptions:  [],       // AI-recommended report objects [{rank, report_name, question_answered, ...}]
+  selectedReportConfig: null, // Full config object for the chosen report
   sessionId:      null,     // Session ID from backend after upload
   selectedReport: null,     // 'A' | 'B' | 'C' | null
   analysisResult: null,     // Analysis data from backend

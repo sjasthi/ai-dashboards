@@ -92,50 +92,29 @@ export function displayAnalysisResults(result) {
 }
 
 /**
- * Generate a report by calling the backend API.
- * Displays results and navigates to results page.
+ * Generate a report using the already-loaded analysis data.
+ * All data is available in state.analysisResult from the analyze-full call.
  */
-export async function generateReport() {
-  if (!state.sessionId) {
+export function generateReport() {
+  if (!state.analysisResult) {
     alert('No analysis yet. Please analyze files first.');
     return;
   }
 
   if (!state.selectedReport) {
-    alert('Please select a report type');
+    alert('Please select a report type first.');
     return;
   }
 
-  const generateBtn = document.getElementById('generateBtn');
+  // Find the selected recommendation object (A=index 0, B=1, C=2)
+  const idx = { A: 0, B: 1, C: 2 }[state.selectedReport] ?? 0;
+  const reportOptions = state.reportOptions || [];
+  state.selectedReportConfig = reportOptions[idx] || null;
 
-  try {
-    state.isAnalyzing = true;
-    generateBtn.disabled = true;
-    generateBtn.textContent = '⏳ Generating...';
-
-    // Call backend to analyze
-    const result = await analyzeData(state.sessionId, state.selectedReport);
-    state.analysisResult = result;
-
-    generateBtn.textContent = '✓ Generated!';
-
-    // Display results
-    displayAnalysisResults(result);
-
-    // Navigate to results page
-    document.getElementById('page-analysis').classList.remove('visible');
-    document.getElementById('page-reports').classList.add('visible');
-
-    // Highlight the results section
-    document.getElementById('nav-reports').classList.add('active');
-
-  } catch (err) {
-    console.error('Generate failed:', err);
-    generateBtn.textContent = '✕ Generate failed';
-    alert(`Failed to generate report: ${err.message}`);
-  } finally {
-    state.isAnalyzing = false;
-    generateBtn.disabled = false;
-    generateBtn.textContent = 'Generate report →';
-  }
+  // Navigate to reports page
+  document.getElementById('page-analysis').classList.remove('visible');
+  document.getElementById('page-reports').classList.add('visible');
+  document.getElementById('nav-reports')?.classList.add('active');
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  document.getElementById('nav-reports')?.classList.add('active');
 }
