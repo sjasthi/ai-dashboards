@@ -41,7 +41,7 @@ npm --version    # should be v9+
 npm --prefix app/web ci
 
 # 2. Start the dev server
-npm --prefix app/web run dev
+npm --prefix app/web run dev  
 ```
 
 Open `http://localhost:5173` in your browser. The page reloads automatically when you save any file.

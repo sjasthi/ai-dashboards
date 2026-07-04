@@ -1,6 +1,6 @@
 import json
 from typing import List
-from data.summary_builder import FileProfile
+from .summary_builder import FileProfile
 
 class RecommendationRequester:
     """Handles request for report recommendations from LLM."""
@@ -41,6 +41,11 @@ class RecommendationRequester:
                                     "y_axis": {"type": "string"},
                                     "title": {"type": "string"}
                                 }
+                            },
+                            "rationale_bullets": {
+                                "type": "array",
+                                "description": "Exactly 3 short bullet points explaining this report's value",
+                                "items": {"type": "string"}
                             }
                         }
                     }
@@ -86,7 +91,11 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
         "y_axis": "aggregated_value",
         "title": "Chart Title"
       }},
-      "data_preparation_notes": "[Y/N] State if any special preparation is needed"
+      "rationale_bullets": [
+        "First short bullet explaining what this report shows",
+        "Second bullet highlighting a key insight or use case",
+        "Third bullet describing the ideal audience or scenario"
+      ]
     }}
   ]
 }}
@@ -96,8 +105,9 @@ For each recommendation:
 2. List the pandas/numpy operations needed
 3. Define the plotly visualization (chart_type, axes, title)
 4. Rank by relevance/insight value
+5. Write exactly 3 rationale_bullets — short, plain-English, no jargon
 
-Return ONLY valid JSON. No markdown formatting, no code blocks, no explanations outside the JSON.
+CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. Do NOT include ```json or ```. Start your response with {{ and end with }}.
 """
         return prompt
        

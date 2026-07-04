@@ -18,8 +18,8 @@ import './css/settings.css';
 // ---- JS module imports --------------------------------------------------
 import { navigate }                                         from './js/router.js';
 import { addFiles, handleDrop, handleDragOver,
-         handleDragLeave, handleFileInput }                 from './js/files.js';
-import { selectReport }                                     from './js/reports.js';
+         handleDragLeave, handleFileInput, analyzeFiles }   from './js/files.js';
+import { selectReport, generateReport }                     from './js/reports.js';
 import { handleExport }                                     from './js/export.js';
 import { toggleUserMenu, closeUserMenu }                    from './js/user.js';
 
@@ -58,19 +58,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('fileInput')
     ?.addEventListener('change', handleFileInput);
 
-  // Analyze button → navigate to analysis
+  // Analyze button → full analysis workflow
   document.getElementById('analyzeBtn')
-    ?.addEventListener('click', () => navigate('analysis'));
+    ?.addEventListener('click', analyzeFiles);
 
   // Report option cards
   ['A', 'B', 'C'].forEach(opt => {
-    document.getElementById(`option-${opt}`)
+    document.getElementById(`select-${opt}`)
       ?.addEventListener('click', () => selectReport(opt));
   });
 
-  // Generate report button → navigate to results
+  // Generate report button → call API then navigate to results
   document.getElementById('generateBtn')
-    ?.addEventListener('click', () => navigate('reports'));
+    ?.addEventListener('click', generateReport);
 
   // Export buttons
   document.querySelectorAll('[data-export-type][data-export-format]').forEach(btn => {
