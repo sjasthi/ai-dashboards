@@ -158,31 +158,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             
             print(f"[API] Sending to AI Engine...")
             
-            # Send to AI and get recommendations
-            ai_response = ai_engine.send_prompt(prompt)
-            
-            # Extract JSON from the AI response robustly.
-            # LLMs often add markdown fences, preamble, trailing text, or invalid JSON.
-            if isinstance(ai_response, str):
-                start = ai_response.find('{')
-                end   = ai_response.rfind('}')
-                if start == -1 or end == -1 or end < start:
-                    raise ValueError(f"No JSON object found in AI response: {ai_response[:200]}")
-                raw_json = ai_response[start:end + 1]
-                
-                # Log raw response for debugging (first 500 chars)
-                print(f"[API] Raw AI JSON (first 500 chars): {raw_json[:500]}")
-                
-                try:
-                    recommendations = json.loads(raw_json)
-                except json.JSONDecodeError:
-                    # Common LLM JSON issues: trailing commas, unescaped newlines in strings
-                    import re
-                    # Remove trailing commas before } or ]
-                    fixed = re.sub(r',\s*([}\]])', r'\1', raw_json)
-                    # Escape literal newlines inside string values
-                    fixed = re.sub(r'(?<!\\)\n', r'\\n', fixed)
-                    recommendations = json.loads(fixed)
+            # Send to AI and get cleaned JSON response
+            recommendations = ai_engine.send_prompt(prompt)
             
             print(f"[API] Analysis complete!")
             
