@@ -8,6 +8,7 @@ Later, replace mock responses with real calls to AI_Engine.py and other modules.
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import json
 import os
 import sys
@@ -27,6 +28,7 @@ try:
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
+    from app.data.report_builder import generate_report
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
@@ -47,6 +49,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================================
+# REQUEST MODELS
+# ============================================================================
+
+class GenerateReportRequest(BaseModel):
+    """Request body for generating a report."""
+    session_id: str
+    report_type: str = "A"
 
 # ============================================================================
 # MOCK DATA & SESSIONS
@@ -307,6 +318,76 @@ def analyze_data(session_id: str, report_type: Optional[str] = "A"):
         "analysis": mock_analysis,
         "charts": mock_charts
     }
+
+
+@app.post("/api/generate-report")
+def generate_report_endpoint(request: GenerateReportRequest):
+    """
+    Generate a structured report from AI recommendations.
+    
+    Body:
+        {
+            "session_id": "20260704_120530",
+            "report_type": "A"
+        }
+    
+    Returns:
+        {
+            "session_id": "20260704_120530",
+            "report_type": "A",
+            "status": "generated",
+            "report_rows": 15,
+            "columns": ["rank", "report_name", ...],
+            "message": "Report generated successfully"
+        }
+    """
+    session_id = request.session_id
+    report_type = request.report_type
+    
+    print(f"\n[API] /api/generate-report called")
+    print(f"[API] Request: session_id={session_id}, report_type={report_type}")
+    print(f"[API] Available sessions: {list(SESSIONS.keys())}")
+    
+    if session_id not in SESSIONS:
+        print(f"[API] Session {session_id} not found!")
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    
+    session = SESSIONS[session_id]
+    recommendations = session.get("recommendations")
+    
+    if not recommendations:
+        print(f"[API] No recommendations in session {session_id}")
+        raise HTTPException(status_code=400, detail="No recommendations found in session")
+    
+    try:
+        print(f"\n[API] Generating report for session {session_id}, type {report_type}")
+        
+        # Generate report using report_builder (executes operations on actual data)
+        # Pass empty file_paths dict to search in datasets/ directory
+        report_df = generate_report(recommendations, report_type, file_paths={})
+        
+        # Store report in session
+        SESSIONS[session_id]["report"] = {
+            "type": report_type,
+            "generated_at": datetime.now().isoformat(),
+            "rows": len(report_df),
+            "columns": list(report_df.columns),
+            "data": report_df.to_dict(orient="records")  # Store as list of dicts for JSON
+        }
+        
+        return {
+            "session_id": session_id,
+            "report_type": report_type,
+            "status": "generated",
+            "report_rows": len(report_df),
+            "columns": list(report_df.columns),
+            "message": f"Report generated successfully with {len(report_df)} rows"
+        }
+    
+    except Exception as e:
+        print(f"[API] Error generating report: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
 
 
 @app.get("/api/results/{session_id}")

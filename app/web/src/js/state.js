@@ -13,6 +13,7 @@ export const state = {
   sessionId:      null,     // Session ID from backend after upload
   selectedReport: null,     // 'A' | 'B' | 'C' | null
   analysisResult: null,     // Analysis data from backend
+  reportData:     null,     // Generated report data from /api/generate-report
   isLoggedIn:     false,
   user:           null,     // email string when logged in
   isUploading:    false,    // Track upload progress

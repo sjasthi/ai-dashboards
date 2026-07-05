@@ -93,9 +93,9 @@ export function displayAnalysisResults(result) {
 
 /**
  * Generate a report using the already-loaded analysis data.
- * All data is available in state.analysisResult from the analyze-full call.
+ * Calls backend /api/generate-report endpoint to execute operations and build the report.
  */
-export function generateReport() {
+export async function generateReport() {
   if (!state.analysisResult) {
     alert('No analysis yet. Please analyze files first.');
     return;
@@ -106,15 +106,52 @@ export function generateReport() {
     return;
   }
 
-  // Find the selected recommendation object (A=index 0, B=1, C=2)
-  const idx = { A: 0, B: 1, C: 2 }[state.selectedReport] ?? 0;
-  const reportOptions = state.reportOptions || [];
-  state.selectedReportConfig = reportOptions[idx] || null;
+  if (!state.sessionId) {
+    alert('No session ID. Please upload and analyze files first.');
+    return;
+  }
 
-  // Navigate to reports page
-  document.getElementById('page-analysis').classList.remove('visible');
-  document.getElementById('page-reports').classList.add('visible');
-  document.getElementById('nav-reports')?.classList.add('active');
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  document.getElementById('nav-reports')?.classList.add('active');
+  try {
+    // Disable button during request
+    const generateBtn = document.getElementById('generateBtn');
+    if (generateBtn) generateBtn.disabled = true;
+
+    // Call backend to generate report
+    const response = await fetch('http://localhost:8000/api/generate-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: state.sessionId,
+        report_type: state.selectedReport,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+    }
+
+    const reportData = await response.json();
+
+    // Store report data in state for use by export/display modules
+    state.reportData = reportData;
+
+    // Find the selected recommendation object (A=index 0, B=1, C=2)
+    const idx = { A: 0, B: 1, C: 2 }[state.selectedReport] ?? 0;
+    const reportOptions = state.reportOptions || [];
+    state.selectedReportConfig = reportOptions[idx] || null;
+
+    // Navigate to reports page
+    document.getElementById('page-analysis').classList.remove('visible');
+    document.getElementById('page-reports').classList.add('visible');
+    document.getElementById('nav-reports')?.classList.add('active');
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.getElementById('nav-reports')?.classList.add('active');
+  } catch (error) {
+    console.error('Report generation failed:', error);
+    alert(`Failed to generate report: ${error.message}`);
+  } finally {
+    // Re-enable button
+    const generateBtn = document.getElementById('generateBtn');
+    if (generateBtn) generateBtn.disabled = false;
+  }
 }
