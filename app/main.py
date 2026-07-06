@@ -27,10 +27,11 @@ loader.add_files(select_files())
 # Generate summaries
 summary_gen = SummaryGenerator()
 file_profiles = summary_gen.profile_all_files(loader)
+relationships = summary_gen.detect_relationships(file_profiles, loader)
 
 # Build recommendation prompt for LLM
 requester = RecommendationRequester()
-prompt = requester.build_request_prompt(file_profiles)
+prompt = requester.build_request_prompt(file_profiles, relationships)
 
 print("\n" + "="*60)
 print("SENDING PROMPT TO AI AGENT")

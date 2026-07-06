@@ -140,6 +140,9 @@ export async function generateReport() {
     const reportOptions = state.reportOptions || [];
     state.selectedReportConfig = reportOptions[idx] || null;
 
+    renderChart(reportData);
+    renderRationaleBullets(state.selectedReportConfig);
+
     // Navigate to reports page
     document.getElementById('page-analysis').classList.remove('visible');
     document.getElementById('page-reports').classList.add('visible');
@@ -153,5 +156,42 @@ export async function generateReport() {
     // Re-enable button
     const generateBtn = document.getElementById('generateBtn');
     if (generateBtn) generateBtn.disabled = false;
+  }
+}
+
+/**
+ * Render the AI-recommended chart (built server-side by chart_builder.py)
+ * into the Reports page using Plotly.js, with the report's title.
+ * @param {Object} reportData - Response from /api/generate-report
+ */
+function renderChart(reportData) {
+  const titleEl = document.getElementById('chartTitle');
+  const container = document.getElementById('chartContainer');
+  const note = document.getElementById('chartNote');
+
+  if (titleEl) titleEl.textContent = reportData.report_name || 'Chart';
+
+  if (reportData.chart && container && window.Plotly) {
+    window.Plotly.newPlot(container, reportData.chart.data, reportData.chart.layout, { responsive: true });
+    if (note) note.style.display = 'none';
+  } else {
+    if (container) container.innerHTML = '';
+    if (note) note.style.display = 'block';
+  }
+}
+
+/**
+ * Populate the three bullet cards with the selected report's rationale_bullets
+ * (the same 3 bullets already shown on the Analysis page option card).
+ * @param {Object|null} selectedRecConfig - The selected recommendation object
+ */
+function renderRationaleBullets(selectedRecConfig) {
+  const bullets = Array.isArray(selectedRecConfig?.rationale_bullets)
+    ? selectedRecConfig.rationale_bullets
+    : [];
+
+  for (let i = 0; i < 3; i++) {
+    const el = document.getElementById(`bullet-${i + 1}`);
+    if (el) el.textContent = bullets[i] || '';
   }
 }

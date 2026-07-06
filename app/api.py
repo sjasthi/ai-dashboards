@@ -28,7 +28,8 @@ try:
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
-    from app.data.report_builder import generate_report
+    from app.data.report_builder import generate_report, report_type_to_index
+    from app.data.chart_builder import build_chart_figure
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
@@ -160,17 +161,18 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             # Generate summaries
             summary_gen = SummaryGenerator()
             file_profiles = summary_gen.profile_all_files(loader)
-            
+            relationships = summary_gen.detect_relationships(file_profiles, loader)
+
             print(f"[API] Building recommendation prompt...")
-            
+
             # Build recommendation prompt
             requester = RecommendationRequester()
-            prompt = requester.build_request_prompt(file_profiles)
+            prompt = requester.build_request_prompt(file_profiles, relationships)
             
             print(f"[API] Sending to AI Engine...")
             
             # Send to AI and get cleaned JSON response
-            recommendations = ai_engine.send_prompt(prompt)
+            recommendations = ai_engine.send_prompt(prompt, session_id=session_id)
             
             print(f"[API] Analysis complete!")
             
@@ -364,23 +366,37 @@ def generate_report_endpoint(request: GenerateReportRequest):
         
         # Generate report using report_builder (executes operations on actual data)
         # Pass empty file_paths dict to search in datasets/ directory
-        report_df = generate_report(recommendations, report_type, file_paths={})
-        
+        report_df = generate_report(recommendations, report_type, file_paths={}, session_id=session_id)
+
+        # Build the chart the AI recommended for this same report (its plotly_config)
+        recs_list = recommendations.get("recommendations", [])
+        rec_idx = report_type_to_index(report_type)
+        selected_rec = recs_list[rec_idx] if rec_idx is not None and rec_idx < len(recs_list) else None
+        chart = None
+        if selected_rec:
+            try:
+                chart = build_chart_figure(report_df, selected_rec.get("plotly_config") or {})
+            except Exception as e:
+                print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
+
         # Store report in session
         SESSIONS[session_id]["report"] = {
             "type": report_type,
             "generated_at": datetime.now().isoformat(),
             "rows": len(report_df),
             "columns": list(report_df.columns),
-            "data": report_df.to_dict(orient="records")  # Store as list of dicts for JSON
+            "data": report_df.to_dict(orient="records"),  # Store as list of dicts for JSON
+            "chart": chart
         }
-        
+
         return {
             "session_id": session_id,
             "report_type": report_type,
             "status": "generated",
             "report_rows": len(report_df),
             "columns": list(report_df.columns),
+            "report_name": selected_rec.get("report_name") if selected_rec else None,
+            "chart": chart,
             "message": f"Report generated successfully with {len(report_df)} rows"
         }
     

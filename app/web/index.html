@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI-Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -167,39 +168,22 @@
 
     <div class="results-grid">
       <div class="chart-card">
-        <div class="chart-card__title">Chart [TBD]</div>
-        <div class="chart-placeholder">
-          <div class="chart-bar" style="height:55%"></div>
-          <div class="chart-bar" style="height:70%"></div>
-          <div class="chart-bar" style="height:90%"></div>
-          <div class="chart-bar" style="height:60%"></div>
-          <div class="chart-bar" style="height:75%"></div>
-          <div class="chart-bar" style="height:100%"></div>
-          <div class="chart-bar" style="height:40%"></div>
-        </div>
-        <div class="chart-note">
-          Chart [PH] — connect your data source to populate
+        <div class="chart-card__title" id="chartTitle">Chart</div>
+        <div class="chart-container" id="chartContainer"></div>
+        <div class="chart-note" id="chartNote" style="display:none">
+          No chart available for this report.
         </div>
       </div>
 
       <div class="insights-col">
         <div class="insight-card">
-          <div class="insight-card__type">Top Insight [TBD]</div>
-          <div class="insight-card__text">
-            Top finding [PH] — AI-generated key finding will appear here once the report is generated.
-          </div>
+          <div class="insight-card__text" id="bullet-1"></div>
         </div>
-        <div class="insight-card anomaly">
-          <div class="insight-card__type">⚠ Anomaly Detected [TBD]</div>
-          <div class="insight-card__text">
-            Flag / warning [PH] — unusual patterns or statistical outliers will be surfaced here.
-          </div>
+        <div class="insight-card">
+          <div class="insight-card__text" id="bullet-2"></div>
         </div>
-        <div class="insight-card recommendation">
-          <div class="insight-card__type">✓ Recommendation [TBD]</div>
-          <div class="insight-card__text">
-            Suggested action [PH] — strategic recommendations based on your data will appear here.
-          </div>
+        <div class="insight-card">
+          <div class="insight-card__text" id="bullet-3"></div>
         </div>
       </div>
     </div>
