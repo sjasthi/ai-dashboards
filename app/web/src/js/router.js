@@ -13,8 +13,8 @@ const NAV_INDEX = { upload: 0, analysis: 1, reports: 2, settings: 3 };
  * Guards prevent skipping ahead without completing prior steps.
  */
 export function navigate(page) {
-  if (page === 'analysis' && state.files.length === 0) return;
-  if (page === 'reports'  && !state.selectedReport)    return;
+  if (page === 'analysis' && !state.analysisResult) return;   // Need to analyze first
+  if (page === 'reports'  && !state.selectedReport)    return;  // Need to select report type
 
   state.currentPage = page;
 

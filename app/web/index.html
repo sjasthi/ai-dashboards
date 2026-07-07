@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI-Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -96,11 +97,11 @@
 
       <div class="report-card" id="option-A">
         <div class="report-card__label">Option A</div>
-        <div class="report-card__title">Sales Performance Summary</div>
+        <div class="report-card__title">card__title</div>
         <div class="report-card__rationale">
-          <div class="rationale-line">Aggregates total revenue and units by period</div>
-          <div class="rationale-line">Highlights top-performing products and regions</div>
-          <div class="rationale-line">Ideal for weekly or monthly business reviews</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
         </div>
         <div class="report-card__select">
           <button class="btn-select" id="select-A">Select this report</button>
@@ -109,11 +110,11 @@
 
       <div class="report-card" id="option-B">
         <div class="report-card__label">Option B</div>
-        <div class="report-card__title">Regional Breakdown with Anomaly Report</div>
+        <div class="report-card__title">card__title</div>
         <div class="report-card__rationale">
-          <div class="rationale-line">Segments data by geographic region and territory</div>
-          <div class="rationale-line">Flags statistical outliers and unusual patterns</div>
-          <div class="rationale-line">Best for teams investigating regional discrepancies</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
         </div>
         <div class="report-card__select">
           <button class="btn-select" id="select-B">Select this report</button>
@@ -122,11 +123,11 @@
 
       <div class="report-card" id="option-C">
         <div class="report-card__label">Option C</div>
-        <div class="report-card__title">Executive Overview with Recommendations</div>
+        <div class="report-card__title">card__title</div>
         <div class="report-card__rationale">
-          <div class="rationale-line">Concise snapshot of key business metrics</div>
-          <div class="rationale-line">AI-generated strategic recommendations included</div>
-          <div class="rationale-line">Designed for C-suite and leadership presentations</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
+          <div class="rationale-line">rationale-line</div>
         </div>
         <div class="report-card__select">
           <button class="btn-select" id="select-C">Select this report</button>
@@ -148,58 +149,41 @@
 
     <div class="metrics-row">
       <div class="metric-card">
-        <div class="metric-card__label">Total Revenue</div>
+        <div class="metric-card__label">Total Revenue [TBD]</div>
         <div class="metric-card__value">—</div>
       </div>
       <div class="metric-card">
-        <div class="metric-card__label">Records Analyzed</div>
+        <div class="metric-card__label">Records Analyzed [TBD]</div>
         <div class="metric-card__value">—</div>
       </div>
       <div class="metric-card">
-        <div class="metric-card__label">Regions Covered</div>
+        <div class="metric-card__label">Regions Covered [TBD]</div>
         <div class="metric-card__value">—</div>
       </div>
       <div class="metric-card">
-        <div class="metric-card__label">Anomalies Detected</div>
+        <div class="metric-card__label">Anomalies Detected [TBD]</div>
         <div class="metric-card__value">—</div>
       </div>
     </div>
 
     <div class="results-grid">
       <div class="chart-card">
-        <div class="chart-card__title">Performance by Region — placeholder</div>
-        <div class="chart-placeholder">
-          <div class="chart-bar" style="height:55%"></div>
-          <div class="chart-bar" style="height:70%"></div>
-          <div class="chart-bar" style="height:90%"></div>
-          <div class="chart-bar" style="height:60%"></div>
-          <div class="chart-bar" style="height:75%"></div>
-          <div class="chart-bar" style="height:100%"></div>
-          <div class="chart-bar" style="height:40%"></div>
-        </div>
-        <div class="chart-note">
-          Chart placeholder — connect your data source to populate
+        <div class="chart-card__title" id="chartTitle">Chart</div>
+        <div class="chart-container" id="chartContainer"></div>
+        <div class="chart-note" id="chartNote" style="display:none">
+          No chart available for this report.
         </div>
       </div>
 
       <div class="insights-col">
         <div class="insight-card">
-          <div class="insight-card__type">Top Insight</div>
-          <div class="insight-card__text">
-            Top finding placeholder — AI-generated key finding will appear here once the report is generated.
-          </div>
+          <div class="insight-card__text" id="bullet-1"></div>
         </div>
-        <div class="insight-card anomaly">
-          <div class="insight-card__type">⚠ Anomaly Detected</div>
-          <div class="insight-card__text">
-            Flag / warning placeholder — unusual patterns or statistical outliers will be surfaced here.
-          </div>
+        <div class="insight-card">
+          <div class="insight-card__text" id="bullet-2"></div>
         </div>
-        <div class="insight-card recommendation">
-          <div class="insight-card__type">✓ Recommendation</div>
-          <div class="insight-card__text">
-            Suggested action placeholder — strategic recommendations based on your data will appear here.
-          </div>
+        <div class="insight-card">
+          <div class="insight-card__text" id="bullet-3"></div>
         </div>
       </div>
     </div>
@@ -209,7 +193,7 @@
       <div class="export-grid">
 
         <div class="export-card">
-          <div class="export-card__title">Summary Report</div>
+          <div class="export-card__title">Report - Spreadsheet [WIP]</div>
           <div class="export-card__btns">
             <button class="btn btn-outline btn-sm"
               data-export-type="summary" data-export-format="pdf">PDF</button>
@@ -221,7 +205,7 @@
         </div>
 
         <div class="export-card">
-          <div class="export-card__title">Full Analysis</div>
+          <div class="export-card__title">Full Analysis [TBD]</div>
           <div class="export-card__btns">
             <button class="btn btn-outline btn-sm"
               data-export-type="full" data-export-format="pdf">PDF</button>
@@ -233,7 +217,7 @@
         </div>
 
         <div class="export-card">
-          <div class="export-card__title">Recommendations</div>
+          <div class="export-card__title">Recommendations [TBD]</div>
           <div class="export-card__btns">
             <button class="btn btn-outline btn-sm"
               data-export-type="recommendations" data-export-format="pdf">PDF</button>

@@ -1,30 +1,64 @@
-import app.data.prompt_builder as prompt
+import tkinter as tk
+from tkinter import filedialog
+
 from data.data_loader import DataLoader
-import data.AI_Engine
+from data.summary_builder import SummaryGenerator
+from data.recommendation_requester import RecommendationRequester
+from data.session_manager import SessionManager
+import data.AI_Engine as ai
+import json
 
-print("Loading CSV files...")
+def select_files():
+    root = tk.Tk()
+    root.withdraw()
 
-files = [
-    "datasets/courses.csv",
-    "datasets/grades.csv",
-    "datasets/students.csv",
-]
+    file_paths = filedialog.askopenfilenames(
+        title="Select CSV Files",
+        filetypes=[("CSV Files", "*.csv")],
+        initialdir="datasets"
+    )
 
+    return list(file_paths)
+
+# Load Files
 loader = DataLoader()
-loader.add_files(files)
+loader.add_files(select_files())
 
-summary = prompt.build_prompt(loader, report_goal="<TBD>")
+# Generate summaries
+summary_gen = SummaryGenerator()
+file_profiles = summary_gen.profile_all_files(loader)
+relationships = summary_gen.detect_relationships(file_profiles, loader)
 
-print("\nDATA SUMMARY")
-print("=" * 50)
+# Build recommendation prompt for LLM
+requester = RecommendationRequester()
+prompt = requester.build_request_prompt(file_profiles, relationships)
 
-print(summary)
+print("\n" + "="*60)
+print("SENDING PROMPT TO AI AGENT")
+print("="*60 + "\n")
 
-print("\nSending data to Claude...")
+# Get response from LLM
+response = ai.send_prompt(prompt)
 
-recommendations = data.AI_Engine.get_report_recommendations(summary)
+# Validate and parse response
+print("\n" + "="*60)
+print("RESPONSE FROM AI AGENT")
+print("="*60 + "\n")
+print(response)
 
-print("\nREPORT RECOMMENDATIONS")
-print("=" * 50)
+# Try validating JSON structure
+try:
+    response_data = json.loads(response)
+    print("\n✓ Response is valid JSON")
+    print(f"✓ Found {len(response_data.get('recommendations', []))} recommendations")
+    
+except json.JSONDecodeError as e:
+    print(f"\n✗ Response is not valid JSON: {e}")
+    print("Raw response:", response)
 
-print(recommendations)
+### Save files for review ###
+session = SessionManager()
+
+session.save_profiles(file_profiles)
+session.save_prompt(prompt)
+session.save_response(response)

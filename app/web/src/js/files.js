@@ -5,6 +5,9 @@
  */
 import { state } from './state.js';
 import { escHtml } from './utils.js';
+import { analyzeFilesFull } from './api.js';
+import { navigate } from './router.js';
+import { displayAnalysisResults } from './reports.js';
 
 // ---- File parsing -------------------------------------------------------
 
@@ -33,13 +36,66 @@ export function addFiles(fileList) {
     if (!ALLOWED_EXTS.includes(ext)) return;
     if (state.files.find(f => f.name === file.name)) return; // no duplicates
     state.files.push(parseFileMeta(file));
+    state.fileObjects.push(file);
   });
   renderFileList();
 }
 
 export function removeFile(index) {
   state.files.splice(index, 1);
+  state.fileObjects.splice(index, 1);
   renderFileList();
+}
+
+// ---- Analyze files (full pipeline) ------------------------------------------
+
+/**
+ * Analyze all selected files:
+ * 1. Upload to backend
+ * 2. Create summaries
+ * 3. Generate recommendation prompt
+ * 4. Send to AI
+ * 5. Store results
+ * 6. Display results on analysis page
+ */
+export async function analyzeFiles() {
+  if (state.fileObjects.length === 0) {
+    alert('No files selected. Please add files first.');
+    return;
+  }
+
+  const analyzeBtn = document.getElementById('analyzeBtn');
+
+  try {
+    state.isAnalyzing = true;
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = '⏳ Analyzing files...';
+
+    // Call backend to analyze files (full pipeline)
+    const result = await analyzeFilesFull(state.fileObjects);
+    
+    state.sessionId = result.session_id;
+    state.analysisResult = result;
+
+    analyzeBtn.textContent = '✓ Analysis complete!';
+
+    // Display recommendations on analysis page
+    displayAnalysisResults(result);
+
+    // Navigate to analysis page
+    navigate('analysis');
+
+  } catch (err) {
+    console.error('Analysis failed:', err);
+    analyzeBtn.textContent = '✕ Analysis failed';
+    analyzeBtn.style.color = '#ef4444';
+    alert(`Analysis failed: ${err.message}`);
+  } finally {
+    state.isAnalyzing = false;
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = 'Analyze files →';
+    analyzeBtn.style.color = '';
+  }
 }
 
 // ---- Render -------------------------------------------------------------
@@ -84,7 +140,7 @@ export function renderFileList() {
     document.getElementById('analyzeCount').textContent =
       `${n} file${n !== 1 ? 's' : ''} ready · ${totalRows.toLocaleString()} total rows · ${totalSheets} sheet${totalSheets !== 1 ? 's' : ''}`;
     document.getElementById('analyzeDetail').textContent =
-      'Add more files or continue to analysis';
+      'Click "Analyze files" to process with AI';
 
     bar.style.display = 'flex';
     navAnalysis.classList.remove('disabled');

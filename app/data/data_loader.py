@@ -18,7 +18,8 @@ class DataLoader:
         for encoding in encodings:
             try:
                 df = pd.read_csv(file_path, encoding=encoding)
-                print(f"✓ Loaded {file_path} (encoding: {encoding})")
+                df.columns = df.columns.str.strip()
+                print(f"Loaded {file_path} (encoding: {encoding})")
                 return df
             except (UnicodeDecodeError, UnicodeError):
                 continue

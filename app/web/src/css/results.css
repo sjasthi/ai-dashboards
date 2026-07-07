@@ -55,28 +55,10 @@
   font-weight: var(--weight-semibold);
   margin-bottom: 20px;
 }
-.chart-placeholder {
+.chart-container {
   width: 100%;
-  height: 200px;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding-top: 12px;
-  border-bottom: 1px solid var(--color-border);
+  height: 256px;
 }
-.chart-bar {
-  flex: 1;
-  background: var(--color-accent);
-  border-radius: 3px 3px 0 0;
-}
-/* Vary bar heights and opacity for placeholder feel */
-.chart-bar:nth-child(1) { opacity: 0.15; }
-.chart-bar:nth-child(2) { opacity: 0.25; }
-.chart-bar:nth-child(3) { opacity: 0.60; }
-.chart-bar:nth-child(4) { opacity: 0.35; }
-.chart-bar:nth-child(5) { opacity: 0.45; }
-.chart-bar:nth-child(6) { opacity: 0.80; }
-.chart-bar:nth-child(7) { opacity: 0.20; }
 
 .chart-note {
   margin-top: 10px;
@@ -98,16 +80,6 @@
   padding: 16px;
   box-shadow: var(--shadow-card);
 }
-.insight-card__type {
-  font-size: var(--size-xs);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-  margin-bottom: 6px;
-}
-.insight-card.anomaly   .insight-card__type { color: var(--color-warning); }
-.insight-card.recommendation .insight-card__type { color: var(--color-success); }
 .insight-card__text {
   font-size: var(--size-sm);
   color: var(--color-text-primary);
