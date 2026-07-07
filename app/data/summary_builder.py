@@ -1,13 +1,7 @@
 import pandas as pd
-from data_profiling import ProfileReport
-import json
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
-import warnings
 import os
-
-# Suppress the deprecation warning
-warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 @dataclass
 class ColumnProfile:
@@ -228,28 +222,27 @@ class SummaryGenerator:
           
     def profile_df_with_ydata(self, filename, df) -> FileProfile:
         """Profile a single file."""
-        # Generate ydata profile
-        profile = ProfileReport(df, minimal=True)  # minimal=True for speed
-        profile_dict = json.loads(profile.to_json())
-        
-        # Extract column profiles
-        columns_data = profile_dict.get('variables', {})
         col_profiles = []
-        
-        for col_name, col_stats in columns_data.items():
-            dtype = str(df[col_name].dtype)
-            unique_count = col_stats.get('n_unique', df[col_name].nunique())
-            null_count = col_stats.get('n_missing', df[col_name].isnull().sum())
-            null_percent = (null_count / len(df)) * 100
-            
+
+        for col_name in df.columns:
+            series = df[col_name]
+            dtype = str(series.dtype)
+            unique_count = int(series.nunique())
+            null_count = int(series.isnull().sum())
+            null_percent = (null_count / len(df)) * 100 if len(df) else 0.0
+
             # Detect role
             role = detect_column_role(col_name, dtype, unique_count, len(df))
-            
-            # Extract numeric stats if available
-            min_val = col_stats.get('min')
-            max_val = col_stats.get('max')
-            mean_val = col_stats.get('mean')
-            
+
+            # Numeric stats if available
+            min_val = max_val = mean_val = None
+            if pd.api.types.is_numeric_dtype(series):
+                non_null = series.dropna()
+                if not non_null.empty:
+                    min_val = non_null.min()
+                    max_val = non_null.max()
+                    mean_val = float(non_null.mean())
+
             col_profiles.append(ColumnProfile(
                 name=col_name,
                 dtype=dtype,
@@ -257,17 +250,17 @@ class SummaryGenerator:
                 null_count=null_count,
                 null_percent=round(null_percent, 2),
                 role=role,
-                min_value=str(min_val) if min_val else None,
-                max_value=str(max_val) if max_val else None,
+                min_value=str(min_val) if min_val is not None else None,
+                max_value=str(max_val) if max_val is not None else None,
                 mean_value=mean_val
             ))
-        
+
         # Sample rows
         sample_rows = df.head(3).to_dict('records')
-        
+
         # Quality flags
         quality_flags = detect_quality_flags(df)
-        
+
         return FileProfile(
             filename=filename,
             row_count=len(df),
