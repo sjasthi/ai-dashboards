@@ -35,112 +35,6 @@ class RecommendationRequester:
         "OUTLIER": "flag rows far from the norm on a numeric measure (e.g. via IQR or z-score)."
     }
 
-    def __init__(self):
-        self.response_schema = self._get_schema()
-
-    def _get_schema(self) -> dict:
-        """Define the exact JSON structure LLM should return."""
-        return {
-            "type": "object",
-            "properties": {
-                "recommendations": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 4,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "rank": {"type": "integer"},
-                            "report_name": {"type": "string"},
-                            "question_answered": {"type": "string"},
-                            "pattern_used": {
-                                "type": "string",
-                                "enum": list(self.REPORT_PATTERNS.keys())
-                            },
-                            "justification": {
-                                "type": "object",
-                                "properties": {
-                                    "column": {"type": "string"},
-                                    "profile_evidence": {"type": "string"}
-                                }
-                            },
-                            "required_operations": {
-                                "type": "array",
-                                "description": "Ordered pipeline: filter -> derive -> groupby -> sort_limit -> join, as applicable",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "operation_type": {
-                                            "type": "string",
-                                            "enum": ["filter", "derive", "groupby", "sort_limit", "join"]
-                                        },
-                                        "files_involved": {"type": "array", "items": {"type": "string"}},
-                                        "filter_conditions": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "column": {"type": "string"},
-                                                    "condition": {"type": "string"}
-                                                }
-                                            }
-                                        },
-                                        "derive_column": {
-                                            "type": "object",
-                                            "properties": {
-                                                "new_name": {"type": "string"},
-                                                "source_column": {"type": "string"},
-                                                "method": {"type": "string"},
-                                                "pattern": {"type": "string"},
-                                                "bins": {"type": "array"},
-                                                "bin_labels": {"type": "array", "items": {"type": "string"}}
-                                            }
-                                        },
-                                        "groupby_columns": {"type": "array", "items": {"type": "string"}},
-                                        "aggregations": {"type": "object"},
-                                        "sort_by": {"type": "string"},
-                                        "ascending": {"type": "boolean"},
-                                        "limit": {"type": "integer"},
-                                        "join_keys": {"type": "array", "items": {"type": "string"}},
-                                        "join_type": {"type": "string"}
-                                    }
-                                }
-                            },
-                            "expected_output_schema": {
-                                "type": "array",
-                                "description": "Columns/types produced after running required_operations",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"}
-                                    }
-                                }
-                            },
-                            "plotly_config": {
-                                "type": "object",
-                                "properties": {
-                                    "chart_type": {"type": "string"},
-                                    "x_axis": {"type": "string"},
-                                    "y_axis": {"type": "string"},
-                                    "title": {"type": "string"}
-                                }
-                            },
-                            "rationale_bullets": {
-                                "type": "array",
-                                "description": "Exactly 3 short bullet points explaining this report's value",
-                                "items": {"type": "string"}
-                            },
-                            "data_quality_warning": {
-                                "type": "string",
-                                "description": "Populate only if this report relies on data with significant caveats"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
     def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
         """Build LLM prompt with explicit JSON schema instructions."""
 
@@ -196,13 +90,16 @@ profiles above.
 {relationships_block}
 Your task: recommend meaningful, EXECUTABLE reports built specifically from the data above.
 
-STEP 1 - Classify each column before recommending anything. Do not infer a column's
-purpose from its name alone; derive its role from the profile stats:
-- unique_values / row_count > 0.9  -> identifier/primary-key-like; never use as a groupby column
-- unique_values <= ~20 (or a low ratio to row_count) with an object/categorical dtype -> categorical; good for groupby/composition
-- numeric dtype with high unique_values -> continuous measure; good for distribution/comparison, not groupby
+STEP 1 - Each column's "role" field above was already computed deterministically from
+the actual data (not guessed from its name) - treat it as ground truth and do not
+re-derive or second-guess it. Apply these role-based rules directly:
+- role == "primary_key" -> identifier-like; never use as a groupby column
+- role == "categorical" -> good for a groupby/composition axis
+- role == "measure" -> numeric measure; good for distribution/comparison, generally not a groupby column
+- role == "temporal" -> good for a trend x-axis
+Independently of role, still watch for two things the role field doesn't capture:
 - null_percent > 40% -> low-quality column; avoid as a primary axis unless you filter it first
-- also treat non-numeric placeholder tokens (e.g. "-", "N/A", "?") in an otherwise numeric column as nulls, and add a filter/clean operation before aggregating that column
+- non-numeric placeholder tokens (e.g. "-", "N/A", "?") in an otherwise numeric/measure column also count as missing data - add a filter/clean operation before aggregating that column
 
 STEP 2 - Only recommend a report pattern whose data requirements are actually met by
 this file's profile. Choose from this fixed set of patterns (do not invent others):

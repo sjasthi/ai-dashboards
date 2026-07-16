@@ -170,9 +170,13 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             prompt = requester.build_request_prompt(file_profiles, relationships)
             
             print(f"[API] Sending to AI Engine...")
-            
-            # Send to AI and get cleaned JSON response
-            recommendations = ai_engine.send_prompt(prompt, session_id=session_id)
+
+            # Send to AI, validate against the recommendations schema, and
+            # retry with correction feedback if it doesn't validate
+            valid_filenames = {p.filename for p in file_profiles}
+            recommendations = ai_engine.get_validated_recommendations(
+                prompt, valid_filenames, session_id=session_id
+            )
             
             print(f"[API] Analysis complete!")
             
