@@ -45,6 +45,8 @@ class PlotlyConfig(BaseModel):
     y_axis: Optional[str] = None  # omitted for a raw histogram (see chart_builder.py) - Plotly bins the raw x values itself
     title: str
     secondary_y: Optional[str] = None
+    x_axis_label: Optional[str] = None  # human-readable override for x_axis's column name; see chart_builder.py for validation
+    y_axis_label: Optional[str] = None  # human-readable override for y_axis's column name; see chart_builder.py for validation
 
 class Justification(BaseModel):
     column: str = ""

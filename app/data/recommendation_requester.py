@@ -211,7 +211,9 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
         "chart_type": "bar",
         "x_axis": "derived_category",
         "y_axis": "measure_column_mean",
-        "title": "Chart Title"
+        "title": "Chart Title",
+        "x_axis_label": "Derived Category",
+        "y_axis_label": "Average Measure Column"
       }},
       "rationale_bullets": [
         "First short bullet explaining what this report shows",
@@ -228,6 +230,7 @@ Rules:
 1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30" and never date strings; put display strings in "bin_labels" instead (one fewer label than bins). Only bin a numeric (role == "measure") column this way - never bin a role == "temporal" column directly, since its bin edges would have to be date strings. To bucket a date/temporal column into ranges (e.g. "signups by year"), derive a period label first (e.g. regex_extract the year out of a formatted date string) and group by that instead of using "bin" on the raw date. "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
 2. Never group by a column classified as identifier/primary-key-like in Step 1.
 2b. A groupby's aggregated output columns are always renamed to "{{column}}_{{function}}" (e.g. aggregations {{"Calories": "mean"}} produces a column literally named "Calories_mean"). Always use that exact renamed form - never the bare column name - in sort_by, plotly_config axes, and expected_output_schema.
+2e. "x_axis_label"/"y_axis_label" in plotly_config are OPTIONAL plain-English overrides of the axis title shown to end users (the raw "x_axis"/"y_axis" column name is still used to pull the data - never change those). Omit either key entirely when the raw column name is already clear. When you do include one, it must describe the column as actually computed - never imply an aggregation (e.g. "rate", "average", "%", "total") for a column that is NOT the output of a groupby aggregation (i.e. does not carry an "_mean"/"_sum"/"_count"/etc. suffix per rule 2b). E.g. a raw pass-through column like "churn_signal" must not be labeled "Churn Rate" - only a column like "churn_signal_mean" may be.
 2c. A "groupby" operation's "groupby_columns" must NEVER be empty. If you want a count of records per value of some column (e.g. "how many sets per year"), that column goes in BOTH "groupby_columns" AND "aggregations" (e.g. "groupby_columns": ["year"], "aggregations": {{"year": "count"}}) - never leave "groupby_columns" empty and only reference the column in "aggregations".
 2d. If two joined files both have a column with the same name (e.g. both have "name"), any later step (groupby/filter/derive/sort_limit) that uses that column MUST list the SPECIFIC file it means in that step's own "files_involved" - not just repeat whichever file list the join used. E.g. if you joined sets.csv with themes.csv and want to group by the theme's "name" (not the set's "name"), that groupby step's "files_involved" must be ["themes.csv"], even though the join step's "files_involved" was ["sets.csv", "themes.csv"].
 3. Bar/pie charts must resolve to at most ~15-20 categories after sort_limit; use limit to enforce this.

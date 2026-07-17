@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -11,6 +12,59 @@ _CHART_TYPE_TRACE = {
     "scatter": "scatter",
     "histogram": "histogram",  # resolved to a real trace type below
 }
+
+# report_builder's groupby step renames aggregated columns to "{column}_{function}"
+# (see report_builder._execute_groupby) - stripping a known suffix here lets us tell
+# an aggregated column (e.g. "churn_signal_mean") from a raw pass-through one (e.g.
+# "churn_signal") using only the column name, no access to the operations pipeline.
+_AGG_SUFFIXES = {
+    "mean": "avg",
+    "sum": "total",
+    "count": "count",
+    "min": "min",
+    "max": "max",
+    "median": "median",
+    "std": "std dev",
+    "nunique": "unique count",
+}
+
+# Words that imply an aggregation was computed (a rate, an average, a total, ...).
+# Applying one of these to a raw/un-aggregated column is how a display bug (ugly
+# label) turns into a misleading-data bug (a label that claims something the chart
+# doesn't actually show) - see _resolve_axis_label.
+_AGG_IMPLYING_WORDS = re.compile(
+    r"\b(rate|percent|ratio|average|avg|mean|total)\b|%", re.IGNORECASE
+)
+
+
+def _humanize_column(column: str) -> str:
+    """Turn a raw/derived column name into a readable axis label, e.g.
+    "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group"."""
+    base = column
+    qualifier = None
+    for suffix, word in _AGG_SUFFIXES.items():
+        if column.endswith(f"_{suffix}"):
+            base = column[: -len(suffix) - 1]
+            qualifier = word
+            break
+
+    label = base.replace("_", " ").strip().title()
+    return f"{label} ({qualifier})" if qualifier else label
+
+
+def _resolve_axis_label(column: str, llm_label: Optional[str]) -> str:
+    """Pick the axis title for `column`, preferring the LLM's `llm_label` but
+    falling back to a mechanically-derived one whenever the LLM's text isn't
+    trustworthy for this column - see the module-level comment on
+    _AGG_IMPLYING_WORDS for why that check exists."""
+    if not llm_label:
+        return _humanize_column(column)
+
+    is_aggregated = any(column.endswith(f"_{suffix}") for suffix in _AGG_SUFFIXES)
+    if not is_aggregated and _AGG_IMPLYING_WORDS.search(llm_label):
+        return _humanize_column(column)
+
+    return llm_label
 
 
 def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -75,10 +129,13 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         else:
             fig = go.Figure(go.Bar(x=x_values, y=y_values))
 
+    x_label = _resolve_axis_label(x_axis, plotly_config.get("x_axis_label"))
+    y_label = _resolve_axis_label(y_axis, plotly_config.get("y_axis_label")) if has_y else "Count"
+
     fig.update_layout(
         title=title,
-        xaxis_title=x_axis if trace_type != "pie" else None,
-        yaxis_title=(y_axis if has_y else "count") if trace_type != "pie" else None,
+        xaxis_title=x_label if trace_type != "pie" else None,
+        yaxis_title=y_label if trace_type != "pie" else None,
         margin=dict(l=40, r=20, t=50, b=40),
         template=None,  # skip embedding Plotly's full default theme in every response
     )
