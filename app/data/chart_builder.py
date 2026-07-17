@@ -115,6 +115,16 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         # Plotly's JSON output as ordinary arrays instead of its compact
         # base64 array encoding, which older Plotly.js builds don't decode.
         if trace_type in ("bar", "pie"):
+            # A "bin"/"quantile" derive step (report_builder._execute_derive)
+            # produces an ordered Categorical whose category order IS the
+            # logical axis order (e.g. "18-30" < "30-40" < ...). A later
+            # sort_limit step commonly re-sorts rows by aggregated value
+            # (for top-N ranking), which silently scrambles that logical
+            # order - restore it here so ordinal categories don't render
+            # sorted by value instead of by bucket.
+            x_dtype = df[x_axis].dtype
+            if isinstance(x_dtype, pd.CategoricalDtype) and x_dtype.ordered:
+                df = df.sort_values(x_axis)
             x_values = df[x_axis].astype(str).tolist()
         else:
             x_values = df[x_axis].tolist()
