@@ -116,7 +116,9 @@ and declare the expected_output_schema that pipeline produces, so the columns yo
 reference in plotly_config actually exist in the result. A DISTRIBUTION report with
 chart_type "histogram" plots ONE continuous column's raw values directly (the
 histogram bins them itself) - it needs only a "filter" step (e.g. not_null on that
-column), never a "groupby" or "sort_limit" step. Only include an operation step at
+column), never a "groupby" or "sort_limit" step, and its plotly_config must OMIT
+"y_axis" entirely (do not set it to null or any column name) since Plotly computes
+the y values itself. Only include an operation step at
 all if it does real work; never include a "groupby" (or any other step) with empty/
 placeholder fields like "groupby_columns": [] just to have every step type present.
 
@@ -223,7 +225,7 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
 
 Rules:
 1. Only include operation_type values that apply - filter/derive/groupby/sort_limit/join are ALL optional per recommendation; omit any step (including groupby and sort_limit) entirely when it doesn't apply, rather than including it with empty/placeholder fields. When you DO include a groupby step, it must have real groupby_columns and aggregations (never skip that validity check).
-1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30"; put display strings in "bin_labels" instead (one fewer label than bins). "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
+1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30" and never date strings; put display strings in "bin_labels" instead (one fewer label than bins). Only bin a numeric (role == "measure") column this way - never bin a role == "temporal" column directly, since its bin edges would have to be date strings. To bucket a date/temporal column into ranges (e.g. "signups by year"), derive a period label first (e.g. regex_extract the year out of a formatted date string) and group by that instead of using "bin" on the raw date. "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
 2. Never group by a column classified as identifier/primary-key-like in Step 1.
 2b. A groupby's aggregated output columns are always renamed to "{{column}}_{{function}}" (e.g. aggregations {{"Calories": "mean"}} produces a column literally named "Calories_mean"). Always use that exact renamed form - never the bare column name - in sort_by, plotly_config axes, and expected_output_schema.
 2c. A "groupby" operation's "groupby_columns" must NEVER be empty. If you want a count of records per value of some column (e.g. "how many sets per year"), that column goes in BOTH "groupby_columns" AND "aggregations" (e.g. "groupby_columns": ["year"], "aggregations": {{"year": "count"}}) - never leave "groupby_columns" empty and only reference the column in "aggregations".
