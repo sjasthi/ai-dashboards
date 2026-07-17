@@ -8,6 +8,7 @@ _CHART_TYPE_TRACE = {
     "bar": "bar",
     "pie": "pie",
     "line": "line",
+    "scatter": "scatter",
     "histogram": "histogram",  # resolved to a real trace type below
 }
 
@@ -50,18 +51,27 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
     if raw_histogram:
         fig = go.Figure(go.Histogram(x=df[x_axis].tolist()))
     else:
-        # .astype(str) handles non-primitive values (e.g. pandas Interval
-        # objects from a "bin" derive step, like "(18, 30]") as plain display
-        # labels. Plain Python lists (not pandas Series/numpy arrays) keep
+        # Categorical charts (bar/pie) get x forced to strings so pandas
+        # Interval objects from a "bin" derive step (e.g. "(18, 30]") render
+        # as plain display labels instead of Plotly guessing an axis type.
+        # Scatter/line plot real (often continuous) values, so a numeric
+        # x_axis must stay numeric - stringifying it would make Plotly treat
+        # the axis as categorical, ordered by first appearance instead of by
+        # value. Plain Python lists (not pandas Series/numpy arrays) keep
         # Plotly's JSON output as ordinary arrays instead of its compact
         # base64 array encoding, which older Plotly.js builds don't decode.
-        x_values = df[x_axis].astype(str).tolist()
+        if trace_type in ("bar", "pie"):
+            x_values = df[x_axis].astype(str).tolist()
+        else:
+            x_values = df[x_axis].tolist()
         y_values = df[y_axis].tolist() if has_y else None
 
         if trace_type == "pie":
             fig = go.Figure(go.Pie(labels=x_values, values=y_values))
         elif trace_type == "line":
             fig = go.Figure(go.Scatter(x=x_values, y=y_values, mode="lines+markers"))
+        elif trace_type == "scatter":
+            fig = go.Figure(go.Scatter(x=x_values, y=y_values, mode="markers"))
         else:
             fig = go.Figure(go.Bar(x=x_values, y=y_values))
 

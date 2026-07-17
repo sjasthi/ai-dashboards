@@ -42,7 +42,7 @@ class OutputColumn(BaseModel):
 class PlotlyConfig(BaseModel):
     chart_type: str  # "bar", "line", "scatter", "pie", "box", etc.
     x_axis: str  # column name
-    y_axis: str  # column name
+    y_axis: Optional[str] = None  # omitted for a raw histogram (see chart_builder.py) - Plotly bins the raw x values itself
     title: str
     secondary_y: Optional[str] = None
 
