@@ -26,7 +26,7 @@ import plotly.graph_objects as go
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from app.data.report_builder import generate_report, report_type_to_index, _find_file_path  # noqa: E402
+from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes, _find_file_path  # noqa: E402
 from app.data.chart_builder import build_chart_figure  # noqa: E402
 
 SESSION_DATA_DIR = REPO_ROOT / "session_data"
@@ -126,7 +126,7 @@ def run_one(recommendations: dict, report_type: str, file_paths: dict, session_i
     print(df.head(15).to_string())
     print(f"Shape: {df.shape}")
 
-    plotly_config = rec.get("plotly_config") or {}
+    plotly_config = resolve_plotly_axes(df, rec.get("plotly_config") or {}, rec.get("required_operations", []))
     chart_dict = build_chart_figure(df, plotly_config)
     if chart_dict is None:
         print(f"[replay_report] chart_builder returned no chart for report {report_type}.")

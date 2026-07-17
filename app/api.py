@@ -29,7 +29,7 @@ try:
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
-    from app.data.report_builder import generate_report, report_type_to_index
+    from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes
     from app.data.chart_builder import build_chart_figure
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
@@ -308,7 +308,12 @@ def generate_report_endpoint(request: GenerateReportRequest):
         chart = None
         if selected_rec:
             try:
-                chart = build_chart_figure(report_df, selected_rec.get("plotly_config") or {})
+                axes_config = resolve_plotly_axes(
+                    report_df,
+                    selected_rec.get("plotly_config") or {},
+                    selected_rec.get("required_operations", [])
+                )
+                chart = build_chart_figure(report_df, axes_config)
             except Exception as e:
                 print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
 

@@ -540,6 +540,36 @@ def _resolve_column(df: pd.DataFrame, name: Optional[str], files_involved: List[
     return name
 
 
+def resolve_plotly_axes(
+    df: pd.DataFrame,
+    plotly_config: Optional[Dict[str, Any]],
+    operations: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Resolve plotly_config's x_axis/y_axis to the actual output column names.
+
+    The LLM writes plotly_config against expected_output_schema, which doesn't
+    account for _execute_join's collision suffixing (e.g. both "sets.csv" and
+    "themes.csv" having a "name" column makes the real output column
+    "name_themes"). Reuses _resolve_column with every file named across the
+    pipeline's operations, since we don't know upfront which operation's
+    files_involved is the relevant hint for a given axis.
+    """
+    if not plotly_config:
+        return plotly_config or {}
+
+    files_involved: List[str] = []
+    for op in operations or []:
+        for filename in op.get("files_involved", []) or []:
+            if filename not in files_involved:
+                files_involved.append(filename)
+
+    resolved = dict(plotly_config)
+    for key in ("x_axis", "y_axis"):
+        if resolved.get(key):
+            resolved[key] = _resolve_column(df, resolved[key], files_involved)
+    return resolved
+
+
 def _normalize_nulls(series: pd.Series) -> pd.Series:
     """Treat common missing-value placeholder tokens (e.g. '-', 'N/A') as NaN."""
     def clean(value):
