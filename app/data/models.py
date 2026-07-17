@@ -72,4 +72,8 @@ class ReportRecommendation(BaseModel):
         return v
 
 class RecommendationsResponse(BaseModel):
+    # Plain-English narrative of what the dataset represents. Optional so a
+    # response that omits it still validates (mirrors data_quality_warning);
+    # model_dump(exclude_none=True) drops it from the output when absent.
+    dataset_overview: Optional[str] = None
     recommendations: List[ReportRecommendation] = Field(min_length=1, max_length=4)
