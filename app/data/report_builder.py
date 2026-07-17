@@ -337,7 +337,14 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
         if not pattern:
             print(f"[ReportBuilder] Skipping regex_extract derive: no pattern given")
             return df
-        extracted = df[source_column].astype(str).str.extract(pattern, expand=False)
+        try:
+            extracted = df[source_column].astype(str).str.extract(pattern, expand=False)
+        except ValueError as e:
+            # AI-generated patterns don't always include a capture group (e.g. "^\d{4}"),
+            # which pandas' str.extract() requires - wrap the whole pattern in one and retry.
+            if "capture group" not in str(e):
+                raise
+            extracted = df[source_column].astype(str).str.extract(f"({pattern})", expand=False)
         df[new_name] = extracted.fillna("Other")
 
     elif method == "bin":
