@@ -1,3 +1,4 @@
+import { useState } from 'react';
 
 const API_BASE = 'http://localhost:8000';
 const REPORT_TYPE_LETTERS = ['A', 'B', 'C', 'D'];
