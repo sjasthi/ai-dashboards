@@ -240,6 +240,19 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
         if col in df.columns:
             agg_named[f"{col}_{func}"] = (col, func)
 
+    if aggregations and not agg_named:
+        # The LLM asked to aggregate column(s) that don't actually exist in the
+        # joined data (e.g. it aggregated a "quantity" column that only lives in
+        # a file it never joined in). Silently falling back to a plain count
+        # would produce a result whose columns no longer match the
+        # expected_output_schema/plotly_config the LLM declared, so the chart
+        # would fail downstream with no indication of why - raise instead so
+        # the real cause shows up in the report's error/debug output.
+        raise ValueError(
+            f"Aggregation column(s) {list(aggregations.keys())} not found after "
+            f"prior steps. Available columns: {df.columns.tolist()}"
+        )
+
     if not agg_named:
         # No aggregations specified, just group and count
         result = df.groupby(valid_groupby, as_index=False).size().rename(columns={"size": "count"})
