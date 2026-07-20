@@ -210,7 +210,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             # retry with correction feedback if it doesn't validate
             valid_filenames = {p.filename for p in file_profiles}
             recommendations = ai_engine.get_validated_recommendations(
-                prompt, valid_filenames, session_id=session_id, tables=session_tables
+                prompt, valid_filenames, session_id=session_id, tables=session_tables,
+                correction_prompt=requester.build_correction_prompt(file_profiles, relationships)
             )
 
             print(f"[API] Analysis complete!")

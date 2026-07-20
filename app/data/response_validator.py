@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Optional, Set
 
 import pandas as pd
@@ -11,6 +12,51 @@ from .summary_builder import _comparable_value_sets
 # real relationship. Matches the threshold detect_relationships uses to discard a
 # name match with no value evidence.
 MIN_JOIN_OVERLAP = 0.05
+
+
+def _canonical_key(filename: str) -> str:
+    """Normalized filename for tolerant matching - case, and the difference between
+    spaces, underscores and hyphens, are ignored."""
+    return re.sub(r"[\s_-]+", " ", filename.strip().lower())
+
+
+def _canonicalize_filenames(
+    parsed: RecommendationsResponse,
+    valid_filenames: Set[str]
+) -> Set[str]:
+    """Rewrite near-miss filenames to the real uploaded name, returning any that still
+    don't resolve.
+
+    Worksheet-derived names contain spaces ("sales pipeline (workbook).xlsx") and the
+    LLM routinely writes them with underscores instead. That one-character difference
+    used to fail validation and force an entire retry, so repair the near-miss here
+    rather than spending another round trip on it. Only an unambiguous match is
+    accepted - if two uploaded files normalize the same way, we can't safely guess.
+    """
+    by_key: Dict[str, List[str]] = {}
+    for name in valid_filenames:
+        by_key.setdefault(_canonical_key(name), []).append(name)
+
+    unknown = set()
+    for rec in parsed.recommendations:
+        for op in rec.required_operations:
+            resolved = []
+            for filename in op.files_involved:
+                if filename in valid_filenames:
+                    resolved.append(filename)
+                    continue
+
+                matches = by_key.get(_canonical_key(filename), [])
+                if len(matches) == 1:
+                    print(f"[Validator] Repaired filename {filename!r} -> {matches[0]!r}")
+                    resolved.append(matches[0])
+                else:
+                    # unknown, or ambiguous between two real files
+                    resolved.append(filename)
+                    unknown.add(filename)
+            op.files_involved = resolved
+
+    return unknown
 
 
 def _verify_joins(
@@ -93,10 +139,14 @@ def parse_and_validate(
     Validate a raw LLM response dict against RecommendationsResponse, then
     cross-check every operation's files_involved against the files actually
     uploaded (Pydantic's List[str] typing alone can't catch a hallucinated
-    filename - any string satisfies it).
+    filename - any string satisfies it). Filenames that differ only by case or by
+    space/underscore/hyphen are repaired in place rather than rejected.
 
     When `tables` is given, proposed joins are additionally verified against the
     real data (see _verify_joins).
+
+    Returns the validated response with filenames canonicalized to the real
+    uploaded names, so downstream lookups by filename resolve.
 
     Raises:
         ValueError: If the response fails Pydantic validation, references
@@ -108,12 +158,7 @@ def parse_and_validate(
     except ValidationError as e:
         raise ValueError(f"Response did not match the required schema:\n{e}") from e
 
-    unknown_files = set()
-    for rec in parsed.recommendations:
-        for op in rec.required_operations:
-            for filename in op.files_involved:
-                if filename not in valid_filenames:
-                    unknown_files.add(filename)
+    unknown_files = _canonicalize_filenames(parsed, valid_filenames)
 
     if unknown_files:
         raise ValueError(
