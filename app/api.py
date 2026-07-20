@@ -174,6 +174,11 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
         prompt = fallback["prompt"]
         recommendations = fallback["recommendations"]
 
+        # Loaded DataFrames kept in memory for /api/generate-report. The uploaded
+        # files themselves are deleted below, and worksheets never existed as files,
+        # so this is the only way the report step can reach the user's data.
+        session_tables = {}
+
         if DATA_MODULES_AVAILABLE:
           # ------------------------------------------------------------------
           # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
@@ -184,6 +189,7 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             # Load files
             loader = DataLoader()
             loader.add_files(file_paths)
+            session_tables = loader.tables()
 
             print(f"[API] Generating summaries...")
 
@@ -222,7 +228,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             "file_profiles": file_profiles,
             "prompt": prompt,
             "recommendations": recommendations,
-            "analysis": recommendations
+            "analysis": recommendations,
+            "tables": session_tables
         }
         
         # NOTE: this "file_profiles" response field is actually `file_metadata`
@@ -297,9 +304,22 @@ def generate_report_endpoint(request: GenerateReportRequest):
     try:
         print(f"\n[API] Generating report for session {session_id}, type {report_type}")
         
-        # Generate report using report_builder (executes operations on actual data)
-        # Pass empty file_paths dict to search in datasets/ directory
-        report_df = generate_report(recommendations, report_type, file_paths={}, session_id=session_id)
+        # Generate report using report_builder (executes operations on actual data).
+        # Uploaded data comes from the session's in-memory tables; file_paths stays
+        # empty so non-upload flows can still fall back to the datasets/ directory.
+        report_df = generate_report(
+            recommendations,
+            report_type,
+            file_paths={},
+            session_id=session_id,
+            tables=SESSIONS[session_id].get("tables")
+        )
+
+        # The report couldn't be built (bad recommendation, missing table, failed
+        # operation). Surface why instead of returning a blank report as a success.
+        report_error = report_df.attrs.get("error")
+        if report_error:
+            raise HTTPException(status_code=422, detail=f"Could not generate report: {report_error}")
 
         # Build the chart the AI recommended for this same report (its plotly_config)
         recs_list = recommendations.get("recommendations", [])
@@ -338,6 +358,10 @@ def generate_report_endpoint(request: GenerateReportRequest):
             "message": f"Report generated successfully with {len(report_df)} rows"
         }
     
+    except HTTPException:
+        # Already a deliberate HTTP error (e.g. the 422 above) - don't rewrap as a 500
+        raise
+
     except Exception as e:
         print(f"[API] Error generating report: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
