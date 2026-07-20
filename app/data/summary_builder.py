@@ -54,6 +54,27 @@ def _is_key_like_column(col: ColumnProfile) -> bool:
     return col.role == "primary_key" or name.endswith(("_id", "_key", "_num"))
 
 
+def _comparable_value_sets(series_a: pd.Series, series_b: pd.Series) -> tuple:
+    """Value sets for two columns being checked for overlap, compared as numbers
+    when BOTH parse cleanly as numeric and as strings otherwise.
+
+    A key column containing any nulls is read as float, so its values stringify as
+    "101.0" while the int column it joins to gives "101". Comparing those as strings
+    finds zero overlap and a real join gets discarded as a coincidence. The numeric
+    decision has to be made jointly - normalizing one column alone would just swap
+    a str/str mismatch for a float/str one.
+    """
+    values_a = series_a.dropna()
+    values_b = series_b.dropna()
+
+    numeric_a = pd.to_numeric(values_a, errors="coerce")
+    numeric_b = pd.to_numeric(values_b, errors="coerce")
+    if numeric_a.notna().all() and numeric_b.notna().all():
+        return set(numeric_a.astype(float)), set(numeric_b.astype(float))
+
+    return set(values_a.astype(str)), set(values_b.astype(str))
+
+
 def _fk_entity_stem(col_name: str) -> Optional[str]:
     """Extract the entity name from a foreign-key-style column, e.g. "theme_id" -> "theme"."""
     name = col_name.strip().lower()
@@ -122,8 +143,7 @@ class SummaryGenerator:
             if df_a is None or df_b is None:
                 return None
             try:
-                values_a = set(df_a[col_a_name].dropna().astype(str))
-                values_b = set(df_b[col_b_name].dropna().astype(str))
+                values_a, values_b = _comparable_value_sets(df_a[col_a_name], df_b[col_b_name])
                 if values_a and values_b:
                     return len(values_a & values_b) / min(len(values_a), len(values_b))
             except Exception:
