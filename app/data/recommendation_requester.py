@@ -35,112 +35,6 @@ class RecommendationRequester:
         "OUTLIER": "flag rows far from the norm on a numeric measure (e.g. via IQR or z-score)."
     }
 
-    def __init__(self):
-        self.response_schema = self._get_schema()
-
-    def _get_schema(self) -> dict:
-        """Define the exact JSON structure LLM should return."""
-        return {
-            "type": "object",
-            "properties": {
-                "recommendations": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 4,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "rank": {"type": "integer"},
-                            "report_name": {"type": "string"},
-                            "question_answered": {"type": "string"},
-                            "pattern_used": {
-                                "type": "string",
-                                "enum": list(self.REPORT_PATTERNS.keys())
-                            },
-                            "justification": {
-                                "type": "object",
-                                "properties": {
-                                    "column": {"type": "string"},
-                                    "profile_evidence": {"type": "string"}
-                                }
-                            },
-                            "required_operations": {
-                                "type": "array",
-                                "description": "Ordered pipeline: filter -> derive -> groupby -> sort_limit -> join, as applicable",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "operation_type": {
-                                            "type": "string",
-                                            "enum": ["filter", "derive", "groupby", "sort_limit", "join"]
-                                        },
-                                        "files_involved": {"type": "array", "items": {"type": "string"}},
-                                        "filter_conditions": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "column": {"type": "string"},
-                                                    "condition": {"type": "string"}
-                                                }
-                                            }
-                                        },
-                                        "derive_column": {
-                                            "type": "object",
-                                            "properties": {
-                                                "new_name": {"type": "string"},
-                                                "source_column": {"type": "string"},
-                                                "method": {"type": "string"},
-                                                "pattern": {"type": "string"},
-                                                "bins": {"type": "array"},
-                                                "bin_labels": {"type": "array", "items": {"type": "string"}}
-                                            }
-                                        },
-                                        "groupby_columns": {"type": "array", "items": {"type": "string"}},
-                                        "aggregations": {"type": "object"},
-                                        "sort_by": {"type": "string"},
-                                        "ascending": {"type": "boolean"},
-                                        "limit": {"type": "integer"},
-                                        "join_keys": {"type": "array", "items": {"type": "string"}},
-                                        "join_type": {"type": "string"}
-                                    }
-                                }
-                            },
-                            "expected_output_schema": {
-                                "type": "array",
-                                "description": "Columns/types produced after running required_operations",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"}
-                                    }
-                                }
-                            },
-                            "plotly_config": {
-                                "type": "object",
-                                "properties": {
-                                    "chart_type": {"type": "string"},
-                                    "x_axis": {"type": "string"},
-                                    "y_axis": {"type": "string"},
-                                    "title": {"type": "string"}
-                                }
-                            },
-                            "rationale_bullets": {
-                                "type": "array",
-                                "description": "Exactly 3 short bullet points explaining this report's value",
-                                "items": {"type": "string"}
-                            },
-                            "data_quality_warning": {
-                                "type": "string",
-                                "description": "Populate only if this report relies on data with significant caveats"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
     def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
         """Build LLM prompt with explicit JSON schema instructions."""
 
@@ -179,6 +73,10 @@ related files (per the relationships above) to answer a question that no single 
 could answer alone - e.g. combining a customer attribute with a transaction/behavior
 measure, or a product attribute with sales performance. Only fall back to purely
 single-file recommendations for files that have no detected relationship to anything else.
+There is NO limit on how many "join" steps a single recommendation's required_operations
+may contain - chain as many as the detected relationships actually support (e.g. file1
+into file2 into file3 into file4). The two-join example in the JSON structure below is
+only illustrating the join syntax, not capping how many joins you may use.
 """
             else:
                 relationships_block = f"""
@@ -194,15 +92,35 @@ profiles above.
 
 {summaries_json}
 {relationships_block}
-Your task: recommend meaningful, EXECUTABLE reports built specifically from the data above.
+Each file profile includes "sample_rows" (a small representative spread of real
+rows) and, on categorical columns, "top_values" (the most common values and their
+counts). Use these to understand what the data actually MEANS - the real entities,
+units, and categories behind the column names - when writing the narrative and
+choosing reports. But when filling "justification.profile_evidence", still cite the
+aggregate profile stats (unique_values / null_percent / dtype), never a sample value.
 
-STEP 1 - Classify each column before recommending anything. Do not infer a column's
-purpose from its name alone; derive its role from the profile stats:
-- unique_values / row_count > 0.9  -> identifier/primary-key-like; never use as a groupby column
-- unique_values <= ~20 (or a low ratio to row_count) with an object/categorical dtype -> categorical; good for groupby/composition
-- numeric dtype with high unique_values -> continuous measure; good for distribution/comparison, not groupby
+Your task: (1) write a short "dataset_overview" narrative telling the story of what
+this data represents, and (2) recommend meaningful, EXECUTABLE reports built
+specifically from the data above.
+
+DATASET OVERVIEW - Before the recommendations, write a "dataset_overview": 1-2 short
+paragraphs, in plain English, describing what this dataset represents as a whole -
+the key entities each file captures, how the files relate to each other (reference
+the DETECTED CROSS-FILE RELATIONSHIPS when present), and the most notable patterns or
+characteristics you can see. Ground every statement in the profiles/sample_rows/
+top_values above - do NOT invent facts, sources, or figures that aren't supported by
+the data provided.
+
+STEP 1 - Each column's "role" field above was already computed deterministically from
+the actual data (not guessed from its name) - treat it as ground truth and do not
+re-derive or second-guess it. Apply these role-based rules directly:
+- role == "primary_key" -> identifier-like; never use as a groupby column
+- role == "categorical" -> good for a groupby/composition axis
+- role == "measure" -> numeric measure; good for distribution/comparison, generally not a groupby column
+- role == "temporal" -> good for a trend x-axis
+Independently of role, still watch for two things the role field doesn't capture:
 - null_percent > 40% -> low-quality column; avoid as a primary axis unless you filter it first
-- also treat non-numeric placeholder tokens (e.g. "-", "N/A", "?") in an otherwise numeric column as nulls, and add a filter/clean operation before aggregating that column
+- non-numeric placeholder tokens (e.g. "-", "N/A", "?") in an otherwise numeric/measure column also count as missing data - add a filter/clean operation before aggregating that column
 
 STEP 2 - Only recommend a report pattern whose data requirements are actually met by
 this file's profile. Choose from this fixed set of patterns (do not invent others):
@@ -219,7 +137,9 @@ and declare the expected_output_schema that pipeline produces, so the columns yo
 reference in plotly_config actually exist in the result. A DISTRIBUTION report with
 chart_type "histogram" plots ONE continuous column's raw values directly (the
 histogram bins them itself) - it needs only a "filter" step (e.g. not_null on that
-column), never a "groupby" or "sort_limit" step. Only include an operation step at
+column), never a "groupby" or "sort_limit" step, and its plotly_config must OMIT
+"y_axis" entirely (do not set it to null or any column name) since Plotly computes
+the y values itself. Only include an operation step at
 all if it does real work; never include a "groupby" (or any other step) with empty/
 placeholder fields like "groupby_columns": [] just to have every step type present.
 
@@ -230,6 +150,7 @@ explaining the caveat, rather than forcing a low-quality suggestion.
 IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with this exact structure:
 
 {{
+  "dataset_overview": "1-2 short paragraphs telling the story of what this data represents (see DATASET OVERVIEW above).",
   "recommendations": [
     {{
       "rank": 1,
@@ -256,6 +177,12 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
           "operation_type": "join",
           "files_involved": ["file2.csv", "file3.csv"],
           "join_keys": [{{"left": "foreign_key_in_file2", "right": "primary_key_in_file3"}}],
+          "join_type": "inner"
+        }},
+        {{
+          "operation_type": "join",
+          "files_involved": ["file3.csv", "file4.csv"],
+          "join_keys": [{{"left": "foreign_key_in_file3", "right": "primary_key_in_file4"}}],
           "join_type": "inner"
         }},
         {{
@@ -312,7 +239,9 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
         "chart_type": "bar",
         "x_axis": "derived_category",
         "y_axis": "measure_column_mean",
-        "title": "Chart Title"
+        "title": "Chart Title",
+        "x_axis_label": "Derived Category",
+        "y_axis_label": "Average Measure Column"
       }},
       "rationale_bullets": [
         "First short bullet explaining what this report shows",
@@ -326,11 +255,13 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
 
 Rules:
 1. Only include operation_type values that apply - filter/derive/groupby/sort_limit/join are ALL optional per recommendation; omit any step (including groupby and sort_limit) entirely when it doesn't apply, rather than including it with empty/placeholder fields. When you DO include a groupby step, it must have real groupby_columns and aggregations (never skip that validity check).
-1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30"; put display strings in "bin_labels" instead (one fewer label than bins). "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
+1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30" and never date strings; put display strings in "bin_labels" instead (one fewer label than bins). Only bin a numeric (role == "measure") column this way - never bin a role == "temporal" column directly, since its bin edges would have to be date strings. To bucket a date/temporal column into ranges (e.g. "signups by year"), derive a period label first (e.g. regex_extract the year out of a formatted date string) and group by that instead of using "bin" on the raw date. "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
 2. Never group by a column classified as identifier/primary-key-like in Step 1.
 2b. A groupby's aggregated output columns are always renamed to "{{column}}_{{function}}" (e.g. aggregations {{"Calories": "mean"}} produces a column literally named "Calories_mean"). Always use that exact renamed form - never the bare column name - in sort_by, plotly_config axes, and expected_output_schema.
+2e. "x_axis_label"/"y_axis_label" in plotly_config are OPTIONAL plain-English overrides of the axis title shown to end users (the raw "x_axis"/"y_axis" column name is still used to pull the data - never change those). Omit either key entirely when the raw column name is already clear. When you do include one, it must describe the column as actually computed - never imply an aggregation (e.g. "rate", "average", "%", "total") for a column that is NOT the output of a groupby aggregation (i.e. does not carry an "_mean"/"_sum"/"_count"/etc. suffix per rule 2b). E.g. a raw pass-through column like "churn_signal" must not be labeled "Churn Rate" - only a column like "churn_signal_mean" may be.
 2c. A "groupby" operation's "groupby_columns" must NEVER be empty. If you want a count of records per value of some column (e.g. "how many sets per year"), that column goes in BOTH "groupby_columns" AND "aggregations" (e.g. "groupby_columns": ["year"], "aggregations": {{"year": "count"}}) - never leave "groupby_columns" empty and only reference the column in "aggregations".
 2d. If two joined files both have a column with the same name (e.g. both have "name"), any later step (groupby/filter/derive/sort_limit) that uses that column MUST list the SPECIFIC file it means in that step's own "files_involved" - not just repeat whichever file list the join used. E.g. if you joined sets.csv with themes.csv and want to group by the theme's "name" (not the set's "name"), that groupby step's "files_involved" must be ["themes.csv"], even though the join step's "files_involved" was ["sets.csv", "themes.csv"].
+2f. Before writing a "groupby"/"filter"/"sort_limit" step, check the actual "columns" list in the profile(s) above for every file you joined and confirm the column you're referencing (in "aggregations", "groupby_columns", or "filter_conditions") is really one of them - never assume a column exists on a file just because it sounds plausible (e.g. do not assume a "quantity" column exists on a file that has no such entry in its profiled "columns"). If the column you need lives on a DIFFERENT file than the one(s) your join already covers, add a join step to that specific file (per the DETECTED CROSS-FILE RELATIONSHIPS above) instead of aggregating a column that isn't actually present. When multiple files share the same join key (e.g. both an "inventories" and an "inventory_sets" file joinable on "set_num"), pick the one whose profile actually contains the column your aggregation needs.
 3. Bar/pie charts must resolve to at most ~15-20 categories after sort_limit; use limit to enforce this.
 4. Cite real values from the profile (unique_values, null_percent, dtype) in "justification" - do not fabricate stats.
 5. Rank recommendations by relevance/insight value.
@@ -347,21 +278,29 @@ CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. 
 
     def _profile_to_dict(self, profile: FileProfile) -> dict:
         """Convert FileProfile dataclass to dict for JSON serialization."""
+        def _column_dict(col):
+            d = {
+                "name": col.name,
+                "dtype": col.dtype,
+                "unique_values": col.unique_values,
+                "null_percent": col.null_percent,
+                "role": col.role,
+                "min": _round_if_numeric(col.min_value),
+                "max": _round_if_numeric(col.max_value),
+                "mean": _round_if_numeric(col.mean_value)
+            }
+            # Only categorical columns carry top_values (see summary_builder);
+            # omit the key entirely elsewhere rather than emitting null tokens.
+            if col.top_values:
+                d["top_values"] = col.top_values
+            return d
+
         return {
             "filename": profile.filename,
             "row_count": profile.row_count,
-            "columns": [
-                {
-                    "name": col.name,
-                    "dtype": col.dtype,
-                    "unique_values": col.unique_values,
-                    "null_percent": col.null_percent,
-                    "role": col.role,
-                    "min": _round_if_numeric(col.min_value),
-                    "max": _round_if_numeric(col.max_value),
-                    "mean": _round_if_numeric(col.mean_value)
-                }
-                for col in profile.columns
-            ],
-            "quality_flags": profile.quality_flags
+            "columns": [_column_dict(col) for col in profile.columns],
+            "quality_flags": profile.quality_flags,
+            # Real rows so the LLM can read actual value combinations, not just
+            # aggregate stats. A small representative spread (see summary_builder).
+            "sample_rows": profile.sample_rows
         }

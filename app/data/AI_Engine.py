@@ -1,4 +1,5 @@
 import os
+from typing import Set
 from ollama import chat
 from ollama import ChatResponse
 from json_repair import loads as json_repair_loads
@@ -6,6 +7,7 @@ import json
 from dotenv import load_dotenv
 from groq import Groq
 from .session_manager import SessionManager
+from .response_validator import parse_and_validate
 
 load_dotenv()
 
@@ -78,9 +80,53 @@ def send_prompt(prompt, session_id=None):
     # ===========================
 
 
+def get_validated_recommendations(
+    prompt: str,
+    valid_filenames: Set[str],
+    session_id: str = None,
+    max_retries: int = 2,
+) -> dict:
+    """
+    Like send_prompt, but validates the response against RecommendationsResponse
+    (see response_validator.parse_and_validate) before returning it. On
+    validation failure, the error is appended to the prompt as correction
+    text and the LLM is retried, up to max_retries times.
+
+    Returns:
+        The validated response as a plain dict (schema_conformant, but still
+        report_builder.py's usual dict shape - no callers need to change).
+
+    Raises:
+        ValueError: If the response still doesn't validate after exhausting
+            retries. Callers should already be catching failures from
+            send_prompt (e.g. to fall back to mock data), so this needs no
+            new handling on top of that.
+    """
+    attempt_prompt = prompt
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        raw_response = send_prompt(attempt_prompt, session_id=session_id)
+        try:
+            parsed = parse_and_validate(raw_response, valid_filenames)
+            return parsed.model_dump(exclude_none=True)
+        except ValueError as e:
+            last_error = e
+            print(f"[AI_Engine] Response failed validation (attempt {attempt + 1}/{max_retries + 1}): {e}")
+            attempt_prompt = (
+                f"{prompt}\n\n"
+                f"Your previous response failed validation with this error:\n{e}\n\n"
+                f"Return ONLY corrected raw JSON matching the required structure."
+            )
+
+    raise last_error
+
+
 def _send_prompt_ollama(prompt: str) -> str:
-    """Original local Ollama call, unchanged."""
-    response: ChatResponse = chat(model='qwen2.5', messages=[
+    """Original local Ollama call. format='json' asks the model to guarantee
+    syntactically valid JSON output, catching most "wrapped in prose"
+    failures before they ever reach parsing."""
+    response: ChatResponse = chat(model='qwen2.5', format='json', messages=[
     {
         'role': 'user',
         'content': prompt,
@@ -93,6 +139,7 @@ def _send_prompt_groq(prompt: str, model: str) -> str:
     client = Groq(api_key=GROQ_API_KEY)
     response = client.chat.completions.create(
         model=model,
+        response_format={"type": "json_object"},
         messages=[
             {
                 'role': 'user',

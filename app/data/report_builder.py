@@ -240,6 +240,19 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
         if col in df.columns:
             agg_named[f"{col}_{func}"] = (col, func)
 
+    if aggregations and not agg_named:
+        # The LLM asked to aggregate column(s) that don't actually exist in the
+        # joined data (e.g. it aggregated a "quantity" column that only lives in
+        # a file it never joined in). Silently falling back to a plain count
+        # would produce a result whose columns no longer match the
+        # expected_output_schema/plotly_config the LLM declared, so the chart
+        # would fail downstream with no indication of why - raise instead so
+        # the real cause shows up in the report's error/debug output.
+        raise ValueError(
+            f"Aggregation column(s) {list(aggregations.keys())} not found after "
+            f"prior steps. Available columns: {df.columns.tolist()}"
+        )
+
     if not agg_named:
         # No aggregations specified, just group and count
         result = df.groupby(valid_groupby, as_index=False).size().rename(columns={"size": "count"})
@@ -337,7 +350,14 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
         if not pattern:
             print(f"[ReportBuilder] Skipping regex_extract derive: no pattern given")
             return df
-        extracted = df[source_column].astype(str).str.extract(pattern, expand=False)
+        try:
+            extracted = df[source_column].astype(str).str.extract(pattern, expand=False)
+        except ValueError as e:
+            # AI-generated patterns don't always include a capture group (e.g. "^\d{4}"),
+            # which pandas' str.extract() requires - wrap the whole pattern in one and retry.
+            if "capture group" not in str(e):
+                raise
+            extracted = df[source_column].astype(str).str.extract(f"({pattern})", expand=False)
         df[new_name] = extracted.fillna("Other")
 
     elif method == "bin":
@@ -531,6 +551,36 @@ def _resolve_column(df: pd.DataFrame, name: Optional[str], files_involved: List[
     if name in df.columns:
         return name
     return name
+
+
+def resolve_plotly_axes(
+    df: pd.DataFrame,
+    plotly_config: Optional[Dict[str, Any]],
+    operations: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Resolve plotly_config's x_axis/y_axis to the actual output column names.
+
+    The LLM writes plotly_config against expected_output_schema, which doesn't
+    account for _execute_join's collision suffixing (e.g. both "sets.csv" and
+    "themes.csv" having a "name" column makes the real output column
+    "name_themes"). Reuses _resolve_column with every file named across the
+    pipeline's operations, since we don't know upfront which operation's
+    files_involved is the relevant hint for a given axis.
+    """
+    if not plotly_config:
+        return plotly_config or {}
+
+    files_involved: List[str] = []
+    for op in operations or []:
+        for filename in op.get("files_involved", []) or []:
+            if filename not in files_involved:
+                files_involved.append(filename)
+
+    resolved = dict(plotly_config)
+    for key in ("x_axis", "y_axis"):
+        if resolved.get(key):
+            resolved[key] = _resolve_column(df, resolved[key], files_involved)
+    return resolved
 
 
 def _normalize_nulls(series: pd.Series) -> pd.Series:

@@ -14,6 +14,7 @@ class ColumnProfile:
     min_value: str = None
     max_value: str = None
     mean_value: float = None
+    top_values: List[Dict] = None # Most common values for categorical columns
 
 @dataclass
 class FileProfile:
@@ -243,6 +244,18 @@ class SummaryGenerator:
                     max_val = non_null.max()
                     mean_val = float(non_null.mean())
 
+            # Top values give the LLM the column's actual semantics, which raw stats
+            # can't convey. Only for genuinely low-cardinality categorical columns:
+            # detect_column_role also labels leftover high-cardinality text (e.g. a
+            # "name" column) "categorical", where a top-5 is noise, not signal.
+            top_values = None
+            if role == "categorical" and unique_count <= 30:
+                counts = series.value_counts().head(5)
+                top_values = [
+                    {"value": str(value), "count": int(count)}
+                    for value, count in counts.items()
+                ]
+
             col_profiles.append(ColumnProfile(
                 name=col_name,
                 dtype=dtype,
@@ -252,11 +265,18 @@ class SummaryGenerator:
                 role=role,
                 min_value=str(min_val) if min_val is not None else None,
                 max_value=str(max_val) if max_val is not None else None,
-                mean_value=mean_val
+                mean_value=mean_val,
+                top_values=top_values
             ))
 
         # Sample rows
-        sample_rows = df.head(3).to_dict('records')
+        n_sample = min(5, len(df))
+        if n_sample > 0:
+            sample_indices = [round(i * (len(df) - 1) / max(n_sample - 1, 1)) for i in range(n_sample)]
+            sample_indices = list(dict.fromkeys(sample_indices))
+            sample_rows = df.iloc[sample_indices].to_dict('records')
+        else:
+            sample_rows = []
 
         # Quality flags
         quality_flags = detect_quality_flags(df)

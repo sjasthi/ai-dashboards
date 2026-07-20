@@ -1,8 +1,9 @@
 """
 FastAPI server for AI Dashboard backend.
 
-This is a mock API layer that your frontend can communicate with.
-Later, replace mock responses with real calls to AI_Engine.py and other modules.
+Some endpoints call the real data pipeline; others return mock data.
+See the per-endpoint [REAL] / [MOCK] / [REAL + MOCK FALLBACK] / [UNUSED]
+tags on each endpoint below.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -28,7 +29,7 @@ try:
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
-    from app.data.report_builder import generate_report, report_type_to_index
+    from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes
     from app.data.chart_builder import build_chart_figure
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
@@ -61,7 +62,7 @@ class GenerateReportRequest(BaseModel):
     report_type: str = "A"
 
 # ============================================================================
-# MOCK DATA & SESSIONS
+# SESSIONS
 # ============================================================================
 
 SESSIONS = {}  # Store uploaded file metadata by session_id
@@ -73,25 +74,54 @@ def generate_session_id():
 
 
 # ============================================================================
-# ENDPOINTS
+# ANALYZE-FULL MOCK FALLBACK HELPERS
 # ============================================================================
 
+def _mock_analyze_full_fallback(file_paths):
+    """[MOCK] Fallback values used when DATA_MODULES_AVAILABLE is False
+    or the real pipeline raises during /api/analyze-full."""
+    return {
+        "file_profiles": [],
+        "prompt": "Mock prompt (AI_Engine integration pending)",
+        "recommendations": {
+            "summary": "Mock analysis - integrate your AI_Engine code",
+            "key_insights": [f"Processed {len(file_paths)} file(s)", "Files received and ready for analysis"],
+            "recommendations": ["Connect your data pipeline to process files"],
+        },
+    }
+
+
+# ============================================================================
+# ENDPOINTS — ACTIVE (wired to current React frontend)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# [REAL]
+# ----------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
+    """[REAL] Health check endpoint."""
     return {"status": "ok", "message": "API is running"}
 
 
+# ----------------------------------------------------------------------------
+# [REAL + MOCK FALLBACK] Used by Uploaddashboard.jsx
+# ----------------------------------------------------------------------------
 @app.post("/api/analyze-full")
 async def analyze_files_full(files: list[UploadFile] = File(...)):
     """
+    [REAL + MOCK FALLBACK]
     Full analysis workflow:
     1. Accept files
     2. Create file summaries
     3. Generate recommendation prompt
     4. Send to AI
     5. Return results and place on analysis page
-    
+
+    Runs the real DataLoader -> SummaryGenerator -> RecommendationRequester ->
+    AI_Engine pipeline when DATA_MODULES_AVAILABLE and no exception occurs;
+    otherwise falls back to _mock_analyze_full_fallback() values.
+
     Returns:
         {
             "session_id": "20260704_120530",
@@ -132,32 +162,31 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             file_metadata.append({
                 "name": file.filename,
                 "size": len(content),
-                "rows": 500  # Placeholder
+                "rows": 500,  # TODO: REVIEW - [MOCK] placeholder row count — not computed from real data even when pipeline succeeds
             })
-        
+
         if not file_paths:
             raise HTTPException(status_code=400, detail="No valid files provided")
-        
-        # ---- INTEGRATE YOUR CODE HERE ----
-        # Step 1: Load files with DataLoader
-        file_profiles = []
-        prompt = "Mock prompt (AI_Engine integration pending)"
-        recommendations = {
-            "summary": "Mock analysis - integrate your AI_Engine code",
-            "key_insights": [f"Processed {len(file_paths)} file(s)", "Files received and ready for analysis"],
-            "recommendations": ["Connect your data pipeline to process files"]
-        }
-        
+
+        # [MOCK] default/fallback values — overwritten below if the real pipeline succeeds
+        fallback = _mock_analyze_full_fallback(file_paths)
+        file_profiles = fallback["file_profiles"]
+        prompt = fallback["prompt"]
+        recommendations = fallback["recommendations"]
+
         if DATA_MODULES_AVAILABLE:
+          # ------------------------------------------------------------------
+          # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
+          # ------------------------------------------------------------------
           try:
             print(f"[API] Loading {len(file_paths)} files...")
-            
+
             # Load files
             loader = DataLoader()
             loader.add_files(file_paths)
-            
+
             print(f"[API] Generating summaries...")
-            
+
             # Generate summaries
             summary_gen = SummaryGenerator()
             file_profiles = summary_gen.profile_all_files(loader)
@@ -168,19 +197,23 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             # Build recommendation prompt
             requester = RecommendationRequester()
             prompt = requester.build_request_prompt(file_profiles, relationships)
-            
+
             print(f"[API] Sending to AI Engine...")
-            
-            # Send to AI and get cleaned JSON response
-            recommendations = ai_engine.send_prompt(prompt, session_id=session_id)
-            
+
+            # Send to AI, validate against the recommendations schema, and
+            # retry with correction feedback if it doesn't validate
+            valid_filenames = {p.filename for p in file_profiles}
+            recommendations = ai_engine.get_validated_recommendations(
+                prompt, valid_filenames, session_id=session_id
+            )
+
             print(f"[API] Analysis complete!")
-            
+
           except Exception as e:
-            # Runtime error in data pipeline
+            # [MOCK FALLBACK] real pipeline failed — `fallback` values above stand
             print(f"[API] Error during analysis: {type(e).__name__}: {e}")
             print(f"[API] Returning mock data for {len(file_paths)} file(s)")
-        
+
         # Store session info
         SESSIONS[session_id] = {
             "files": file_metadata,
@@ -192,6 +225,9 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             "analysis": recommendations
         }
         
+        # NOTE: this "file_profiles" response field is actually `file_metadata`
+        # (name/size/[MOCK] placeholder rows) — the real per-column `file_profiles`
+        # computed above is only stored in SESSIONS, never returned to the caller.
         return {
             "session_id": session_id,
             "status": "complete",
@@ -200,139 +236,36 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             "recommendations": recommendations,
             "analysis": recommendations
         }
-    
+
     except HTTPException:
         # Re-raise HTTP exceptions (validation errors)
         raise
-    
+
     except Exception as e:
         print(f"[API] Unexpected error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-    
+
     finally:
         # Clean up temp directory
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
 
 
-@app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
-    """
-    Upload one or more CSV/Excel files.
-    
-    Returns:
-        {
-            "session_id": "20260704_120530",
-            "status": "processing",
-            "files": [
-                {"name": "file1.csv", "size": 12345, "rows": 500}
-            ]
-        }
-    """
-    try:
-        session_id = generate_session_id()
-        file_metadata = []
-        
-        for file in files:
-            # Mock parsing — in reality you'd use pandas/openpyxl
-            # to get real row/sheet counts
-            filename = file.filename or "unknown"
-            size = len(await file.read())
-            
-            # Mock: random rows between 500-5000
-            import random
-            rows = random.randint(500, 5000)
-            
-            file_metadata.append({
-                "name": filename,
-                "size": size,
-                "rows": rows
-            })
-        
-        # Store session info
-        SESSIONS[session_id] = {
-            "files": file_metadata,
-            "status": "processing",
-            "created_at": datetime.now().isoformat(),
-            "analysis": None
-        }
-        
-        return {
-            "session_id": session_id,
-            "status": "processing",
-            "files": file_metadata,
-            "message": f"Received {len(files)} file(s). Analysis starting..."
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/analyze")
-def analyze_data(session_id: str, report_type: Optional[str] = "A"):
-    """
-    Trigger analysis for a session and report type.
-    
-    Args:
-        session_id: Session ID from upload
-        report_type: 'A', 'B', or 'C'
-    
-    Returns:
-        {
-            "session_id": "20260704_120530",
-            "report_type": "A",
-            "status": "complete",
-            "analysis": {...},
-            "charts": [...]
-        }
-    """
-    if session_id not in SESSIONS:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Mock analysis result
-    mock_analysis = {
-        "summary": f"Analysis of {len(SESSIONS[session_id]['files'])} file(s) using report type {report_type}",
-        "key_insights": [
-            "Data contains 3 key categories",
-            "Outliers detected in 2 columns",
-            "Strong correlation between variables X and Y"
-        ],
-        "data_quality": {
-            "completeness": "95%",
-            "duplicates": "2.1%",
-            "anomalies": "0.5%"
-        }
-    }
-    
-    mock_charts = [
-        {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
-        {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
-        {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
-    ]
-    
-    SESSIONS[session_id]["status"] = "complete"
-    SESSIONS[session_id]["analysis"] = mock_analysis
-    
-    return {
-        "session_id": session_id,
-        "report_type": report_type,
-        "status": "complete",
-        "analysis": mock_analysis,
-        "charts": mock_charts
-    }
-
-
+# ----------------------------------------------------------------------------
+# [REAL] Used by Analysisdashboard.jsx
+# ----------------------------------------------------------------------------
 @app.post("/api/generate-report")
 def generate_report_endpoint(request: GenerateReportRequest):
     """
+    [REAL]
     Generate a structured report from AI recommendations.
-    
+
     Body:
         {
             "session_id": "20260704_120530",
             "report_type": "A"
         }
-    
+
     Returns:
         {
             "session_id": "20260704_120530",
@@ -375,7 +308,12 @@ def generate_report_endpoint(request: GenerateReportRequest):
         chart = None
         if selected_rec:
             try:
-                chart = build_chart_figure(report_df, selected_rec.get("plotly_config") or {})
+                axes_config = resolve_plotly_axes(
+                    report_df,
+                    selected_rec.get("plotly_config") or {},
+                    selected_rec.get("required_operations", [])
+                )
+                chart = build_chart_figure(report_df, axes_config)
             except Exception as e:
                 print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
 
@@ -405,88 +343,222 @@ def generate_report_endpoint(request: GenerateReportRequest):
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
 
 
+# TODO: Review & Remove legacy code
+# # ============================================================================
+# # ENDPOINTS — UNUSED / LEGACY (not called by current frontend)
+# # ============================================================================
 
-@app.get("/api/results/{session_id}")
-def get_results(session_id: str):
-    """
-    Fetch analysis results for a session.
-    
-    Returns:
-        {
-            "session_id": "20260704_120530",
-            "status": "complete",
-            "analysis": {...},
-            "charts": [...]
-        }
-    """
-    if session_id not in SESSIONS:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    session = SESSIONS[session_id]
-    
-    return {
-        "session_id": session_id,
-        "status": session["status"],
-        "analysis": session["analysis"],
-        "charts": [] if session["analysis"] is None else [
-            {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
-            {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
-            {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
-        ]
-    }
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED] Only called by legacy app/web/src/js/api.js (pre-React)
+# # ----------------------------------------------------------------------------
+# @app.post("/api/upload")
+# async def upload_files(files: list[UploadFile] = File(...)):
+#     """
+#     [MOCK, UNUSED]
+#     Upload one or more CSV/Excel files.
 
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "status": "processing",
+#             "files": [
+#                 {"name": "file1.csv", "size": 12345, "rows": 500}
+#             ]
+#         }
+#     """
+#     try:
+#         session_id = generate_session_id()
+#         file_metadata = []
 
-@app.get("/api/export/{session_id}")
-def export_report(session_id: str, format: str = "json"):
-    """
-    Export analysis as PDF, HTML, or JSON.
-    
-    Args:
-        session_id: Session ID
-        format: 'json', 'html', or 'pdf'
-    
-    Returns mock file data
-    """
-    if session_id not in SESSIONS:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Mock response
-    return {
-        "session_id": session_id,
-        "format": format,
-        "status": "ready",
-        "download_url": f"/downloads/{session_id}/report.{format}",
-        "message": f"Report exported as {format.upper()}"
-    }
+#         for file in files:
+#             # Mock parsing — in reality you'd use pandas/openpyxl
+#             # to get real row/sheet counts
+#             filename = file.filename or "unknown"
+#             size = len(await file.read())
 
+#             # Mock: random rows between 500-5000
+#             import random
+#             rows = random.randint(500, 5000)
 
-@app.get("/api/sessions")
-def list_sessions():
-    """
-    List all stored sessions.
-    Useful for Reports page.
-    """
-    sessions_list = [
-        {
-            "session_id": sid,
-            "created_at": sess.get("created_at"),
-            "file_count": len(sess.get("files", [])),
-            "status": sess.get("status"),
-            "total_rows": sum(f.get("rows", 0) for f in sess.get("files", []))
-        }
-        for sid, sess in SESSIONS.items()
-    ]
-    return {"sessions": sessions_list, "total_count": len(sessions_list)}
+#             file_metadata.append({
+#                 "name": filename,
+#                 "size": size,
+#                 "rows": rows
+#             })
+
+#         # Store session info
+#         SESSIONS[session_id] = {
+#             "files": file_metadata,
+#             "status": "processing",
+#             "created_at": datetime.now().isoformat(),
+#             "analysis": None
+#         }
+
+#         return {
+#             "session_id": session_id,
+#             "status": "processing",
+#             "files": file_metadata,
+#             "message": f"Received {len(files)} file(s). Analysis starting..."
+#         }
+
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.delete("/api/sessions/{session_id}")
-def delete_session(session_id: str):
-    """Delete a session."""
-    if session_id not in SESSIONS:
-        raise HTTPException(status_code=404, detail="Session not found")
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED] Superseded by /api/analyze-full
+# # ----------------------------------------------------------------------------
+# @app.post("/api/analyze")
+# def analyze_data(session_id: str, report_type: Optional[str] = "A"):
+#     """
+#     [MOCK, UNUSED]
+#     Trigger analysis for a session and report type.
+
+#     Args:
+#         session_id: Session ID from upload
+#         report_type: 'A', 'B', or 'C'
+
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "report_type": "A",
+#             "status": "complete",
+#             "analysis": {...},
+#             "charts": [...]
+#         }
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+
+#     # Mock analysis result
+#     mock_analysis = {
+#         "summary": f"Analysis of {len(SESSIONS[session_id]['files'])} file(s) using report type {report_type}",
+#         "key_insights": [
+#             "Data contains 3 key categories",
+#             "Outliers detected in 2 columns",
+#             "Strong correlation between variables X and Y"
+#         ],
+#         "data_quality": {
+#             "completeness": "95%",
+#             "duplicates": "2.1%",
+#             "anomalies": "0.5%"
+#         }
+#     }
+
+#     mock_charts = [
+#         {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
+#         {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
+#         {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
+#     ]
+
+#     SESSIONS[session_id]["status"] = "complete"
+#     SESSIONS[session_id]["analysis"] = mock_analysis
+
+#     return {
+#         "session_id": session_id,
+#         "report_type": report_type,
+#         "status": "complete",
+#         "analysis": mock_analysis,
+#         "charts": mock_charts
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL + MOCK FALLBACK, UNUSED] Real session lookup, hardcoded fake charts
+# # ----------------------------------------------------------------------------
+# @app.get("/api/results/{session_id}")
+# def get_results(session_id: str):
+#     """
+#     [REAL + MOCK FALLBACK, UNUSED]
+#     Fetch analysis results for a session.
+
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "status": "complete",
+#             "analysis": {...},
+#             "charts": [...]
+#         }
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
     
-    del SESSIONS[session_id]
-    return {"message": f"Session {session_id} deleted"}
+#     session = SESSIONS[session_id]
+    
+#     return {
+#         "session_id": session_id,
+#         "status": session["status"],
+#         "analysis": session["analysis"],
+#         "charts": [] if session["analysis"] is None else [
+#             {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
+#             {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
+#             {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
+#         ]
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.get("/api/export/{session_id}")
+# def export_report(session_id: str, format: str = "json"):
+#     """
+#     [MOCK, UNUSED]
+#     Export analysis as PDF, HTML, or JSON.
+
+#     Args:
+#         session_id: Session ID
+#         format: 'json', 'html', or 'pdf'
+
+#     Returns mock file data
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+    
+#     # Mock response
+#     return {
+#         "session_id": session_id,
+#         "format": format,
+#         "status": "ready",
+#         "download_url": f"/downloads/{session_id}/report.{format}",
+#         "message": f"Report exported as {format.upper()}"
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.get("/api/sessions")
+# def list_sessions():
+#     """
+#     [REAL, UNUSED]
+#     List all stored sessions.
+#     Useful for Reports page.
+#     """
+#     sessions_list = [
+#         {
+#             "session_id": sid,
+#             "created_at": sess.get("created_at"),
+#             "file_count": len(sess.get("files", [])),
+#             "status": sess.get("status"),
+#             "total_rows": sum(f.get("rows", 0) for f in sess.get("files", []))
+#         }
+#         for sid, sess in SESSIONS.items()
+#     ]
+#     return {"sessions": sessions_list, "total_count": len(sessions_list)}
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.delete("/api/sessions/{session_id}")
+# def delete_session(session_id: str):
+#     """[REAL, UNUSED] Delete a session."""
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+
+#     del SESSIONS[session_id]
+#     return {"message": f"Session {session_id} deleted"}
 
 
 # ============================================================================
