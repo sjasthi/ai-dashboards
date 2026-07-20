@@ -85,6 +85,7 @@ def get_validated_recommendations(
     valid_filenames: Set[str],
     session_id: str = None,
     max_retries: int = 2,
+    tables: dict = None,
 ) -> dict:
     """
     Like send_prompt, but validates the response against RecommendationsResponse
@@ -108,7 +109,7 @@ def get_validated_recommendations(
     for attempt in range(max_retries + 1):
         raw_response = send_prompt(attempt_prompt, session_id=session_id)
         try:
-            parsed = parse_and_validate(raw_response, valid_filenames)
+            parsed = parse_and_validate(raw_response, valid_filenames, tables)
             return parsed.model_dump(exclude_none=True)
         except ValueError as e:
             last_error = e

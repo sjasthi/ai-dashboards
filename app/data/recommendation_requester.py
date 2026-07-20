@@ -77,13 +77,32 @@ There is NO limit on how many "join" steps a single recommendation's required_op
 may contain - chain as many as the detected relationships actually support (e.g. file1
 into file2 into file3 into file4). The two-join example in the JSON structure below is
 only illustrating the join syntax, not capping how many joins you may use.
+
+This list is a floor, not a ceiling. Detection only recognizes columns NAMED like keys
+("id", or ending in "_id"/"_key"/"_num"), so it misses natural keys - e.g. a "product"
+column joining to a product list, or an "account" column joining to an account list. If
+you can see such a pair in the profiles/sample_rows above, use it as a join too. Every
+join you propose is checked against the actual column values before your answer is
+accepted, so propose only pairs whose values genuinely line up.
 """
             else:
                 relationships_block = f"""
-You were given {len(file_profiles)} files but no reliable shared key was detected between
-them (no matching column names with overlapping values). Do not invent a join - treat
-these as independent datasets unless you can point to a real shared column in the
-profiles above.
+You were given {len(file_profiles)} files but the automatic key detection found no
+relationship between them. That detection only recognizes columns NAMED like keys
+("id", or ending in "_id"/"_key"/"_num"), so it misses natural keys - a "product"
+column joining to a product list, an "account" column joining to an account list, an
+"email" or "sku" shared across files. Those are real joins and you should use them.
+
+Read the profiles, sample_rows and top_values above and decide for yourself whether
+any two files can be joined. If you find a pair of columns that plainly refer to the
+same real-world entity AND whose sample values visibly overlap, treat it as a join and
+use it - you are analyzing {len(file_profiles)} files together, not {len(file_profiles)}
+separate datasets. State the evidence in that recommendation's justification.
+
+Be honest rather than eager: propose a join only where the values really do line up.
+Every join you propose is checked against the actual column values before your answer
+is accepted, and a pair that does not genuinely share values will be rejected and sent
+back to you. If two files truly share nothing, say so and recommend single-file reports.
 """
         else:
             relationships_block = ""
