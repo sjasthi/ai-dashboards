@@ -36,8 +36,31 @@ class RecommendationRequester:
     }
 
     def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
-        """Build LLM prompt with explicit JSON schema instructions."""
+        """Build the full LLM prompt: data + analysis guidance + output contract."""
+        return (
+            f"{self._data_section(file_profiles, relationships)}\n"
+            f"{self._guidance_section()}\n"
+            f"{self._output_contract()}"
+        )
 
+    def build_correction_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
+        """Prompt for a validation retry: the data and the output contract, WITHOUT the
+        analysis guidance.
+
+        By the time a response fails validation the model has already chosen its reports;
+        what it needs to fix a schema/column/join error is the data and the output rules,
+        not the role-and-pattern guidance that shaped the original choice. Retries
+        otherwise resend the entire prompt, so a single failure nearly doubles the tokens
+        spent on an analysis.
+        """
+        return (
+            f"{self._data_section(file_profiles, relationships)}\n"
+            f"{self._output_contract()}"
+        )
+
+    def _data_section(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
+        """The per-dataset half of the prompt: profiles, detected relationships, and how
+        to read them."""
         # Serialize summaries to JSON. Compact (no indent) rather than
         # pretty-printed - the LLM parses it identically either way, but
         # compact JSON is meaningfully fewer tokens (whitespace/newlines are
@@ -46,10 +69,6 @@ class RecommendationRequester:
             [self._profile_to_dict(p) for p in file_profiles],
             separators=(",", ":"),
             default=str
-        )
-
-        patterns_block = "\n".join(
-            f"- {name}: {desc}" for name, desc in self.REPORT_PATTERNS.items()
         )
 
         relationships = relationships or []
@@ -77,77 +96,101 @@ There is NO limit on how many "join" steps a single recommendation's required_op
 may contain - chain as many as the detected relationships actually support (e.g. file1
 into file2 into file3 into file4). The two-join example in the JSON structure below is
 only illustrating the join syntax, not capping how many joins you may use.
+
+This list is a floor, not a ceiling. Detection only recognizes columns NAMED like keys
+("id", or ending in "_id"/"_key"/"_num"), so it misses natural keys - e.g. a "product"
+column joining to a product list, or an "account" column joining to an account list. If
+you can see such a pair in the profiles/sample_rows above, use it as a join too. Every
+join you propose is checked against the actual column values before your answer is
+accepted, so propose only pairs whose values genuinely line up.
 """
             else:
                 relationships_block = f"""
-You were given {len(file_profiles)} files but no reliable shared key was detected between
-them (no matching column names with overlapping values). Do not invent a join - treat
-these as independent datasets unless you can point to a real shared column in the
-profiles above.
+You were given {len(file_profiles)} files but the automatic key detection found no
+relationship between them. That detection only recognizes columns NAMED like keys
+("id", or ending in "_id"/"_key"/"_num"), so it misses natural keys - a "product"
+column joining to a product list, an "account" column joining to an account list, an
+"email" or "sku" shared across files. Those are real joins and you should use them.
+
+Read the profiles, sample_rows and top_values above and decide for yourself whether
+any two files can be joined. If you find a pair of columns that plainly refer to the
+same real-world entity AND whose sample values visibly overlap, treat it as a join and
+use it - you are analyzing {len(file_profiles)} files together, not {len(file_profiles)}
+separate datasets. State the evidence in that recommendation's justification.
+
+Be honest rather than eager: propose a join only where the values really do line up.
+Every join you propose is checked against the actual column values before your answer
+is accepted, and a pair that does not genuinely share values will be rejected and sent
+back to you. If two files truly share nothing, say so and recommend single-file reports.
 """
         else:
             relationships_block = ""
 
-        prompt = f"""You are a data analyst expert. I have the following CSV/Excel files and their profiles:
+        return f"""You are a data analyst expert. I have the following CSV/Excel files and their profiles:
 
 {summaries_json}
 {relationships_block}
-Each file profile includes "sample_rows" (a small representative spread of real
-rows) and, on categorical columns, "top_values" (the most common values and their
-counts). Use these to understand what the data actually MEANS - the real entities,
-units, and categories behind the column names - when writing the narrative and
-choosing reports. But when filling "justification.profile_evidence", still cite the
-aggregate profile stats (unique_values / null_percent / dtype), never a sample value.
+READING THE PROFILES: both sample fields are positional, to save space.
+- "sample_rows": each entry is one real row, given as an array of values in the SAME
+  ORDER as that file's "columns" array. The Nth value belongs to the Nth column.
+- "top_values" (categorical columns only): each entry is [value, count].
+- Stats that don't apply to a column (e.g. "mean" on text) are omitted, not null.
+Use these to understand what the data actually MEANS - the real entities, units and
+categories behind the column names. But when filling "justification.profile_evidence",
+cite aggregate stats (unique_values / null_percent / dtype), never a sample value.
+"""
 
-Your task: (1) write a short "dataset_overview" narrative telling the story of what
-this data represents, and (2) recommend meaningful, EXECUTABLE reports built
-specifically from the data above.
+    def _guidance_section(self) -> str:
+        """How to choose reports. Dropped on retries - see build_correction_prompt."""
+        patterns_block = "\n".join(
+            f"- {name}: {desc}" for name, desc in self.REPORT_PATTERNS.items()
+        )
 
-DATASET OVERVIEW - Before the recommendations, write a "dataset_overview": 1-2 short
-paragraphs, in plain English, describing what this dataset represents as a whole -
-the key entities each file captures, how the files relate to each other (reference
-the DETECTED CROSS-FILE RELATIONSHIPS when present), and the most notable patterns or
-characteristics you can see. Ground every statement in the profiles/sample_rows/
-top_values above - do NOT invent facts, sources, or figures that aren't supported by
-the data provided.
+        return f"""Your task: (1) a short "dataset_overview" narrative, and (2) meaningful, EXECUTABLE
+report recommendations built specifically from the data above.
 
-STEP 1 - Each column's "role" field above was already computed deterministically from
-the actual data (not guessed from its name) - treat it as ground truth and do not
-re-derive or second-guess it. Apply these role-based rules directly:
-- role == "primary_key" -> identifier-like; never use as a groupby column
-- role == "categorical" -> good for a groupby/composition axis
-- role == "measure" -> numeric measure; good for distribution/comparison, generally not a groupby column
-- role == "temporal" -> good for a trend x-axis
-Independently of role, still watch for two things the role field doesn't capture:
-- null_percent > 40% -> low-quality column; avoid as a primary axis unless you filter it first
-- non-numeric placeholder tokens (e.g. "-", "N/A", "?") in an otherwise numeric/measure column also count as missing data - add a filter/clean operation before aggregating that column
+DATASET OVERVIEW - 1-2 short plain-English paragraphs: what this dataset represents as
+a whole, the key entities each file captures, how the files relate to each other
+(reference the DETECTED CROSS-FILE RELATIONSHIPS when present), and the most notable
+patterns. Ground every statement in the data above - do NOT invent facts, sources or
+figures it doesn't support.
 
-STEP 2 - Only recommend a report pattern whose data requirements are actually met by
-this file's profile. Choose from this fixed set of patterns (do not invent others):
+STEP 1 - Each column's "role" was computed deterministically from the actual data, not
+guessed from its name. Treat it as ground truth; do not second-guess it:
+- "primary_key" -> identifier-like; never a groupby column
+- "categorical" -> good groupby/composition axis
+- "measure" -> numeric; good for distribution/comparison, generally not a groupby column
+- "temporal" -> good trend x-axis
+Role doesn't capture everything, so also watch for:
+- null_percent > 40% -> avoid as a primary axis unless you filter it first
+- placeholder tokens ("-", "N/A", "?") in an otherwise numeric column are missing data
+  -> filter them before aggregating that column
+
+STEP 2 - Only recommend a pattern whose data requirements this profile actually meets.
+Choose from this fixed set (do not invent others):
 {patterns_block}
 
-STEP 3 - If a categorical breakdown would be useful but no low-cardinality column
-exists, define a "derive" operation to create one (e.g. regex_extract a family/prefix
-out of a high-cardinality text column, or bin a numeric column into ranges) instead of
-grouping directly on a near-unique column.
+STEP 3 - If a categorical breakdown would help but no low-cardinality column exists,
+"derive" one (regex_extract a family/prefix from high-cardinality text, or bin a numeric
+column) rather than grouping on a near-unique column.
 
-STEP 4 - Express each recommendation as an ordered operation pipeline
-(filter -> derive -> groupby -> sort_limit -> join, using only the steps that apply),
-and declare the expected_output_schema that pipeline produces, so the columns you
-reference in plotly_config actually exist in the result. A DISTRIBUTION report with
-chart_type "histogram" plots ONE continuous column's raw values directly (the
-histogram bins them itself) - it needs only a "filter" step (e.g. not_null on that
-column), never a "groupby" or "sort_limit" step, and its plotly_config must OMIT
-"y_axis" entirely (do not set it to null or any column name) since Plotly computes
-the y values itself. Only include an operation step at
-all if it does real work; never include a "groupby" (or any other step) with empty/
-placeholder fields like "groupby_columns": [] just to have every step type present.
+STEP 4 - Express each recommendation as an ordered pipeline (filter -> derive -> groupby
+-> sort_limit -> join, using only the steps that apply), and declare the
+expected_output_schema it produces so every column named in plotly_config exists in the
+result. Include a step only if it does real work - never one with empty placeholder
+fields like "groupby_columns": []. Special case: a DISTRIBUTION report with chart_type
+"histogram" plots one continuous column's raw values (it bins them itself), so it needs
+only a "filter" (e.g. not_null), never "groupby" or "sort_limit", and its plotly_config
+must OMIT "y_axis" entirely - not null, not a column name.
 
-STEP 5 - If the data is too sparse, too dirty, or too uniform to support a good report,
-it is fine to return fewer than 3 recommendations, and to add a data_quality_warning
-explaining the caveat, rather than forcing a low-quality suggestion.
+STEP 5 - If the data is too sparse, dirty or uniform for a good report, return fewer
+than 3 recommendations and add a data_quality_warning, rather than forcing a weak one.
+"""
 
-IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with this exact structure:
+    def _output_contract(self) -> str:
+        """The required JSON shape and the rules a response must satisfy to validate.
+        Always sent, including on retries."""
+        return f"""IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with this exact structure:
 
 {{
   "dataset_overview": "1-2 short paragraphs telling the story of what this data represents (see DATASET OVERVIEW above).",
@@ -254,27 +297,29 @@ IMPORTANT: You MUST return a valid JSON object (not markdown, not prose) with th
 }}
 
 Rules:
-1. Only include operation_type values that apply - filter/derive/groupby/sort_limit/join are ALL optional per recommendation; omit any step (including groupby and sort_limit) entirely when it doesn't apply, rather than including it with empty/placeholder fields. When you DO include a groupby step, it must have real groupby_columns and aggregations (never skip that validity check).
-1b. A "derive" step's "method" is one of "regex_extract", "bin", or "quantile" - never invent another method name. "bin"'s "bins" field must be NUMBERS only (the numeric boundary edges, e.g. [18, 30, 40, 100]) - never range strings like "18-30" and never date strings; put display strings in "bin_labels" instead (one fewer label than bins). Only bin a numeric (role == "measure") column this way - never bin a role == "temporal" column directly, since its bin edges would have to be date strings. To bucket a date/temporal column into ranges (e.g. "signups by year"), derive a period label first (e.g. regex_extract the year out of a formatted date string) and group by that instead of using "bin" on the raw date. "quantile" splits by cut POINTS between 0 and 1 in a "quantiles" field (e.g. [0.25, 0.5, 0.75] for quartiles), also paired with "bin_labels" (one more label than quantiles). In any LATER step, reference the derived column by its own "new_name" value (e.g. "age_group") - never by the literal field name "derive_column".
-2. Never group by a column classified as identifier/primary-key-like in Step 1.
-2b. A groupby's aggregated output columns are always renamed to "{{column}}_{{function}}" (e.g. aggregations {{"Calories": "mean"}} produces a column literally named "Calories_mean"). Always use that exact renamed form - never the bare column name - in sort_by, plotly_config axes, and expected_output_schema.
-2e. "x_axis_label"/"y_axis_label" in plotly_config are OPTIONAL plain-English overrides of the axis title shown to end users (the raw "x_axis"/"y_axis" column name is still used to pull the data - never change those). Omit either key entirely when the raw column name is already clear. When you do include one, it must describe the column as actually computed - never imply an aggregation (e.g. "rate", "average", "%", "total") for a column that is NOT the output of a groupby aggregation (i.e. does not carry an "_mean"/"_sum"/"_count"/etc. suffix per rule 2b). E.g. a raw pass-through column like "churn_signal" must not be labeled "Churn Rate" - only a column like "churn_signal_mean" may be.
-2c. A "groupby" operation's "groupby_columns" must NEVER be empty. If you want a count of records per value of some column (e.g. "how many sets per year"), that column goes in BOTH "groupby_columns" AND "aggregations" (e.g. "groupby_columns": ["year"], "aggregations": {{"year": "count"}}) - never leave "groupby_columns" empty and only reference the column in "aggregations".
-2d. If two joined files both have a column with the same name (e.g. both have "name"), any later step (groupby/filter/derive/sort_limit) that uses that column MUST list the SPECIFIC file it means in that step's own "files_involved" - not just repeat whichever file list the join used. E.g. if you joined sets.csv with themes.csv and want to group by the theme's "name" (not the set's "name"), that groupby step's "files_involved" must be ["themes.csv"], even though the join step's "files_involved" was ["sets.csv", "themes.csv"].
-2f. Before writing a "groupby"/"filter"/"sort_limit" step, check the actual "columns" list in the profile(s) above for every file you joined and confirm the column you're referencing (in "aggregations", "groupby_columns", or "filter_conditions") is really one of them - never assume a column exists on a file just because it sounds plausible (e.g. do not assume a "quantity" column exists on a file that has no such entry in its profiled "columns"). If the column you need lives on a DIFFERENT file than the one(s) your join already covers, add a join step to that specific file (per the DETECTED CROSS-FILE RELATIONSHIPS above) instead of aggregating a column that isn't actually present. When multiple files share the same join key (e.g. both an "inventories" and an "inventory_sets" file joinable on "set_num"), pick the one whose profile actually contains the column your aggregation needs.
+1. All step types (filter/derive/groupby/sort_limit/join) are optional - omit any that doesn't apply rather than including it with empty/placeholder fields. A groupby you do include must have real groupby_columns AND aggregations.
+1b. A derive "method" is one of "regex_extract", "bin", "quantile" - never invent another.
+   - "bin": "bins" must be NUMBERS (boundary edges, e.g. [18,30,40,100]) - never range strings like "18-30", never dates. Display strings go in "bin_labels" (one FEWER than bins). Only bin a role=="measure" column; never bin a "temporal" one, whose edges would have to be dates - instead derive a period label first (e.g. regex_extract the year out of a formatted date) and group by that.
+   - "quantile": cut POINTS between 0 and 1 in "quantiles" (e.g. [0.25,0.5,0.75] for quartiles), with "bin_labels" (one MORE than quantiles).
+   Later steps reference a derived column by its "new_name" (e.g. "age_group"), never by the literal field name "derive_column".
+2. Never group by an identifier/primary-key-like column (see Step 1).
+2b. Groupby renames aggregated outputs to "{{column}}_{{function}}" (aggregations {{"Calories":"mean"}} produces a column literally named "Calories_mean"). Use that exact renamed form - never the bare column name - in sort_by, plotly_config axes and expected_output_schema.
+2c. "groupby_columns" must NEVER be empty. For a count of records per value of a column, put that column in BOTH groupby_columns AND aggregations (e.g. "groupby_columns": ["year"], "aggregations": {{"year":"count"}}).
+2d. If two joined files share a column name (e.g. both have "name"), any later step (groupby/filter/derive/sort_limit) using it must name the SPECIFIC file in that step's own "files_involved" - not reuse the join's file list. E.g. to group by the theme's "name" rather than the set's, that step's files_involved is ["themes.csv"], even though the join's was ["sets.csv","themes.csv"].
+2e. "x_axis_label"/"y_axis_label" are OPTIONAL plain-English overrides of the displayed axis title; the raw "x_axis"/"y_axis" column names still pull the data, so never change those. Omit either when the raw name is already clear. A label must describe the column as actually computed - never imply an aggregation ("rate", "average", "%", "total") for a column that is not a groupby output (i.e. lacks an "_mean"/"_sum"/"_count"/etc. suffix per 2b). A pass-through column like "churn_signal" must not be labeled "Churn Rate"; only "churn_signal_mean" may be.
+2f. Before any groupby/filter/sort_limit, confirm every column you reference (in aggregations, groupby_columns or filter_conditions) actually appears in the profiled "columns" of a file you have joined - never assume one exists because it sounds plausible. If the column lives on a DIFFERENT file, add a join to that file (per DETECTED CROSS-FILE RELATIONSHIPS) instead of aggregating a column that isn't there. When several files share the same join key (e.g. both "inventories" and "inventory_sets" join on "set_num"), pick the one whose profile actually contains the column you need.
 3. Bar/pie charts must resolve to at most ~15-20 categories after sort_limit; use limit to enforce this.
-4. Cite real values from the profile (unique_values, null_percent, dtype) in "justification" - do not fabricate stats.
+4. Cite real profile values (unique_values, null_percent, dtype) in "justification" - never fabricate stats.
 5. Rank recommendations by relevance/insight value.
-6. Write exactly 3 rationale_bullets per recommendation - short, plain-English, no jargon.
-7. Return between 1 and 4 recommendations; only include as many as the data genuinely supports.
-8. If DETECTED CROSS-FILE RELATIONSHIPS were provided above, at least one recommendation must use them via a "join" operation - do not restrict every recommendation to a single file when the data supports connecting them.
-9. A "join" operation's shared column(s) MUST go in a "join_keys" array field - never "join_column" or any other field name. "join_type" is optional and defaults to "inner". Each entry in "join_keys" is either:
-   - a plain string when both files use the exact same column name, e.g. "join_keys": ["customer_id"]
-   - a {{"left": ..., "right": ...}} object when the column names differ between the two files (per column_a/column_b in DETECTED CROSS-FILE RELATIONSHIPS above), e.g. "join_keys": [{{"left": "theme_id", "right": "id"}}] where "left" is the column in the first file listed in "files_involved" and "right" is the column in the second.
+6. Exactly 3 rationale_bullets per recommendation - short, plain English, no jargon.
+7. Return between 1 and 4 recommendations; only as many as the data genuinely supports.
+8. If DETECTED CROSS-FILE RELATIONSHIPS were provided, at least one recommendation must use them via a "join" - do not confine every recommendation to a single file when the data supports connecting them.
+9. Join columns MUST go in a "join_keys" array - never "join_column" or any other field name. "join_type" is optional (defaults to "inner"). Each entry is either:
+   - a plain string when both files use the same column name, e.g. ["customer_id"]
+   - a {{"left":...,"right":...}} object when the names differ (per column_a/column_b above), e.g. [{{"left":"theme_id","right":"id"}}], where "left" is the column in the FIRST file of "files_involved" and "right" the second.
 
 CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. Do NOT include ```json or ```. Start your response with {{ and end with }}.
 """
-        return prompt
 
     def _profile_to_dict(self, profile: FileProfile) -> dict:
         """Convert FileProfile dataclass to dict for JSON serialization."""
@@ -289,11 +334,15 @@ CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. 
                 "max": _round_if_numeric(col.max_value),
                 "mean": _round_if_numeric(col.mean_value)
             }
-            # Only categorical columns carry top_values (see summary_builder);
-            # omit the key entirely elsewhere rather than emitting null tokens.
+            # min/max/mean are None on non-numeric columns - omit those keys rather
+            # than spending tokens on "min":null,"max":null,"mean":null for every
+            # text column. Only categorical columns carry top_values at all.
+            d = {key: value for key, value in d.items() if value is not None}
             if col.top_values:
-                d["top_values"] = col.top_values
+                d["top_values"] = [[t["value"], t["count"]] for t in col.top_values]
             return d
+
+        column_order = [col.name for col in profile.columns]
 
         return {
             "filename": profile.filename,
@@ -301,6 +350,9 @@ CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. 
             "columns": [_column_dict(col) for col in profile.columns],
             "quality_flags": profile.quality_flags,
             # Real rows so the LLM can read actual value combinations, not just
-            # aggregate stats. A small representative spread (see summary_builder).
-            "sample_rows": profile.sample_rows
+            # aggregate stats. Positional (aligned to "columns") instead of repeating
+            # every column name on every row - see the reading note in the prompt.
+            "sample_rows": [
+                [row.get(name) for name in column_order] for row in profile.sample_rows
+            ]
         }

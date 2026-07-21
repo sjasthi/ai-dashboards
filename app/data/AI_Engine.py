@@ -6,6 +6,8 @@ from json_repair import loads as json_repair_loads
 import json
 from dotenv import load_dotenv
 from groq import Groq
+from google import genai
+from google.genai import types as genai_types
 from .session_manager import SessionManager
 from .response_validator import parse_and_validate
 
@@ -30,6 +32,12 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 # smaller/lighter model here has its own untouched quota to fall back on when
 # GROQ_MODEL gets rate-limited, before giving up to local Ollama.
 GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
+# Gemini sits between Groq and Ollama: its free-tier quota is a separate account
+# entirely, so it survives a Groq daily limit that both Groq models share an
+# account with. Chosen over other free tiers because our prompts run 8k-30k
+# input tokens, which Cerebras' free 8k context window can't hold at all.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 # ============================================================================
 
@@ -49,20 +57,19 @@ def send_prompt(prompt, session_id=None):
     """
     raw_response = None
 
-    if AI_BACKEND == "groq" and GROQ_API_KEY:
+    if AI_BACKEND == "groq" and not GROQ_API_KEY:
+        print("[AI_Engine] AI_BACKEND=groq but GROQ_API_KEY is not set, skipping Groq")
+
+    for label, send in _remote_providers():
         try:
-            raw_response = _send_prompt_groq(prompt, GROQ_MODEL)
+            raw_response = send(prompt)
+            break
         except Exception as e:
-            print(f"[AI_Engine] Groq request failed with model '{GROQ_MODEL}' ({e}), "
-                  f"trying fallback model '{GROQ_FALLBACK_MODEL}'")
-            try:
-                raw_response = _send_prompt_groq(prompt, GROQ_FALLBACK_MODEL)
-            except Exception as e2:
-                print(f"[AI_Engine] Groq fallback model also failed ({e2}), falling back to local Ollama")
-    elif AI_BACKEND == "groq" and not GROQ_API_KEY:
-        print("[AI_Engine] AI_BACKEND=groq but GROQ_API_KEY is not set, falling back to local Ollama")
+            print(f"[AI_Engine] {label} request failed ({e})")
 
     if raw_response is None:
+        # Local Ollama is the last resort rather than one of the tiers above: it
+        # has no quota to exhaust, so it can't fail the way the hosted ones do.
         raw_response = _send_prompt_ollama(prompt)
 
     print(f"[AI_Engine] Received response from LLM")
@@ -85,6 +92,8 @@ def get_validated_recommendations(
     valid_filenames: Set[str],
     session_id: str = None,
     max_retries: int = 2,
+    tables: dict = None,
+    correction_prompt: str = None,
 ) -> dict:
     """
     Like send_prompt, but validates the response against RecommendationsResponse
@@ -108,18 +117,52 @@ def get_validated_recommendations(
     for attempt in range(max_retries + 1):
         raw_response = send_prompt(attempt_prompt, session_id=session_id)
         try:
-            parsed = parse_and_validate(raw_response, valid_filenames)
+            parsed = parse_and_validate(raw_response, valid_filenames, tables)
             return parsed.model_dump(exclude_none=True)
         except ValueError as e:
             last_error = e
             print(f"[AI_Engine] Response failed validation (attempt {attempt + 1}/{max_retries + 1}): {e}")
+            # Retries reuse the shorter correction prompt when the caller supplied one
+            # (data + output contract, minus the analysis guidance) - resending the full
+            # prompt every attempt is what makes one failed validation cost double.
             attempt_prompt = (
-                f"{prompt}\n\n"
+                f"{correction_prompt or prompt}\n\n"
                 f"Your previous response failed validation with this error:\n{e}\n\n"
                 f"Return ONLY corrected raw JSON matching the required structure."
             )
 
     raise last_error
+
+
+def _remote_providers():
+    """The hosted backends to try, in order, before falling back to local Ollama.
+
+    Each entry is (label, callable taking the prompt and returning raw text). A tier
+    is only included when it's actually usable, so a missing key is a skipped tier
+    rather than a guaranteed exception on every request.
+
+    Order is cheapest-recovery-first: the second Groq model shares an account with
+    the first (so it only helps against a PER-MODEL daily limit), while Gemini is a
+    separate account whose quota survives Groq being exhausted account-wide.
+    """
+    providers = []
+
+    if AI_BACKEND == "groq" and GROQ_API_KEY:
+        providers.append(
+            (f"Groq model '{GROQ_MODEL}'", lambda p: _send_prompt_groq(p, GROQ_MODEL))
+        )
+        if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
+            providers.append((
+                f"Groq fallback model '{GROQ_FALLBACK_MODEL}'",
+                lambda p: _send_prompt_groq(p, GROQ_FALLBACK_MODEL),
+            ))
+
+    if GEMINI_API_KEY:
+        providers.append(
+            (f"Gemini model '{GEMINI_MODEL}'", lambda p: _send_prompt_gemini(p, GEMINI_MODEL))
+        )
+
+    return providers
 
 
 def _send_prompt_ollama(prompt: str) -> str:
@@ -148,6 +191,27 @@ def _send_prompt_groq(prompt: str, model: str) -> str:
         ],
     )
     return response.choices[0].message.content
+
+
+def _send_prompt_gemini(prompt: str, model: str) -> str:
+    """Gemini equivalent of _send_prompt_groq.
+
+    response_mime_type is the JSON-mode switch, same role as Groq's
+    response_format={"type": "json_object"}. Gemini also accepts a response_schema
+    that would enforce our shape server-side, but RecommendationsResponse can't be
+    expressed in the subset it supports - `aggregations` is an open-ended dict and
+    `join_keys` is a Union - so validation stays in response_validator, where those
+    are already handled.
+    """
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
+    )
+    return response.text
 
 
 def _extract_and_clean_json(text: str) -> dict:

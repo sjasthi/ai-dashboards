@@ -26,7 +26,8 @@ def generate_report(
     recommendations: Dict[str, Any],
     report_type: str = "A",
     file_paths: Optional[Dict[str, str]] = None,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    tables: Optional[Dict[str, pd.DataFrame]] = None
 ) -> pd.DataFrame:
     """
     Generate a structured report by executing ONE AI-recommended operation
@@ -38,6 +39,9 @@ def generate_report(
             'B' -> recommendations[1], 'C' -> recommendations[2], etc.), matching
             the frontend's option cards
         file_paths: Dict mapping filename -> full filepath (e.g., {"starbucks.csv": "/path/to/file"})
+        tables: Dict mapping table name -> already-loaded DataFrame (from
+            DataLoader.tables()). Preferred over file_paths - uploaded files are
+            deleted after analysis, and worksheets have no file of their own.
         session_id: If given, debug output (exact operations run + resulting data)
             is written to session_data/<session_id>/report_debug_<report_type>.txt
 
@@ -53,19 +57,14 @@ def generate_report(
     recs = recommendations.get("recommendations", [])
 
     if not recs:
-        print("[ReportBuilder] WARNING: No recommendations found in response")
-        debug_lines.append("WARNING: No recommendations found in response")
-        _save_debug_output(session_id, report_type, debug_lines, pd.DataFrame())
-        return pd.DataFrame()
+        return _failed_report(session_id, report_type, debug_lines,
+                              "No recommendations found in response")
 
     rec_idx = report_type_to_index(report_type)
     if rec_idx is None or rec_idx >= len(recs):
-        msg = (f"report_type '{report_type}' does not map to any of the "
-               f"{len(recs)} available recommendation(s)")
-        print(f"[ReportBuilder] WARNING: {msg}")
-        debug_lines.append(f"WARNING: {msg}")
-        _save_debug_output(session_id, report_type, debug_lines, pd.DataFrame())
-        return pd.DataFrame()
+        return _failed_report(session_id, report_type, debug_lines,
+                              f"report_type '{report_type}' does not map to any of the "
+                              f"{len(recs)} available recommendation(s)")
 
     rec = recs[rec_idx]
     operations = rec.get("required_operations", [])
@@ -74,28 +73,24 @@ def generate_report(
     )
     debug_lines.append(f"Operations pipeline:\n{json.dumps(operations, indent=2, default=str)}")
 
-    final_df = pd.DataFrame()
-
     if not operations:
-        msg = f"Recommendation {rec_idx + 1} ({rec.get('report_name', 'Untitled')}): No operations specified"
+        return _failed_report(session_id, report_type, debug_lines,
+                              f"Recommendation {rec_idx + 1} "
+                              f"({rec.get('report_name', 'Untitled')}): no operations specified")
+
+    try:
+        final_df = _execute_pipeline(operations, file_paths, tables)
+        final_df.insert(0, "recommendation_rank", rec.get("rank", 0))
+        final_df.insert(1, "recommendation_name", rec.get("report_name", "Untitled"))
+
+        msg = (f"Executed pipeline for recommendation {rec_idx + 1} "
+               f"({len(operations)} operation(s))")
         print(f"[ReportBuilder] {msg}")
         debug_lines.append(msg)
-    else:
-        try:
-            final_df = _execute_pipeline(operations, file_paths)
-            final_df.insert(0, "recommendation_rank", rec.get("rank", 0))
-            final_df.insert(1, "recommendation_name", rec.get("report_name", "Untitled"))
 
-            msg = (f"Executed pipeline for recommendation {rec_idx + 1} "
-                   f"({len(operations)} operation(s))")
-            print(f"[ReportBuilder] {msg}")
-            debug_lines.append(msg)
-
-        except Exception as e:
-            msg = f"Error executing pipeline for recommendation {rec_idx + 1}: {e}"
-            print(f"[ReportBuilder] {msg}")
-            debug_lines.append(msg)
-            final_df = pd.DataFrame()
+    except Exception as e:
+        return _failed_report(session_id, report_type, debug_lines,
+                              f"Error executing pipeline for recommendation {rec_idx + 1}: {e}")
 
     # ==================== TEMPORARY OUTPUT ====================
     print(f"\n{'='*80}")
@@ -119,6 +114,24 @@ def report_type_to_index(report_type: str) -> Optional[int]:
     if len(letter) == 1 and "A" <= letter <= "Z":
         return ord(letter) - ord("A")
     return None
+
+
+def _failed_report(
+    session_id: Optional[str],
+    report_type: str,
+    debug_lines: List[str],
+    message: str
+) -> pd.DataFrame:
+    """Empty report carrying the reason it failed in .attrs["error"], so callers can
+    surface it instead of showing a silently blank report. Kept as a DataFrame
+    return so existing callers that just check .empty are unaffected."""
+    print(f"[ReportBuilder] WARNING: {message}")
+    debug_lines.append(f"WARNING: {message}")
+
+    empty = pd.DataFrame()
+    empty.attrs["error"] = message
+    _save_debug_output(session_id, report_type, debug_lines, empty)
+    return empty
 
 
 def _save_debug_output(
@@ -149,7 +162,8 @@ def _save_debug_output(
 
 def _execute_pipeline(
     operations: List[Dict[str, Any]],
-    file_paths: Optional[Dict[str, str]] = None
+    file_paths: Optional[Dict[str, str]] = None,
+    tables: Optional[Dict[str, pd.DataFrame]] = None
 ) -> pd.DataFrame:
     """
     Execute an ordered list of operations as a single pipeline, threading one
@@ -167,7 +181,7 @@ def _execute_pipeline(
         files_involved = operation.get("files_involved", [])
 
         if operation_type == "join":
-            df = _execute_join(operation, file_paths, loaded_files, df, merged_filenames)
+            df = _execute_join(operation, file_paths, loaded_files, df, merged_filenames, tables)
             continue
 
         # Lazily load the primary file the first time a step needs data.
@@ -175,10 +189,7 @@ def _execute_pipeline(
             if not files_involved:
                 raise ValueError("No files specified for operation")
             filename = files_involved[0]
-            filepath = _find_file_path(filename, file_paths)
-            if not filepath:
-                raise ValueError(f"File not found: {filename}")
-            df = _load_file(filepath)
+            df = _resolve_table(filename, file_paths, tables)
             loaded_files[filename] = df
             merged_filenames.add(filename)
 
@@ -303,9 +314,14 @@ def _apply_filter_condition(df: pd.DataFrame, column: str, condition: str) -> pd
         series = _normalize_nulls(df[column])
         return df[series.isna()]
 
-    match = re.match(r'^(>=|<=|==|!=|>|<)\s*(.+)$', condition)
+    # A bare "=" is accepted alongside "==" because the LLM often writes the
+    # SQL-style form (e.g. "='Won'"); without it the whole condition falls through
+    # to the literal fallback below and silently matches nothing.
+    match = re.match(r'^(>=|<=|==|!=|=|>|<)\s*(.+)$', condition)
     if match:
         op, raw_value = match.groups()
+        if op == "=":
+            op = "=="
         raw_value = raw_value.strip().strip('"\'')
 
         try:
@@ -328,8 +344,9 @@ def _apply_filter_condition(df: pd.DataFrame, column: str, condition: str) -> pd
         if op == "!=":
             return df[series != value]
 
-    # Fallback: treat the condition as a plain equality match
-    return df[df[column].astype(str) == condition]
+    # Fallback: treat the condition as a plain equality match (quotes stripped, so
+    # an operator-less "'Won'" still matches)
+    return df[df[column].astype(str) == condition.strip('"\'')]
 
 
 def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame:
@@ -454,7 +471,8 @@ def _execute_join(
     file_paths: Optional[Dict[str, str]],
     loaded_files: Dict[str, pd.DataFrame],
     current_df: Optional[pd.DataFrame],
-    merged_filenames: set
+    merged_filenames: set,
+    tables: Optional[Dict[str, pd.DataFrame]] = None
 ) -> pd.DataFrame:
     """Execute a join across two or more files (or the current pipeline result).
 
@@ -481,10 +499,7 @@ def _execute_join(
         if filename in loaded_files:
             new_dfs.append((filename, loaded_files[filename]))
         else:
-            filepath = _find_file_path(filename, file_paths)
-            if not filepath:
-                raise ValueError(f"File not found: {filename}")
-            loaded = _load_file(filepath)
+            loaded = _resolve_table(filename, file_paths, tables)
             loaded_files[filename] = loaded
             new_dfs.append((filename, loaded))
         merged_filenames.add(filename)
@@ -643,6 +658,24 @@ def _read_csv_with_encoding(filepath: str) -> pd.DataFrame:
     )
 
 
+def _prepare_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a DataFrame for report operations. Applied to both files read from
+    disk and in-memory session tables so the two paths behave identically. Copies
+    so cached session tables are never mutated."""
+    df = df.copy()
+
+    # Strip stray whitespace from column names (e.g. " Protein (g) ") so they
+    # match the (also-stripped) names shown to the LLM during profiling -
+    # otherwise a recommendation referencing "Protein (g)" silently fails to
+    # match the real column and that report/chart can't be built at all.
+    df.columns = df.columns.map(lambda c: c.strip() if isinstance(c, str) else c)
+
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = _normalize_nulls(df[col])
+
+    return _coerce_numeric_columns(df)
+
+
 def _load_file(filepath: str) -> pd.DataFrame:
     """Load a CSV or Excel file into a DataFrame, normalizing placeholder nulls."""
     if not os.path.exists(filepath):
@@ -653,16 +686,32 @@ def _load_file(filepath: str) -> pd.DataFrame:
     else:
         df = _read_csv_with_encoding(filepath)
 
-    # Strip stray whitespace from column names (e.g. " Protein (g) ") so they
-    # match the (also-stripped) names shown to the LLM during profiling -
-    # otherwise a recommendation referencing "Protein (g)" silently fails to
-    # match the real column and that report/chart can't be built at all.
-    df.columns = df.columns.str.strip()
+    return _prepare_df(df)
 
-    for col in df.select_dtypes(include=["object"]).columns:
-        df[col] = _normalize_nulls(df[col])
 
-    return _coerce_numeric_columns(df)
+def _resolve_table(
+    filename: str,
+    file_paths: Optional[Dict[str, str]] = None,
+    tables: Optional[Dict[str, pd.DataFrame]] = None
+) -> pd.DataFrame:
+    """Get the data for a table named in a recommendation's files_involved.
+
+    Prefers the session's in-memory tables (uploaded data, including individual
+    worksheets, which have no file of their own on disk), falling back to reading
+    a real file for non-upload flows like datasets/.
+    """
+    if tables and filename in tables:
+        return _prepare_df(tables[filename])
+
+    filepath = _find_file_path(filename, file_paths)
+    if filepath:
+        return _load_file(filepath)
+
+    available = sorted(tables) if tables else []
+    raise ValueError(
+        f"File not found: {filename}"
+        + (f" (available tables: {available})" if available else "")
+    )
 
 
 def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
