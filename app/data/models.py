@@ -76,4 +76,8 @@ class RecommendationsResponse(BaseModel):
     # response that omits it still validates (mirrors data_quality_warning);
     # model_dump(exclude_none=True) drops it from the output when absent.
     dataset_overview: Optional[str] = None
-    recommendations: List[ReportRecommendation] = Field(min_length=1, max_length=4)
+    # Exactly 3 report suggestions are expected on the Analysis page. Enforcing it
+    # here (rather than min_length=1) means a response with too few recommendations
+    # fails validation and is retried with correction feedback, instead of silently
+    # rendering only 1-2 cards - see recommendation_requester Rule 7 / Step 5.
+    recommendations: List[ReportRecommendation] = Field(min_length=3, max_length=3)
