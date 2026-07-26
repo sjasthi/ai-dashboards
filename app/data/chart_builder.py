@@ -272,12 +272,17 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
     is_pie = trace_type == "pie"
     fig.update_layout(
         title=title,
-        xaxis_title=None if is_pie else x_label,
-        yaxis_title=None if is_pie else y_label,
         colorway=COLORWAY,
         margin=dict(l=40, r=20, t=50, b=40),
         template=None,  # skip embedding Plotly's full default theme in every response
     )
+
+    # automargin lets Plotly grow the plot margins to fit tick labels + axis titles,
+    # and standoff pushes the title clear of the tick text so the two never overlap
+    # (e.g. the vertical "Line Total (total)" landing on top of the "300k/250k" ticks).
+    if not is_pie:
+        fig.update_xaxes(title=dict(text=x_label, standoff=12), automargin=True)
+        fig.update_yaxes(title=dict(text=y_label, standoff=12), automargin=True)
 
     # ---- Y-axis range ----
     # Bars keep their zero baseline (length encoding - the bar's own geometry must run
