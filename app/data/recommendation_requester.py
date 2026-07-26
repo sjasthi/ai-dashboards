@@ -183,8 +183,12 @@ fields like "groupby_columns": []. Special case: a DISTRIBUTION report with char
 only a "filter" (e.g. not_null), never "groupby" or "sort_limit", and its plotly_config
 must OMIT "y_axis" entirely - not null, not a column name.
 
-STEP 5 - If the data is too sparse, dirty or uniform for a good report, return fewer
-than 3 recommendations and add a data_quality_warning, rather than forcing a weak one.
+STEP 5 - Always return EXACTLY 3 recommendations, ranked 1-3 by insight value. If the
+data is too sparse, dirty or uniform to make the 3rd report as strong as the first two,
+still return it as the lowest-ranked recommendation and attach a data_quality_warning
+explaining the caveat - do NOT drop it or return fewer than 3. Write that warning in
+plain English for a non-technical business user (see the data_quality_warning rule
+below): describe the real-world impact, never the raw profile stat.
 """
 
     def _output_contract(self) -> str:
@@ -312,11 +316,12 @@ Rules:
 4. Cite real profile values (unique_values, null_percent, dtype) in "justification" - never fabricate stats.
 5. Rank recommendations by relevance/insight value.
 6. Exactly 3 rationale_bullets per recommendation - short, plain English, no jargon.
-7. Return between 1 and 4 recommendations; only as many as the data genuinely supports.
+7. Return EXACTLY 3 recommendations, ranked 1-3 by relevance/insight value - never fewer. If the data only strongly supports fewer, still produce a 3rd and mark it with a data_quality_warning (see Step 5).
 8. If DETECTED CROSS-FILE RELATIONSHIPS were provided, at least one recommendation must use them via a "join" - do not confine every recommendation to a single file when the data supports connecting them.
 9. Join columns MUST go in a "join_keys" array - never "join_column" or any other field name. "join_type" is optional (defaults to "inner"). Each entry is either:
    - a plain string when both files use the same column name, e.g. ["customer_id"]
    - a {{"left":...,"right":...}} object when the names differ (per column_a/column_b above), e.g. [{{"left":"theme_id","right":"id"}}], where "left" is the column in the FIRST file of "files_involved" and "right" the second.
+10. "data_quality_warning" (when present) is shown directly to a non-technical business user, so write it in plain English about the real-world impact - NEVER expose raw profile internals. Do NOT mention column names, file names, "null_percent", "dtype", or precise decimals. Translate the stat into an everyday phrase and round to a friendly figure: e.g. instead of 'the item_id column in order_details has a null_percent of 1.12', write 'About 1% of orders are missing an item, which may slightly affect the ranking.' ("about 1%", "roughly 1 in 100", "a small number of records").
 
 CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. Do NOT include ```json or ```. Start your response with {{ and end with }}.
 """
