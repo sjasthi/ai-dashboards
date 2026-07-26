@@ -200,8 +200,11 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
             print(f"[API] Building recommendation prompt...")
 
-            # Build recommendation prompt
+            # Build recommendation prompt. The static instruction block goes in the
+            # system message (a stable, cacheable prefix); only the per-dataset profiles
+            # go in the user message.
             requester = RecommendationRequester()
+            system_prompt = requester.build_system_prompt()
             prompt = requester.build_request_prompt(file_profiles, relationships)
 
             print(f"[API] Sending to AI Engine...")
@@ -211,15 +214,23 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             valid_filenames = {p.filename for p in file_profiles}
             recommendations = ai_engine.get_validated_recommendations(
                 prompt, valid_filenames, session_id=session_id, tables=session_tables,
-                correction_prompt=requester.build_correction_prompt(file_profiles, relationships)
+                correction_prompt=requester.build_correction_prompt(file_profiles, relationships),
+                system_prompt=system_prompt,
             )
 
             print(f"[API] Analysis complete!")
 
           except Exception as e:
-            # [MOCK FALLBACK] real pipeline failed — `fallback` values above stand
-            print(f"[API] Error during analysis: {type(e).__name__}: {e}")
-            print(f"[API] Returning mock data for {len(file_paths)} file(s)")
+            # Surface a real error instead of silently returning mock data dressed up
+            # as a real analysis - showing fabricated recommendations as if they were
+            # generated from the user's files is misleading. The console line gives the
+            # developer the underlying cause; the 502 gives the UI a message to render
+            # (Uploaddashboard already displays errBody.detail).
+            print(f"[API] Analysis failed: {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail="AI analysis failed — check the server console and try again.",
+            )
 
         # Store session info
         SESSIONS[session_id] = {

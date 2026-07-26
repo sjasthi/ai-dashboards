@@ -15,9 +15,15 @@ MIN_JOIN_OVERLAP = 0.05
 
 
 def _canonical_key(filename: str) -> str:
-    """Normalized filename for tolerant matching - case, and the difference between
-    spaces, underscores and hyphens, are ignored."""
-    return re.sub(r"[\s_-]+", " ", filename.strip().lower())
+    """Normalized filename for tolerant matching - case, parentheses, and the
+    difference between spaces, underscores and hyphens, are ignored.
+
+    Worksheet-derived names carry parentheses ("orders (workbook 02).xlsx") and the
+    LLM routinely drops one - typically the closing paren before the extension - so
+    strip them before comparing rather than failing an otherwise-unambiguous match.
+    """
+    cleaned = filename.strip().lower().replace("(", "").replace(")", "")
+    return re.sub(r"[\s_-]+", " ", cleaned).strip()
 
 
 def _canonicalize_filenames(
