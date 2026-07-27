@@ -1,6 +1,7 @@
 import json
 import math
 import re
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -38,13 +39,6 @@ _AGG_SUFFIXES = {
 _AGG_IMPLYING_WORDS = re.compile(
     r"\b(rate|percent|ratio|average|avg|mean|total)\b|%", re.IGNORECASE
 )
-
-# When a bar chart's values differ by less than this fraction of their magnitude and
-# sit entirely above zero, a zero-based bar makes the differences invisible. Per the
-# chart-design guide, the fix is NOT a truncated bar (a length encoding must start at
-# zero) but a dot plot - a position encoding, which legitimately supports a zoomed,
-# non-zero baseline. Below this ratio we switch bar -> dot.
-SMALL_DIFF_RATIO = 0.25
 
 # Hard caps enforced in code rather than trusting the LLM's "limit" (the prompt only
 # asks for these). Guide: pie <= 5 slices (else a sorted bar / top-N + "Other"); bars
@@ -113,19 +107,6 @@ def _padded_range(values: List[Any]) -> Optional[List[float]]:
     return [lo - pad, hi + pad]
 
 
-def _is_small_positive_spread(values: List[Any]) -> bool:
-    """True when the values sit entirely above zero and vary by less than
-    SMALL_DIFF_RATIO of their magnitude - the case where a zero-based bar hides the
-    real differences and a dot plot reads better (see SMALL_DIFF_RATIO)."""
-    nums = _numeric(values)
-    if len(nums) < 2:
-        return False
-    lo, hi = min(nums), max(nums)
-    if lo <= 0 or hi <= lo:
-        return False
-    return (hi - lo) / abs(hi) < SMALL_DIFF_RATIO
-
-
 def _fd_xbins(series: pd.Series) -> Optional[Dict[str, float]]:
     """Freedman-Diaconis bin spec (start/end/size) for a raw continuous column, or
     None when it can't be computed. Bin width = 2 * IQR * n^(-1/3) - a principled,
@@ -181,6 +162,30 @@ def _prepare_categorical(df: pd.DataFrame, x_axis: str, y_axis: str) -> Tuple[Li
     return labels, values
 
 
+def _ordered_xy(df: pd.DataFrame, x_axis: str, y_axis: str) -> Tuple[List[Any], List[Any]]:
+    """(x_values, y_values) for a line/scatter trace, sorted by x so a line connects
+    points left-to-right along the axis. Plotly draws a line in the array's order, not
+    x order, so unsorted rows produce a back-and-forth zig-zag. A string x that fully
+    parses as dates is sorted chronologically (not lexically, which would misorder e.g.
+    "MM/DD/YYYY"); a numeric or datetime x sorts natively; any other string falls back
+    to a lexical sort."""
+    work = df[[x_axis, y_axis]].dropna(subset=[y_axis])
+    x = work[x_axis]
+    if not (pd.api.types.is_numeric_dtype(x) or pd.api.types.is_datetime64_any_dtype(x)):
+        # Report dates arrive in varied formats, so let pandas parse each element rather
+        # than pin one format; the resulting "could not infer format" warning is expected.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            parsed = pd.to_datetime(x, errors="coerce")
+        if len(parsed) and parsed.notna().all():
+            work = work.assign(_sort=parsed).sort_values("_sort").drop(columns="_sort")
+        else:
+            work = work.sort_values(x_axis)
+    else:
+        work = work.sort_values(x_axis)
+    return work[x_axis].tolist(), work[y_axis].tolist()
+
+
 def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Build a Plotly figure (as a JSON-safe dict) from a report DataFrame and the
@@ -218,8 +223,6 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
     if y_required and not has_y:
         return None
 
-    render_as_dot = False  # a bar converted to a dot plot for small-difference data
-
     # ---- Build the trace ----
     if raw_histogram:
         values = pd.to_numeric(df[x_axis], errors="coerce").dropna()
@@ -240,19 +243,15 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
             labels, values = _cap_pie(labels, values)
             fig = go.Figure(go.Pie(labels=labels, values=values))
         else:
-            render_as_dot = _is_small_positive_spread(values)
-            if render_as_dot:
-                fig = go.Figure(go.Scatter(x=labels, y=values, mode="markers", marker=dict(size=11)))
-            else:
-                fig = go.Figure(go.Bar(x=labels, y=values))
+            fig = go.Figure(go.Bar(x=labels, y=values))
 
     else:
         # line / scatter plot real (often continuous) values, so x stays as-is (numeric
         # x must NOT be stringified or Plotly treats the axis as categorical). Plain
         # Python lists keep Plotly's JSON as ordinary arrays, which older Plotly.js
-        # builds decode reliably.
-        x_values = df[x_axis].tolist()
-        y_values = df[y_axis].tolist()
+        # builds decode reliably. Sort by x first so a line connects points along the
+        # axis instead of zig-zagging in whatever order the report rows arrived in.
+        x_values, y_values = _ordered_xy(df, x_axis, y_axis)
         if trace_type == "line":
             fig = go.Figure(go.Scatter(x=x_values, y=y_values, mode="lines+markers"))
         else:
@@ -286,13 +285,9 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
 
     # ---- Y-axis range ----
     # Bars keep their zero baseline (length encoding - the bar's own geometry must run
-    # from 0). Position-encoded charts (line/scatter, and a bar demoted to a dot) can
-    # zoom to the data so small differences stay legible.
-    if render_as_dot:
-        rng = _padded_range(values)
-        if rng:
-            fig.update_yaxes(range=rng)
-    elif trace_type in ("line", "scatter") and has_y:
+    # from 0). Position-encoded charts (line/scatter) can zoom to the data so small
+    # differences stay legible.
+    if trace_type in ("line", "scatter") and has_y:
         rng = _padded_range(df[y_axis].tolist())
         if rng:
             fig.update_yaxes(range=rng)
