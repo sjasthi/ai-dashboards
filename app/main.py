@@ -29,8 +29,10 @@ summary_gen = SummaryGenerator()
 file_profiles = summary_gen.profile_all_files(loader)
 relationships = summary_gen.detect_relationships(file_profiles, loader)
 
-# Build recommendation prompt for LLM
+# Build recommendation prompt for LLM. The static instruction block is sent as a
+# system message; only the per-dataset profiles go in the user prompt.
 requester = RecommendationRequester()
+system_prompt = requester.build_system_prompt()
 prompt = requester.build_request_prompt(file_profiles, relationships)
 
 print("\n" + "="*60)
@@ -38,7 +40,7 @@ print("SENDING PROMPT TO AI AGENT")
 print("="*60 + "\n")
 
 # Get response from LLM
-response = ai.send_prompt(prompt)
+response = ai.send_prompt(prompt, system_prompt=system_prompt)
 
 # Validate and parse response
 print("\n" + "="*60)

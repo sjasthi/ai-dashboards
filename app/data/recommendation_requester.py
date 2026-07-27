@@ -35,28 +35,33 @@ class RecommendationRequester:
         "OUTLIER": "flag rows far from the norm on a numeric measure (e.g. via IQR or z-score)."
     }
 
-    def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
-        """Build the full LLM prompt: data + analysis guidance + output contract."""
+    def build_system_prompt(self) -> str:
+        """The static instruction half of the prompt: analysis guidance + output
+        contract. It contains no per-dataset data, so it is byte-identical on every
+        request and can serve as a cacheable system prefix (see AI_Engine.send_prompt).
+        """
         return (
-            f"{self._data_section(file_profiles, relationships)}\n"
             f"{self._guidance_section()}\n"
             f"{self._output_contract()}"
         )
 
-    def build_correction_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
-        """Prompt for a validation retry: the data and the output contract, WITHOUT the
-        analysis guidance.
+    def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
+        """The per-dataset USER message: file profiles, detected relationships, and how
+        to read them. The static guidance + output contract are sent separately via
+        build_system_prompt() so they stay a stable prefix instead of being re-embedded
+        (and re-tokenized fresh) in front of the data every call."""
+        return self._data_section(file_profiles, relationships)
 
-        By the time a response fails validation the model has already chosen its reports;
-        what it needs to fix a schema/column/join error is the data and the output rules,
-        not the role-and-pattern guidance that shaped the original choice. Retries
-        otherwise resend the entire prompt, so a single failure nearly doubles the tokens
-        spent on an analysis.
+    def build_correction_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
+        """User message for a validation retry: just the data.
+
+        The output contract and analysis guidance both live in the system prompt now,
+        which is resent unchanged (and cached) on every attempt - so a retry only needs
+        to re-present the data before the appended validation error. This is the data-only
+        form; identical to build_request_prompt today, kept separate so the two can
+        diverge without touching callers.
         """
-        return (
-            f"{self._data_section(file_profiles, relationships)}\n"
-            f"{self._output_contract()}"
-        )
+        return self._data_section(file_profiles, relationships)
 
     def _data_section(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
         """The per-dataset half of the prompt: profiles, detected relationships, and how
@@ -126,7 +131,7 @@ back to you. If two files truly share nothing, say so and recommend single-file 
         else:
             relationships_block = ""
 
-        return f"""You are a data analyst expert. I have the following CSV/Excel files and their profiles:
+        return f"""Here are the CSV/Excel files and their profiles to analyze:
 
 {summaries_json}
 {relationships_block}
@@ -146,13 +151,14 @@ cite aggregate stats (unique_values / null_percent / dtype), never a sample valu
             f"- {name}: {desc}" for name, desc in self.REPORT_PATTERNS.items()
         )
 
-        return f"""Your task: (1) a short "dataset_overview" narrative, and (2) meaningful, EXECUTABLE
-report recommendations built specifically from the data above.
+        return f"""You are a data analyst expert. You will be given CSV/Excel file profiles as a
+user message. Your task: (1) a short "dataset_overview" narrative, and (2) meaningful,
+EXECUTABLE report recommendations built specifically from the provided data.
 
 DATASET OVERVIEW - 1-2 short plain-English paragraphs: what this dataset represents as
 a whole, the key entities each file captures, how the files relate to each other
 (reference the DETECTED CROSS-FILE RELATIONSHIPS when present), and the most notable
-patterns. Ground every statement in the data above - do NOT invent facts, sources or
+patterns. Ground every statement in the provided data - do NOT invent facts, sources or
 figures it doesn't support.
 
 STEP 1 - Each column's "role" was computed deterministically from the actual data, not
@@ -172,7 +178,9 @@ Choose from this fixed set (do not invent others):
 
 STEP 3 - If a categorical breakdown would help but no low-cardinality column exists,
 "derive" one (regex_extract a family/prefix from high-cardinality text, or bin a numeric
-column) rather than grouping on a near-unique column.
+column) rather than grouping on a near-unique column. To combine two numeric columns
+into a measure (e.g. line_total = unitPrice * quantity, or a rate = numerator /
+denominator), use a "compute" derive - never regex_extract, which is for text only.
 
 STEP 4 - Express each recommendation as an ordered pipeline (filter -> derive -> groupby
 -> sort_limit -> join, using only the steps that apply), and declare the
@@ -206,7 +214,7 @@ below): describe the real-world impact, never the raw profile stat.
       "pattern_used": "COMPOSITION",
       "justification": {{
         "column": "column_name",
-        "profile_evidence": "cite the actual unique_values/null_percent/dtype from the profile above that justify this pattern"
+        "profile_evidence": "cite the actual unique_values/null_percent/dtype from the provided profile that justify this pattern"
       }},
       "required_operations": [
         {{
@@ -217,7 +225,7 @@ below): describe the real-world impact, never the raw profile stat.
         {{
           "operation_type": "join",
           "files_involved": ["file1.csv", "file2.csv"],
-          "join_keys": ["shared_id_column"],
+          "join_keys": [{{"left": "shared_id_column", "right": "shared_id_column"}}],
           "join_type": "inner"
         }},
         {{
@@ -246,6 +254,17 @@ below): describe the real-world impact, never the raw profile stat.
           "operation_type": "derive",
           "files_involved": ["file1.csv"],
           "derive_column": {{
+            "new_name": "line_total",
+            "source_column": "unit_price",
+            "method": "compute",
+            "operator": "*",
+            "right_column": "quantity"
+          }}
+        }},
+        {{
+          "operation_type": "derive",
+          "files_involved": ["file1.csv"],
+          "derive_column": {{
             "new_name": "age_group",
             "source_column": "age",
             "method": "bin",
@@ -268,7 +287,7 @@ below): describe the real-world impact, never the raw profile stat.
           "operation_type": "groupby",
           "files_involved": ["file1.csv"],
           "groupby_columns": ["derived_category"],
-          "aggregations": {{"measure_column": "mean"}}
+          "aggregations": [{{"column": "measure_column", "func": "mean"}}]
         }},
         {{
           "operation_type": "sort_limit",
@@ -301,26 +320,29 @@ below): describe the real-world impact, never the raw profile stat.
 }}
 
 Rules:
-1. All step types (filter/derive/groupby/sort_limit/join) are optional - omit any that doesn't apply rather than including it with empty/placeholder fields. A groupby you do include must have real groupby_columns AND aggregations.
-1b. A derive "method" is one of "regex_extract", "bin", "quantile" - never invent another.
+1. All step types (filter/derive/groupby/sort_limit/join) are optional - omit any that doesn't apply rather than including it with empty/placeholder fields. A groupby you do include must have real groupby_columns AND aggregations. "aggregations" is a LIST of {{"column": <name>, "func": <one of sum|mean|count|min|max|median|std|nunique>}} objects - never a bare {{"col":"func"}} object.
+1b. A derive "method" is one of "compute", "regex_extract", "bin", "quantile" - never invent another.
+   - "compute": arithmetic combining source_column (the LEFT operand) with either another column ("right_column") or a constant ("right_value"), via "operator" (one of + - * /). Use this for measures like line_total = unit_price * quantity. NEVER express arithmetic as a regex_extract "pattern" - that produces a column of garbage text, not numbers.
+   - "regex_extract": TEXT only - "pattern" is a real regex with one capture group, run against source_column's string values. Unmatched rows fall into an "Other" bucket, so only use it when the pattern genuinely matches most rows.
    - "bin": "bins" must be NUMBERS (boundary edges, e.g. [18,30,40,100]) - never range strings like "18-30", never dates. Display strings go in "bin_labels" (one FEWER than bins). Only bin a role=="measure" column; never bin a "temporal" one, whose edges would have to be dates - instead derive a period label first (e.g. regex_extract the year out of a formatted date) and group by that.
    - "quantile": cut POINTS between 0 and 1 in "quantiles" (e.g. [0.25,0.5,0.75] for quartiles), with "bin_labels" (one MORE than quantiles).
    Later steps reference a derived column by its "new_name" (e.g. "age_group"), never by the literal field name "derive_column".
 2. Never group by an identifier/primary-key-like column (see Step 1).
-2b. Groupby renames aggregated outputs to "{{column}}_{{function}}" (aggregations {{"Calories":"mean"}} produces a column literally named "Calories_mean"). Use that exact renamed form - never the bare column name - in sort_by, plotly_config axes and expected_output_schema.
-2c. "groupby_columns" must NEVER be empty. For a count of records per value of a column, put that column in BOTH groupby_columns AND aggregations (e.g. "groupby_columns": ["year"], "aggregations": {{"year":"count"}}).
+2b. Groupby renames aggregated outputs to "{{column}}_{{func}}" (aggregations [{{"column":"Calories","func":"mean"}}] produces a column literally named "Calories_mean"). Use that exact renamed form - never the bare column name - in sort_by, plotly_config axes and expected_output_schema.
+2c. "groupby_columns" must NEVER be empty. For a count of records per value of a column, put that column in BOTH groupby_columns AND aggregations (e.g. "groupby_columns": ["year"], "aggregations": [{{"column":"year","func":"count"}}]).
 2d. If two joined files share a column name (e.g. both have "name"), any later step (groupby/filter/derive/sort_limit) using it must name the SPECIFIC file in that step's own "files_involved" - not reuse the join's file list. E.g. to group by the theme's "name" rather than the set's, that step's files_involved is ["themes.csv"], even though the join's was ["sets.csv","themes.csv"].
 2e. "x_axis_label"/"y_axis_label" are OPTIONAL plain-English overrides of the displayed axis title; the raw "x_axis"/"y_axis" column names still pull the data, so never change those. Omit either when the raw name is already clear. A label must describe the column as actually computed - never imply an aggregation ("rate", "average", "%", "total") for a column that is not a groupby output (i.e. lacks an "_mean"/"_sum"/"_count"/etc. suffix per 2b). A pass-through column like "churn_signal" must not be labeled "Churn Rate"; only "churn_signal_mean" may be.
 2f. Before any groupby/filter/sort_limit, confirm every column you reference (in aggregations, groupby_columns or filter_conditions) actually appears in the profiled "columns" of a file you have joined - never assume one exists because it sounds plausible. If the column lives on a DIFFERENT file, add a join to that file (per DETECTED CROSS-FILE RELATIONSHIPS) instead of aggregating a column that isn't there. When several files share the same join key (e.g. both "inventories" and "inventory_sets" join on "set_num"), pick the one whose profile actually contains the column you need.
 3. Bar/pie charts must resolve to at most ~15-20 categories after sort_limit; use limit to enforce this.
+3b. "chart_type" is one of: "bar", "line", "scatter", "pie", "histogram", "box". Guidance: RANKING/COMPARISON of a measure across categories -> "bar"; TREND over a temporal axis -> "line"; two numeric measures -> "scatter"; a single numeric column's distribution -> "histogram" (raw values, omit y_axis) or, to expose spread/outliers per group, "box" (x_axis = the grouping category, y_axis = the raw measure); OUTLIER on one measure across groups -> "box". Prefer "bar" over "pie", and use "pie" only for a genuine part-of-a-whole with <=5 slices.
 4. Cite real profile values (unique_values, null_percent, dtype) in "justification" - never fabricate stats.
 5. Rank recommendations by relevance/insight value.
 6. Exactly 3 rationale_bullets per recommendation - short, plain English, no jargon.
 7. Return EXACTLY 3 recommendations, ranked 1-3 by relevance/insight value - never fewer. If the data only strongly supports fewer, still produce a 3rd and mark it with a data_quality_warning (see Step 5).
 8. If DETECTED CROSS-FILE RELATIONSHIPS were provided, at least one recommendation must use them via a "join" - do not confine every recommendation to a single file when the data supports connecting them.
-9. Join columns MUST go in a "join_keys" array - never "join_column" or any other field name. "join_type" is optional (defaults to "inner"). Each entry is either:
-   - a plain string when both files use the same column name, e.g. ["customer_id"]
-   - a {{"left":...,"right":...}} object when the names differ (per column_a/column_b above), e.g. [{{"left":"theme_id","right":"id"}}], where "left" is the column in the FIRST file of "files_involved" and "right" the second.
+9. Join columns MUST go in a "join_keys" array - never "join_column" or any other field name. "join_type" is optional (defaults to "inner"). EVERY entry is a {{"left":...,"right":...}} object where "left" is the column in the FIRST file of "files_involved" and "right" the column in the second:
+   - same column name on both sides: repeat it, e.g. [{{"left":"customer_id","right":"customer_id"}}]
+   - names differ (per column_a/column_b above): e.g. [{{"left":"theme_id","right":"id"}}]
 10. "data_quality_warning" (when present) is shown directly to a non-technical business user, so write it in plain English about the real-world impact - NEVER expose raw profile internals. Do NOT mention column names, file names, "null_percent", "dtype", or precise decimals. Translate the stat into an everyday phrase and round to a friendly figure: e.g. instead of 'the item_id column in order_details has a null_percent of 1.12', write 'About 1% of orders are missing an item, which may slightly affect the ranking.' ("about 1%", "roughly 1 in 100", "a small number of records").
 
 CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. Do NOT include ```json or ```. Start your response with {{ and end with }}.
@@ -337,11 +359,21 @@ CRITICAL: Return ONLY the raw JSON object. Do NOT wrap in markdown code fences. 
                 "role": col.role,
                 "min": _round_if_numeric(col.min_value),
                 "max": _round_if_numeric(col.max_value),
-                "mean": _round_if_numeric(col.mean_value)
+                "mean": _round_if_numeric(col.mean_value),
+                # Spread stats (numeric only) - give the model dispersion to reason about
+                # distribution/outliers; also feed deterministic histogram binning.
+                "std": _round_if_numeric(col.std_value),
+                "median": _round_if_numeric(col.median_value),
+                "p25": _round_if_numeric(col.p25_value),
+                "p75": _round_if_numeric(col.p75_value),
+                # Temporal range + suggested aggregation granularity (temporal only).
+                "range_start": col.temporal_min,
+                "range_end": col.temporal_max,
+                "granularity": col.temporal_granularity,
             }
-            # min/max/mean are None on non-numeric columns - omit those keys rather
-            # than spending tokens on "min":null,"max":null,"mean":null for every
-            # text column. Only categorical columns carry top_values at all.
+            # Stats that don't apply to a column (numeric stats on text, temporal range on
+            # numbers) are None - omit those keys rather than spending tokens on explicit
+            # nulls for every column. Only categorical columns carry top_values at all.
             d = {key: value for key, value in d.items() if value is not None}
             if col.top_values:
                 d["top_values"] = [[t["value"], t["count"]] for t in col.top_values]

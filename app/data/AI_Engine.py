@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types as genai_types
 from .session_manager import SessionManager
 from .response_validator import parse_and_validate
+from .models import RecommendationsResponse
 
 load_dotenv()
 
@@ -32,22 +33,53 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 # smaller/lighter model here has its own untouched quota to fall back on when
 # GROQ_MODEL gets rate-limited, before giving up to local Ollama.
 GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
-# Gemini sits between Groq and Ollama: its free-tier quota is a separate account
-# entirely, so it survives a Groq daily limit that both Groq models share an
-# account with. Chosen over other free tiers because our prompts run 8k-30k
-# input tokens, which Cerebras' free 8k context window can't hold at all.
+# Gemini is tried FIRST, ahead of Groq: its free-tier quota is a separate account
+# entirely, so spending it first preserves the shared Groq daily/hourly limit for
+# when Gemini is exhausted or fails. Chosen over other free tiers because our prompts
+# run 8k-30k input tokens, which Cerebras' free 8k context window can't hold at all.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+
+# Number of validation-failure retries (each retry is a full extra generation, so
+# each one spends more of the hosted daily/hourly quota). Default 0 = a single
+# generation attempt per analysis, no self-correction. Raise via the env var - e.g.
+# LLM_MAX_RETRIES=1 - to trade quota for one correction round when needed.
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "0"))
+
+# ============================================================================
+# CLIENTS
+# ============================================================================
+# Constructed once at import (guarded on the key being present) rather than per
+# request - a new Groq()/genai.Client() on every call is needless setup overhead.
+_GROQ_CLIENT = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+_GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+# JSON Schema for the expected response, used for provider-side structured (schema-
+# constrained) decoding. Now that the response has no open-ended dicts or unions
+# (see models.Aggregation / join_keys), the whole shape is expressible as a schema,
+# so the model can be made to emit schema-valid JSON at generation time instead of
+# us extracting/repairing/re-validating it after the fact.
+try:
+    _RESPONSE_JSON_SCHEMA = RecommendationsResponse.model_json_schema()
+except Exception as _schema_err:  # pragma: no cover - defensive
+    print(f"[AI_Engine] Could not build response JSON schema ({_schema_err}); "
+          f"falling back to plain JSON mode")
+    _RESPONSE_JSON_SCHEMA = None
 
 # ============================================================================
 
 
-def send_prompt(prompt, session_id=None):
+def send_prompt(prompt, session_id=None, system_prompt=None):
     """
     Args:
-        prompt: The prompt text to send to the AI
+        prompt: The user/data portion of the prompt to send to the AI
         session_id: If given, debug files are saved into this existing
             session_data/<session_id>/ folder instead of a new one
+        system_prompt: The static instruction block (report guidance + output
+            contract). Sent as a separate system message so it forms a stable
+            prefix across requests - identical every call, it is what providers
+            can prefix-cache, and it keeps the "how to think" text out of the
+            per-dataset user message.
 
     Returns:
         Cleaned & parsed JSON object as dict
@@ -62,7 +94,7 @@ def send_prompt(prompt, session_id=None):
 
     for label, send in _remote_providers():
         try:
-            raw_response = send(prompt)
+            raw_response = send(system_prompt, prompt)
             break
         except Exception as e:
             print(f"[AI_Engine] {label} request failed ({e})")
@@ -70,7 +102,7 @@ def send_prompt(prompt, session_id=None):
     if raw_response is None:
         # Local Ollama is the last resort rather than one of the tiers above: it
         # has no quota to exhaust, so it can't fail the way the hosted ones do.
-        raw_response = _send_prompt_ollama(prompt)
+        raw_response = _send_prompt_ollama(system_prompt, prompt)
 
     print(f"[AI_Engine] Received response from LLM")
 
@@ -91,15 +123,17 @@ def get_validated_recommendations(
     prompt: str,
     valid_filenames: Set[str],
     session_id: str = None,
-    max_retries: int = 2,
+    max_retries: int = None,
     tables: dict = None,
     correction_prompt: str = None,
+    system_prompt: str = None,
 ) -> dict:
     """
     Like send_prompt, but validates the response against RecommendationsResponse
     (see response_validator.parse_and_validate) before returning it. On
     validation failure, the error is appended to the prompt as correction
-    text and the LLM is retried, up to max_retries times.
+    text and the LLM is retried, up to max_retries times. max_retries defaults
+    to the LLM_MAX_RETRIES env var (0 = single attempt, no self-correction).
 
     Returns:
         The validated response as a plain dict (schema_conformant, but still
@@ -111,11 +145,19 @@ def get_validated_recommendations(
             send_prompt (e.g. to fall back to mock data), so this needs no
             new handling on top of that.
     """
+    # None means "use the configured default" - keep the parameter so a caller can
+    # still force a specific count, but let the LLM_MAX_RETRIES env var drive it
+    # (default 0) so quota usage can be tuned without touching code.
+    if max_retries is None:
+        max_retries = LLM_MAX_RETRIES
+
     attempt_prompt = prompt
     last_error = None
 
     for attempt in range(max_retries + 1):
-        raw_response = send_prompt(attempt_prompt, session_id=session_id)
+        # system_prompt stays constant across attempts (it's the cacheable prefix);
+        # only the user/data attempt_prompt grows with correction feedback below.
+        raw_response = send_prompt(attempt_prompt, session_id=session_id, system_prompt=system_prompt)
         try:
             parsed = parse_and_validate(raw_response, valid_filenames, tables)
             return parsed.model_dump(exclude_none=True)
@@ -137,79 +179,117 @@ def get_validated_recommendations(
 def _remote_providers():
     """The hosted backends to try, in order, before falling back to local Ollama.
 
-    Each entry is (label, callable taking the prompt and returning raw text). A tier
-    is only included when it's actually usable, so a missing key is a skipped tier
-    rather than a guaranteed exception on every request.
+    Each entry is (label, callable taking (system, user) and returning raw text). A
+    tier is only included when it's actually usable, so a missing key is a skipped
+    tier rather than a guaranteed exception on every request.
 
-    Order is cheapest-recovery-first: the second Groq model shares an account with
-    the first (so it only helps against a PER-MODEL daily limit), while Gemini is a
-    separate account whose quota survives Groq being exhausted account-wide.
+    Order: Gemini first, then Groq, then (in send_prompt) local Ollama. Gemini is a
+    separate account, so spending it first preserves the Groq daily/hourly quota that
+    both Groq models share - and the two Groq tiers only differ by a per-MODEL limit,
+    so the fallback model just buys one more Groq attempt before dropping to Ollama.
     """
     providers = []
 
+    if GEMINI_API_KEY:
+        providers.append(
+            (f"Gemini model '{GEMINI_MODEL}'", lambda s, u: _send_prompt_gemini(s, u, GEMINI_MODEL))
+        )
+
     if AI_BACKEND == "groq" and GROQ_API_KEY:
         providers.append(
-            (f"Groq model '{GROQ_MODEL}'", lambda p: _send_prompt_groq(p, GROQ_MODEL))
+            (f"Groq model '{GROQ_MODEL}'", lambda s, u: _send_prompt_groq(s, u, GROQ_MODEL))
         )
         if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
             providers.append((
                 f"Groq fallback model '{GROQ_FALLBACK_MODEL}'",
-                lambda p: _send_prompt_groq(p, GROQ_FALLBACK_MODEL),
+                lambda s, u: _send_prompt_groq(s, u, GROQ_FALLBACK_MODEL),
             ))
-
-    if GEMINI_API_KEY:
-        providers.append(
-            (f"Gemini model '{GEMINI_MODEL}'", lambda p: _send_prompt_gemini(p, GEMINI_MODEL))
-        )
 
     return providers
 
 
-def _send_prompt_ollama(prompt: str) -> str:
-    """Original local Ollama call. format='json' asks the model to guarantee
-    syntactically valid JSON output, catching most "wrapped in prose"
-    failures before they ever reach parsing."""
-    response: ChatResponse = chat(model='qwen2.5', format='json', messages=[
-    {
-        'role': 'user',
-        'content': prompt,
-    },
-    ])
+def _chat_messages(system_prompt, user_prompt):
+    """Build an OpenAI/Ollama-style messages list, prepending the system message
+    only when one is given so the older single-string callers still work."""
+    messages = []
+    if system_prompt:
+        messages.append({'role': 'system', 'content': system_prompt})
+    messages.append({'role': 'user', 'content': user_prompt})
+    return messages
+
+
+def _send_prompt_ollama(system_prompt, user_prompt) -> str:
+    """Local Ollama call. Prefers schema-constrained decoding (Ollama structured
+    outputs: format=<json schema>) so qwen2.5 emits a schema-valid object directly.
+    Falls back to plain format='json' if this Ollama build can't compile the schema -
+    the model is local, so the extra attempt costs no quota. format='json' still
+    guarantees syntactically valid JSON, catching most 'wrapped in prose' failures."""
+    messages = _chat_messages(system_prompt, user_prompt)
+
+    if _RESPONSE_JSON_SCHEMA is not None:
+        try:
+            response: ChatResponse = chat(
+                model='qwen2.5',
+                format=_RESPONSE_JSON_SCHEMA,
+                options={'temperature': 0},
+                messages=messages,
+            )
+            return response.message.content
+        except Exception as e:
+            print(f"[AI_Engine] Ollama schema-constrained decode failed ({e}); "
+                  f"retrying with plain JSON mode")
+
+    response = chat(
+        model='qwen2.5',
+        format='json',
+        options={'temperature': 0},
+        messages=messages,
+    )
     return response.message.content
 
 
-def _send_prompt_groq(prompt: str, model: str) -> str:
-    client = Groq(api_key=GROQ_API_KEY)
-    response = client.chat.completions.create(
+def _send_prompt_groq(system_prompt, user_prompt, model: str) -> str:
+    # Kept on json_object (not json_schema structured outputs): schema support on
+    # Groq varies by model, and a call that a model rejects still burns a request
+    # against the daily/hourly quota this whole fallback chain exists to conserve.
+    # The Pydantic validation + json_repair safety net downstream covers Groq.
+    response = _GROQ_CLIENT.chat.completions.create(
         model=model,
         response_format={"type": "json_object"},
-        messages=[
-            {
-                'role': 'user',
-                'content': prompt,
-            },
-        ],
+        temperature=0,
+        messages=_chat_messages(system_prompt, user_prompt),
     )
     return response.choices[0].message.content
 
 
-def _send_prompt_gemini(prompt: str, model: str) -> str:
+def _send_prompt_gemini(system_prompt, user_prompt, model: str) -> str:
     """Gemini equivalent of _send_prompt_groq.
 
     response_mime_type is the JSON-mode switch, same role as Groq's
-    response_format={"type": "json_object"}. Gemini also accepts a response_schema
-    that would enforce our shape server-side, but RecommendationsResponse can't be
-    expressed in the subset it supports - `aggregations` is an open-ended dict and
-    `join_keys` is a Union - so validation stays in response_validator, where those
-    are already handled.
+    response_format={"type": "json_object"}. The static instruction block is passed
+    as system_instruction (Gemini's system-message equivalent) so it stays a stable
+    cacheable prefix, separate from the per-dataset user content.
+
+    response_schema now enforces RecommendationsResponse's shape server-side. This
+    became possible once `aggregations` stopped being an open dict and `join_keys`
+    stopped being a Union (see models.Aggregation / models.JoinKeyPair) - the schema
+    is fully expressible. Pydantic validation still runs downstream (it also does the
+    filename/join cross-checks the schema can't), but the model now emits conforming
+    JSON directly instead of us repairing it.
     """
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(
+    config = genai_types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=0,
+        system_instruction=system_prompt or None,
+    )
+    if _RESPONSE_JSON_SCHEMA is not None:
+        # Pass the Pydantic model; the SDK derives the response schema from it.
+        config.response_schema = RecommendationsResponse
+
+    response = _GEMINI_CLIENT.models.generate_content(
         model=model,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            response_mime_type="application/json",
-        ),
+        contents=user_prompt,
+        config=config,
     )
     return response.text
 

@@ -17,6 +17,7 @@ lives on disk - is made through GUI dialogs.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from tkinter import Tk, Listbox, Button, Label, SINGLE, END, filedialog, messagebox
@@ -26,8 +27,16 @@ import plotly.graph_objects as go
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from app.data.data_loader import DataLoader  # noqa: E402
 from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes, _find_file_path  # noqa: E402
 from app.data.chart_builder import build_chart_figure  # noqa: E402
+
+# A worksheet from a multi-sheet workbook is named "<sheet> (<workbook stem>).<ext>"
+# by DataLoader (see DataLoader._add_excel), so a referenced name that isn't a real
+# file on disk still tells us which workbook to load. The greedy prefix makes the
+# LAST parenthesised group the workbook stem, tolerating sheet names that themselves
+# contain parentheses.
+WORKSHEET_RE = re.compile(r"^(?P<sheet>.*) \((?P<stem>[^()]*)\)(?P<ext>\.[^.]+)$")
 
 SESSION_DATA_DIR = REPO_ROOT / "session_data"
 PREVIEW_WIDTH = 900
@@ -96,29 +105,56 @@ def collect_filenames(operations: list) -> list:
     return names
 
 
-def resolve_file_paths(root: Tk, filenames: list) -> dict:
-    """Auto-resolve via datasets/ where possible; prompt for anything else."""
-    file_paths = {}
+def resolve_source_files(root: Tk, filenames: list) -> list:
+    """Turn the worksheet/file names a recommendation references into the list of
+    real source files to load. A worksheet name collapses to its parent workbook,
+    so a workbook is loaded once no matter how many of its sheets a report uses.
+    Auto-resolves via datasets/ where possible; prompts for anything else."""
+    source_paths = {}  # source basename -> path on disk (dedups, preserves order)
     for name in filenames:
-        found = _find_file_path(name, None)
-        if found:
-            file_paths[name] = found
+        # A name that already resolves to a real file (a CSV, or a single-sheet
+        # workbook) is loaded as-is.
+        direct = _find_file_path(name, None)
+        if direct:
+            source_paths.setdefault(name, direct)
             continue
-        chosen = filedialog.askopenfilename(
-            parent=root,
-            title=f"Select the source file for '{name}'",
-            initialdir=str(REPO_ROOT),
-        )
-        if chosen:
-            file_paths[name] = chosen
+
+        # Otherwise treat it as a worksheet and load its parent workbook instead.
+        match = WORKSHEET_RE.match(name)
+        source_name = f"{match.group('stem')}{match.group('ext')}" if match else name
+        if source_name in source_paths:
+            continue
+
+        found = _find_file_path(source_name, None)
+        if not found:
+            title = (
+                f"Select the workbook '{source_name}' (needed for sheet '{name}')"
+                if match else f"Select the source file for '{name}'"
+            )
+            found = filedialog.askopenfilename(parent=root, title=title, initialdir=str(REPO_ROOT))
+        if found:
+            source_paths[source_name] = found
         else:
             print(f"[replay_report] No file chosen for '{name}' - steps needing it may fail.")
-    return file_paths
+
+    return list(source_paths.values())
 
 
-def run_one(recommendations: dict, report_type: str, file_paths: dict, session_id: str, rec: dict):
+def load_session_tables(source_files: list) -> dict:
+    """Load every source file through DataLoader exactly as the live app does
+    (app/api.py: loader.add_files -> loader.tables), so multi-sheet workbooks
+    expand into the same worksheet-named tables the recommendation was written
+    against. generate_report prefers these in-memory tables over file_paths."""
+    loader = DataLoader()
+    loader.add_files(source_files)
+    tables = loader.tables()
+    print(f"[replay_report] Loaded {len(tables)} table(s): {sorted(tables)}")
+    return tables
+
+
+def run_one(recommendations: dict, report_type: str, tables: dict, session_id: str, rec: dict):
     print(f"\n{'=' * 80}\nReplaying report {report_type}: {rec.get('report_name', 'Untitled')}\n{'=' * 80}")
-    df = generate_report(recommendations, report_type=report_type, file_paths=file_paths, session_id=session_id)
+    df = generate_report(recommendations, report_type=report_type, tables=tables, session_id=session_id)
     if df.empty:
         print(f"[replay_report] Report {report_type} produced no data - skipping chart.")
         return
@@ -164,9 +200,9 @@ def main():
         idx = report_type_to_index(report_type)
         rec = recs[idx]
         filenames = collect_filenames(rec.get("required_operations", []))
-        file_paths = resolve_file_paths(root, filenames)
+        tables = load_session_tables(resolve_source_files(root, filenames))
         try:
-            run_one(recommendations, report_type, file_paths, session_id, rec)
+            run_one(recommendations, report_type, tables, session_id, rec)
         except Exception as e:
             print(f"[replay_report] Report {report_type} failed: {e}")
 

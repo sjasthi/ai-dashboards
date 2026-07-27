@@ -9,6 +9,7 @@ the DataFrame produced by one step feeds directly into the next.
 
 import re
 import json
+import math
 import pandas as pd
 import numpy as np
 import os
@@ -20,6 +21,12 @@ from typing import Dict, Any, List, Optional
 # whole-cell matches (case-insensitive) so real substrings like "AB-123" are
 # left untouched.
 NULL_PLACEHOLDERS = {"-", "n/a", "na", "null", "none", "?", ""}
+
+# Aggregation functions that only make sense on numbers. Applied to a text column,
+# "sum" silently CONCATENATES ("Other"*n -> "OtherOther...") and the rest error out
+# cryptically, so a numeric agg on a non-numeric column is caught up front instead.
+# min/max/count/nunique are excluded - they're meaningful on text too.
+_NUMERIC_ONLY_FUNCS = {"sum", "mean", "median", "std"}
 
 
 def generate_report(
@@ -80,6 +87,18 @@ def generate_report(
 
     try:
         final_df = _execute_pipeline(operations, file_paths, tables)
+
+        # Cross-check the produced columns against what the recommendation declared
+        # in expected_output_schema. This is a soft check: it warns (console + debug
+        # file + .attrs) so a recommendation whose pipeline silently produced the
+        # wrong columns is caught here, rather than only surfacing later as a blank
+        # or mis-plotted chart. Deliberately NOT a retry - retries cost LLM quota.
+        schema_warning = _check_expected_output_schema(final_df, rec)
+        if schema_warning:
+            print(f"[ReportBuilder] {schema_warning}")
+            debug_lines.append(f"SCHEMA WARNING: {schema_warning}")
+            final_df.attrs["schema_warning"] = schema_warning
+
         final_df.insert(0, "recommendation_rank", rec.get("rank", 0))
         final_df.insert(1, "recommendation_name", rec.get("report_name", "Untitled"))
 
@@ -221,10 +240,10 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
     would silently fail to match the actual output columns.
     """
     groupby_cols = operation.get("groupby_columns", [])
-    aggregations = operation.get("aggregations", {})
+    agg_pairs = _normalize_aggregations(operation.get("aggregations", []))
     files_involved = operation.get("files_involved", [])
 
-    if not groupby_cols and not aggregations:
+    if not groupby_cols and not agg_pairs:
         # A completely empty groupby step (no columns, no aggregations) is a
         # no-op the LLM shouldn't have included at all (e.g. a stray step
         # tacked onto a plain histogram/DISTRIBUTION report) - skip it rather
@@ -238,7 +257,7 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
     # Resolve names that a prior join suffixed due to a same-named column
     # colliding across files (e.g. both files having "name").
     groupby_cols = [_resolve_column(df, col, files_involved) for col in groupby_cols]
-    aggregations = {_resolve_column(df, col, files_involved): func for col, func in aggregations.items()}
+    agg_pairs = [(_resolve_column(df, col, files_involved), func) for col, func in agg_pairs]
 
     # Filter to only valid columns
     valid_groupby = [col for col in groupby_cols if col in df.columns]
@@ -247,11 +266,19 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
 
     # Build named aggregations (map new column name -> (source column, agg function))
     agg_named = {}
-    for col, func in aggregations.items():
+    for col, func in agg_pairs:
         if col in df.columns:
+            if func in _NUMERIC_ONLY_FUNCS and not pd.api.types.is_numeric_dtype(df[col]):
+                # e.g. summing a text column concatenates its values into one long
+                # string instead of erroring - fail loudly with the real cause instead.
+                raise ValueError(
+                    f"Cannot apply '{func}' to non-numeric column '{col}' (dtype "
+                    f"{df[col].dtype}). An upstream step likely produced text where "
+                    f"numbers were expected - check the operations that created '{col}'."
+                )
             agg_named[f"{col}_{func}"] = (col, func)
 
-    if aggregations and not agg_named:
+    if agg_pairs and not agg_named:
         # The LLM asked to aggregate column(s) that don't actually exist in the
         # joined data (e.g. it aggregated a "quantity" column that only lives in
         # a file it never joined in). Silently falling back to a plain count
@@ -260,7 +287,7 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
         # would fail downstream with no indication of why - raise instead so
         # the real cause shows up in the report's error/debug output.
         raise ValueError(
-            f"Aggregation column(s) {list(aggregations.keys())} not found after "
+            f"Aggregation column(s) {[col for col, _ in agg_pairs]} not found after "
             f"prior steps. Available columns: {df.columns.tolist()}"
         )
 
@@ -362,6 +389,9 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
 
     df = df.copy()
 
+    if method == "compute":
+        return _execute_compute(df, derive, new_name, source_column, operation.get("files_involved", []))
+
     if method == "regex_extract":
         pattern = derive.get("pattern")
         if not pattern:
@@ -375,6 +405,17 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
             if "capture group" not in str(e):
                 raise
             extracted = df[source_column].astype(str).str.extract(f"({pattern})", expand=False)
+        # A pattern that matches NOTHING (e.g. the model put arithmetic like
+        # "unitPrice * quantity" where a regex belongs) would otherwise fill every row
+        # with the "Other" bucket, producing a column of literal "Other" strings that
+        # then silently corrupts a downstream sum. Treat an all-unmatched extract as a
+        # failed derive and skip it, so the missing column surfaces as a loud error
+        # rather than a plausible-looking wrong chart. A partial match is legitimate
+        # (genuine "Other" bucket for the unmatched rows) and still fills as before.
+        if extracted.notna().sum() == 0:
+            print(f"[ReportBuilder] Skipping regex_extract derive: pattern {pattern!r} "
+                  f"matched no values in {source_column!r} (is it arithmetic? use method='compute')")
+            return df
         df[new_name] = extracted.fillna("Other")
 
     elif method == "bin":
@@ -392,14 +433,23 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
             bins = []
 
         if bins:
+            # Honor explicit LLM edges (they come paired with matching bin_labels).
             try:
                 df[new_name] = pd.cut(numeric_col, bins=bins, labels=labels)
             except (ValueError, TypeError) as e:
                 print(f"[ReportBuilder] Could not bin column {source_column} with bins={bins}: {e}")
                 return df
         else:
+            # No usable edges given: choose them deterministically via Freedman-Diaconis
+            # (bin width from the data's IQR) rather than trusting a guessed bin count.
+            # Auto interval labels here since the FD bin count won't match any supplied
+            # bin_labels. Fall back to quartiles only if FD can't be computed.
+            fd_edges = _freedman_diaconis_edges(numeric_col)
             try:
-                df[new_name] = pd.qcut(numeric_col, q=4, labels=labels, duplicates="drop")
+                if fd_edges:
+                    df[new_name] = pd.cut(numeric_col, bins=fd_edges, include_lowest=True)
+                else:
+                    df[new_name] = pd.qcut(numeric_col, q=4, labels=labels, duplicates="drop")
             except (ValueError, TypeError) as e:
                 print(f"[ReportBuilder] Could not bin column {source_column}: {e}")
                 return df
@@ -428,6 +478,57 @@ def _execute_derive(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame
     return df
 
 
+def _execute_compute(
+    df: pd.DataFrame,
+    derive: Dict[str, Any],
+    new_name: str,
+    source_column: str,
+    files_involved: List[str],
+) -> pd.DataFrame:
+    """Add a column computed as an arithmetic expression: source_column (the left
+    operand) `operator` a second column (right_column) or a constant (right_value).
+
+    This is the correct home for things like "line_total = unitPrice * quantity".
+    Both operands are coerced to numbers (placeholder nulls cleaned first), so a stray
+    non-numeric cell becomes NaN for that row rather than failing the whole derive.
+    Any malformed spec is skipped with a message rather than raised, matching the rest
+    of _execute_derive - a bad optional step shouldn't sink the whole report.
+    """
+    operator = derive.get("operator")
+    if operator not in ("+", "-", "*", "/"):
+        print(f"[ReportBuilder] Skipping compute derive: missing/unknown operator {operator!r}")
+        return df
+
+    left = pd.to_numeric(_normalize_nulls(df[source_column]), errors="coerce")
+
+    right_column = derive.get("right_column")
+    right_value = derive.get("right_value")
+    if right_column:
+        resolved = _resolve_column(df, right_column, files_involved)
+        if resolved not in df.columns:
+            print(f"[ReportBuilder] Skipping compute derive: right_column {right_column!r} not found")
+            return df
+        right: Any = pd.to_numeric(_normalize_nulls(df[resolved]), errors="coerce")
+    elif right_value is not None:
+        right = float(right_value)
+    else:
+        print(f"[ReportBuilder] Skipping compute derive: neither right_column nor right_value given")
+        return df
+
+    if operator == "/":
+        # Guard divide-by-zero: a zero divisor becomes NaN (not inf) so it drops out of
+        # a later sum/mean instead of poisoning it.
+        if isinstance(right, pd.Series):
+            right = right.replace(0, np.nan)
+        elif right == 0:
+            print(f"[ReportBuilder] Skipping compute derive: division by zero constant")
+            return df
+
+    ops = {"+": left.add, "-": left.sub, "*": left.mul, "/": left.truediv}
+    df[new_name] = ops[operator](right)
+    return df
+
+
 def _execute_sort_limit(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame:
     """Execute a sort + top-N limit operation."""
     sort_by = _resolve_column(df, operation.get("sort_by"), operation.get("files_involved", []))
@@ -445,6 +546,46 @@ def _execute_sort_limit(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataF
             pass
 
     return result
+
+
+def _freedman_diaconis_edges(series: pd.Series) -> Optional[List[float]]:
+    """Bin edges chosen by the Freedman-Diaconis rule (width = 2*IQR*n^(-1/3)), or
+    None if they can't be computed (too few points, zero IQR, or flat data). Used as
+    the deterministic default when the LLM supplies no usable numeric bin edges - a
+    small model has no principled way to pick a bin count, so it's computed here."""
+    v = pd.to_numeric(series, errors="coerce").dropna()
+    n = len(v)
+    if n < 2:
+        return None
+    q1, q3 = v.quantile(0.25), v.quantile(0.75)
+    iqr = float(q3 - q1)
+    lo, hi = float(v.min()), float(v.max())
+    if iqr <= 0 or hi <= lo:
+        return None
+    width = 2 * iqr * (n ** (-1.0 / 3.0))
+    if width <= 0:
+        return None
+    # Cap the count so a tiny width on a wide range can't explode into thousands of bins.
+    n_bins = min(50, max(1, int(math.ceil((hi - lo) / width))))
+    return list(np.linspace(lo, hi, n_bins + 1))
+
+
+def _normalize_aggregations(aggregations: Any) -> List[tuple]:
+    """Normalize aggregations to (column, func) pairs, accepting both the current
+    list form ([{"column": "revenue", "func": "sum"}]) and the legacy dict form
+    ({"revenue": "sum"}). The dict path keeps old saved sessions replayable when
+    their operations are fed straight to report_builder without going through the
+    Pydantic model (which would otherwise have normalized them already)."""
+    if isinstance(aggregations, dict):
+        return [(col, func) for col, func in aggregations.items()]
+
+    pairs = []
+    for item in aggregations or []:
+        if isinstance(item, dict):
+            col, func = item.get("column"), item.get("func")
+            if col and func:
+                pairs.append((col, func))
+    return pairs
 
 
 def _normalize_join_keys(join_keys: List[Any]) -> List[tuple]:
@@ -566,6 +707,33 @@ def _resolve_column(df: pd.DataFrame, name: Optional[str], files_involved: List[
     if name in df.columns:
         return name
     return name
+
+
+def _check_expected_output_schema(df: pd.DataFrame, rec: Dict[str, Any]) -> Optional[str]:
+    """Return a warning if the recommendation's declared expected_output_schema columns
+    aren't all present in the produced DataFrame, else None.
+
+    Uses _resolve_column so a name the LLM declared plainly still matches after a join
+    suffixed it (e.g. declared "name" -> actual "name_themes"). Returns a description
+    only; the caller decides how to surface it (this never raises)."""
+    expected = [c.get("name") for c in rec.get("expected_output_schema", []) if c.get("name")]
+    if not expected:
+        return None
+
+    files_involved: List[str] = []
+    for op in rec.get("required_operations", []) or []:
+        for filename in op.get("files_involved", []) or []:
+            if filename not in files_involved:
+                files_involved.append(filename)
+
+    missing = [name for name in expected if _resolve_column(df, name, files_involved) not in df.columns]
+    if missing:
+        return (
+            f"Report output does not match expected_output_schema - declared column(s) "
+            f"{missing} are not in the result (actual columns: {list(df.columns)}). "
+            f"The chart may be blank or plot the wrong values."
+        )
+    return None
 
 
 def resolve_plotly_axes(

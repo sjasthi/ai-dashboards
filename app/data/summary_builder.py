@@ -1,3 +1,5 @@
+import warnings
+
 import pandas as pd
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
@@ -14,6 +16,18 @@ class ColumnProfile:
     min_value: str = None
     max_value: str = None
     mean_value: float = None
+    # Spread stats for numeric columns. Without these the model has no measure of
+    # dispersion, so it can't reason about distribution shape/outliers and the
+    # pipeline can't bin a histogram sensibly (Freedman-Diaconis needs the IQR).
+    std_value: float = None
+    median_value: float = None
+    p25_value: float = None
+    p75_value: float = None
+    # Temporal range + a suggested aggregation granularity for date columns, so the
+    # daily/weekly/monthly decision is made from the actual span rather than guessed.
+    temporal_min: str = None
+    temporal_max: str = None
+    temporal_granularity: str = None  # "daily" | "weekly" | "monthly" | "yearly"
     top_values: List[Dict] = None # Most common values for categorical columns
 
 @dataclass
@@ -82,6 +96,47 @@ def _fk_entity_stem(col_name: str) -> Optional[str]:
         if name.endswith(suffix) and len(name) > len(suffix):
             return name[: -len(suffix)]
     return None
+
+
+def _temporal_summary(series: pd.Series) -> tuple:
+    """(min_date, max_date, granularity) for a temporal column, or (None, None, None)
+    if the values don't parse as dates. Granularity is a *suggested* aggregation
+    period derived deterministically from the span - small models tend to default to
+    "daily" regardless of how many years the data covers, so this is computed rather
+    than left to the model."""
+    # A numeric "year"-style column (e.g. year_established = 1979..2017) is flagged
+    # temporal by NAME but holds plain integers, not dates - pd.to_datetime would read
+    # them as nanoseconds-since-epoch (every value collapsing to 1970). Treat a numeric
+    # column that looks like calendar years as yearly; its min/max already carry the
+    # range via the numeric stats, so no separate range strings are emitted.
+    if pd.api.types.is_numeric_dtype(series):
+        non_null = series.dropna()
+        if not non_null.empty and 1000 <= non_null.min() and non_null.max() <= 3000:
+            return None, None, "yearly"
+        return None, None, None
+
+    # Mixed/unknown date formats make pandas emit a "could not infer format" warning
+    # per column; we intentionally parse tolerantly (errors="coerce"), so silence it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        parsed = pd.to_datetime(series, errors="coerce")
+    parsed = parsed.dropna()
+    if parsed.empty:
+        return None, None, None
+
+    t_min, t_max = parsed.min(), parsed.max()
+    span_days = (t_max - t_min).days
+
+    if span_days > 365 * 3:
+        granularity = "yearly"
+    elif span_days > 180:
+        granularity = "monthly"
+    elif span_days > 45:
+        granularity = "weekly"
+    else:
+        granularity = "daily"
+
+    return t_min.strftime("%Y-%m-%d"), t_max.strftime("%Y-%m-%d"), granularity
 
 
 def _fk_target_matches(entity: str, file_stem: str) -> bool:
@@ -257,12 +312,23 @@ class SummaryGenerator:
 
             # Numeric stats if available
             min_val = max_val = mean_val = None
+            std_val = median_val = p25_val = p75_val = None
             if pd.api.types.is_numeric_dtype(series):
                 non_null = series.dropna()
                 if not non_null.empty:
                     min_val = non_null.min()
                     max_val = non_null.max()
                     mean_val = float(non_null.mean())
+                    median_val = float(non_null.median())
+                    p25_val = float(non_null.quantile(0.25))
+                    p75_val = float(non_null.quantile(0.75))
+                    # std is NaN for a single value; report 0 spread instead.
+                    std_val = float(non_null.std()) if len(non_null) > 1 else 0.0
+
+            # Temporal range + suggested granularity for date columns
+            temporal_min = temporal_max = temporal_granularity = None
+            if role == "temporal":
+                temporal_min, temporal_max, temporal_granularity = _temporal_summary(series)
 
             # Top values give the LLM the column's actual semantics, which raw stats
             # can't convey. Only for genuinely low-cardinality categorical columns:
@@ -286,6 +352,13 @@ class SummaryGenerator:
                 min_value=str(min_val) if min_val is not None else None,
                 max_value=str(max_val) if max_val is not None else None,
                 mean_value=mean_val,
+                std_value=std_val,
+                median_value=median_val,
+                p25_value=p25_val,
+                p75_value=p75_val,
+                temporal_min=temporal_min,
+                temporal_max=temporal_max,
+                temporal_granularity=temporal_granularity,
                 top_values=top_values
             ))
 
