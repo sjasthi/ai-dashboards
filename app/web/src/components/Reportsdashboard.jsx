@@ -125,6 +125,7 @@ export default function ReportsDashboard({ report }) {
   }, [chart]);
 
   const rec = report?.sourceRecommendation;
+  const stats = report?.stats;
   const chartType = chart?.data?.[0]?.type;
 
   return (
@@ -173,18 +174,18 @@ export default function ReportsDashboard({ report }) {
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <InsightCard icon="" title="Top Insight" titleColor="#94a3b8">
-            {rec?.question_answered ||
-              'Top finding placeholder — AI-generated key finding will appear here once the report is generated.'}
+            {stats?.available ? stats.top_insight_text : (rec?.question_answered ||
+              'Top finding placeholder — AI-generated key finding will appear here once the report is generated.')}
           </InsightCard>
 
           <InsightCard icon="⚠" title="Anomaly Detected" titleColor="#d97706">
-            {rec?.data_quality_warning ||
-              'Flag / warning placeholder — unusual patterns or statistical outliers will be surfaced here.'}
+            {stats?.available ? stats.anomaly_text : (rec?.data_quality_warning ||
+              'Flag / warning placeholder — unusual patterns or statistical outliers will be surfaced here.')}
           </InsightCard>
 
           <InsightCard icon="✓" title="Recommendation" titleColor="#16a34a">
-            {rec?.rationale_bullets?.[0] ||
-              'Suggested action placeholder — strategic recommendations based on your data will appear here.'}
+            {stats?.available ? stats.recommendation_text : (rec?.rationale_bullets?.[0] ||
+              'Suggested action placeholder — strategic recommendations based on your data will appear here.')}
           </InsightCard>
         </div>
       </div>
