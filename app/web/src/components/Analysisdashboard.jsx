@@ -1,7 +1,5 @@
-import { useState } from 'react';
-
-const API_BASE = 'http://localhost:8000';
-const REPORT_TYPE_LETTERS = ['A', 'B', 'C', 'D'];
+import React from 'react';
+import { REPORT_TYPE_LETTERS } from '../api';
 
 function PatternBadge({ pattern }) {
   return (
@@ -21,7 +19,7 @@ function PatternBadge({ pattern }) {
   );
 }
 
-function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected }) {
+function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, isBuilt }) {
   return (
     <div style={{
       background: 'white',
@@ -83,46 +81,22 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected }) 
           opacity: isGenerating && !isSelected ? 0.5 : 1
         }}
       >
-        {isSelected && isGenerating ? 'Generating…' : 'Generate this report'}
+        {isSelected && isGenerating
+          ? 'Generating…'
+          : isBuilt ? 'View this report' : 'Generate this report'}
       </button>
     </div>
   );
 }
 
-export default function AnalysisDashboard({ sessionId, recommendations, setReport, onDone }) {
-  const [generatingIndex, setGeneratingIndex] = useState(null);
-  const [errorMsg, setErrorMsg] = useState(null);
-
+export default function AnalysisDashboard({
+  sessionId, recommendations, reports = {}, generatingType, errorMsg, onGenerate,
+}) {
   const recList = recommendations?.recommendations || [];
 
-  const handleSelect = async (index) => {
+  const handleSelect = (index) => {
     if (!sessionId) return;
-
-    setGeneratingIndex(index);
-    setErrorMsg(null);
-
-    const reportType = REPORT_TYPE_LETTERS[index] || 'A';
-
-    try {
-      const response = await fetch(`${API_BASE}/api/generate-report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, report_type: reportType })
-      });
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(errBody.detail || `Request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      setReport({ ...data, sourceRecommendation: recList[index] });
-      if (onDone) onDone();
-    } catch (err) {
-      setErrorMsg(err.message || 'Something went wrong while generating the report.');
-    } finally {
-      setGeneratingIndex(null);
-    }
+    onGenerate(index);
   };
 
   return (
@@ -156,16 +130,20 @@ export default function AnalysisDashboard({ sessionId, recommendations, setRepor
           )}
 
           <div style={{ maxWidth: '760px' }}>
-            {recList.map((rec, i) => (
-              <RecommendationCard
-                key={i}
-                rec={rec}
-                index={i}
-                onSelect={handleSelect}
-                isGenerating={generatingIndex !== null}
-                isSelected={generatingIndex === i}
-              />
-            ))}
+            {recList.map((rec, i) => {
+              const letter = REPORT_TYPE_LETTERS[i] || 'A';
+              return (
+                <RecommendationCard
+                  key={i}
+                  rec={rec}
+                  index={i}
+                  onSelect={handleSelect}
+                  isGenerating={!!generatingType}
+                  isSelected={generatingType === letter}
+                  isBuilt={!!reports[letter]}
+                />
+              );
+            })}
           </div>
         </>
       )}

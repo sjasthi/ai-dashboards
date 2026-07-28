@@ -21,7 +21,9 @@ _CHART_TYPE_TRACE = {
 # (see report_builder._execute_groupby) - stripping a known suffix here lets us tell
 # an aggregated column (e.g. "churn_signal_mean") from a raw pass-through one (e.g.
 # "churn_signal") using only the column name, no access to the operations pipeline.
-_AGG_SUFFIXES = {
+# Public because report_stats.py needs the same suffix knowledge (to humanize column
+# names in its prose, and to decide whether summing a column is even meaningful).
+AGG_SUFFIXES = {
     "mean": "avg",
     "sum": "total",
     "count": "count",
@@ -31,6 +33,11 @@ _AGG_SUFFIXES = {
     "std": "std dev",
     "nunique": "unique count",
 }
+
+# Aggregations whose values can legitimately be added up. Summing a column of means
+# or standard deviations produces a number with no meaning ("the sum of 90 daily
+# averages"), so report_stats suppresses `sum` for anything outside this set.
+ADDITIVE_AGGS = {"sum", "count", "nunique"}
 
 # Words that imply an aggregation was computed (a rate, an average, a total, ...).
 # Applying one of these to a raw/un-aggregated column is how a display bug (ugly
@@ -46,27 +53,45 @@ _AGG_IMPLYING_WORDS = re.compile(
 MAX_PIE_SLICES = 5
 MAX_BAR_CATEGORIES = 20
 
-# Okabe-Ito: an 8-colour categorical palette designed to stay distinguishable under
-# the common forms of colour-blindness. Used as a consistent colourway across reports.
+# Longest category name a *vertical* bar chart can carry before its tick labels start
+# overlapping each other. Past this the chart is drawn horizontally instead, which puts
+# the names on the y-axis where they read left-to-right at full length. Measured, not
+# guessed: at a typical ~870px plot with 9 categories the slot is ~96px, and Plotly's
+# auto-rotated labels begin colliding once the text exceeds roughly 14 characters.
+MAX_VERTICAL_LABEL_CHARS = 14
+
+# Okabe-Ito, trimmed to the six slots that pass a palette audit against a light
+# surface. The full 8-colour set also carries #F0E442 (yellow, lightness 0.90 - above
+# the legible band on white) and #000000 (zero chroma, reads as the axis/text colour
+# rather than as a series). Those two were dropped: reports here are single-series or
+# close to it, so the tail slots were never reached, and keeping them invited a
+# 7th/8th series that no reader could resolve. The remaining six keep a worst-case
+# adjacent separation of dE 9.6 under deuteranopia.
 COLORWAY = [
-    "#0072B2", "#E69F00", "#009E73", "#D55E00",
-    "#CC79A7", "#56B4E9", "#F0E442", "#000000",
+    "#0072B2", "#E69F00", "#009E73",
+    "#D55E00", "#CC79A7", "#56B4E9",
 ]
 
 
-def _humanize_column(column: str) -> str:
+def humanize_column(column: str) -> str:
     """Turn a raw/derived column name into a readable axis label, e.g.
     "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group"."""
-    base = column
-    qualifier = None
-    for suffix, word in _AGG_SUFFIXES.items():
-        if column.endswith(f"_{suffix}"):
-            base = column[: -len(suffix) - 1]
-            qualifier = word
-            break
-
+    base, qualifier = split_agg_suffix(column)
     label = base.replace("_", " ").strip().title()
-    return f"{label} ({qualifier})" if qualifier else label
+    return f"{label} ({AGG_SUFFIXES[qualifier]})" if qualifier else label
+
+
+def split_agg_suffix(column: str) -> Tuple[str, Optional[str]]:
+    """Split "lifetime_value_mean" into ("lifetime_value", "mean"). Returns
+    (column, None) when the column carries no known aggregation suffix."""
+    for suffix in AGG_SUFFIXES:
+        if column.endswith(f"_{suffix}"):
+            return column[: -len(suffix) - 1], suffix
+    return column, None
+
+
+# Kept as a private alias so existing internal call sites read unchanged.
+_humanize_column = humanize_column
 
 
 def _resolve_axis_label(column: str, llm_label: Optional[str]) -> str:
@@ -77,7 +102,7 @@ def _resolve_axis_label(column: str, llm_label: Optional[str]) -> str:
     if not llm_label:
         return _humanize_column(column)
 
-    is_aggregated = any(column.endswith(f"_{suffix}") for suffix in _AGG_SUFFIXES)
+    is_aggregated = split_agg_suffix(column)[1] is not None
     if not is_aggregated and _AGG_IMPLYING_WORDS.search(llm_label):
         return _humanize_column(column)
 
@@ -162,6 +187,18 @@ def _prepare_categorical(df: pd.DataFrame, x_axis: str, y_axis: str) -> Tuple[Li
     return labels, values
 
 
+def _prefers_horizontal(labels: List[str]) -> bool:
+    """True when these category names are too long to sit under a vertical bar.
+
+    A vertical bar chart gives each category a slice of the plot's width, so a long
+    name can only be shown rotated - and rotated names run into each other as soon as
+    the text is wider than the slot. Turning the chart on its side removes the
+    constraint entirely: the names become y-axis ticks with the full plot width to
+    grow into, and they stay horizontal, which is also simply easier to read.
+    """
+    return any(len(str(label)) > MAX_VERTICAL_LABEL_CHARS for label in labels)
+
+
 def _ordered_xy(df: pd.DataFrame, x_axis: str, y_axis: str) -> Tuple[List[Any], List[Any]]:
     """(x_values, y_values) for a line/scatter trace, sorted by x so a line connects
     points left-to-right along the axis. Plotly draws a line in the array's order, not
@@ -224,6 +261,10 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         return None
 
     # ---- Build the trace ----
+    # Set when a bar chart is turned on its side; the axis titles below have to follow
+    # the swap, since the measure then lives on x and the categories on y.
+    horizontal = False
+
     if raw_histogram:
         values = pd.to_numeric(df[x_axis], errors="coerce").dropna()
         fig = go.Figure(go.Histogram(x=values.tolist(), xbins=_fd_xbins(df[x_axis])))
@@ -242,6 +283,12 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         if trace_type == "pie":
             labels, values = _cap_pie(labels, values)
             fig = go.Figure(go.Pie(labels=labels, values=values))
+        elif _prefers_horizontal(labels):
+            # Plotly fills a categorical y-axis from the bottom up, so the arrays are
+            # reversed to put the first row (the largest value, or the first ordinal
+            # bucket) at the top where reading starts.
+            horizontal = True
+            fig = go.Figure(go.Bar(x=values[::-1], y=labels[::-1], orientation="h"))
         else:
             fig = go.Figure(go.Bar(x=labels, y=values))
 
@@ -267,6 +314,12 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
             y_label = _resolve_axis_label(y_axis, plotly_config.get("y_axis_label"))
         else:
             y_label = "Count"  # raw histogram
+
+        # Turning the bars sideways moved the measure onto x and the categories onto y,
+        # so the titles have to change places with them - otherwise each axis is
+        # labelled with the other one's column.
+        if horizontal:
+            x_label, y_label = y_label, x_label
 
     is_pie = trace_type == "pie"
     fig.update_layout(

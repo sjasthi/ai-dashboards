@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI-Dashboard</title>
+  <!-- public/favicon.svg already existed but was never referenced, so every page load
+       fell back to a request for /favicon.ico and logged a 404. -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/src/main.jsx"></script>
 </head>

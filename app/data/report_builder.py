@@ -16,6 +16,12 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+# Bookkeeping columns prepended to every successful report so a stored DataFrame can
+# be traced back to the recommendation that produced it. They are not part of the
+# user's data: anything counting or displaying "the report's columns" must exclude
+# them, or a two-column report reports itself as having four.
+METADATA_COLUMNS = ("recommendation_rank", "recommendation_name")
+
 # Tokens that show up in "numeric" columns but really mean "missing" (e.g. the
 # Starbucks dataset uses "-" for unavailable nutrition facts). Compared as
 # whole-cell matches (case-insensitive) so real substrings like "AB-123" are
@@ -99,6 +105,11 @@ def generate_report(
             debug_lines.append(f"SCHEMA WARNING: {schema_warning}")
             final_df.attrs["schema_warning"] = schema_warning
 
+        for col in METADATA_COLUMNS:
+            # Defensive: a pipeline that produced a column of the same name would
+            # otherwise make insert() raise on a duplicate.
+            if col in final_df.columns:
+                final_df = final_df.drop(columns=col)
         final_df.insert(0, "recommendation_rank", rec.get("rank", 0))
         final_df.insert(1, "recommendation_name", rec.get("report_name", "Untitled"))
 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 const API_BASE = 'http://localhost:8000';
 
-export default function UploadDashboard({ files, setFiles, setSessionId, setRecommendations, setFileProfiles, onDone }) {
+export default function UploadDashboard({ files, setFiles, setSessionId, setRecommendations, setFileProfiles, onStart, onDone }) {
   const [status, setStatus] = useState('idle'); // idle | uploading | error | done
   const [errorMsg, setErrorMsg] = useState(null);
 
@@ -22,6 +22,9 @@ export default function UploadDashboard({ files, setFiles, setSessionId, setReco
 
     setStatus('uploading');
     setErrorMsg(null);
+    // Reports cached from the previous session describe data that is about to be
+    // replaced - clear them before the new session_id lands.
+    if (onStart) onStart();
 
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
