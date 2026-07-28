@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
 import SettingsDashboard from './components/Settingsdashboard';
+import { REPORT_TYPE_LETTERS, generateReport } from './api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('upload');
@@ -15,8 +16,38 @@ export default function App() {
   const [recommendations, setRecommendations] = useState(null); // { recommendations: [...] }
   const [fileProfiles, setFileProfiles] = useState(null);
 
-  // Populated once /api/generate-report succeeds (user picked a recommendation)
-  const [report, setReport] = useState(null);
+  // Generated reports, cached by report type ("A" | "B" | "C"). Held here rather
+  // than in the Reports page so switching between them - or comparing all three -
+  // doesn't re-POST a report the server has already built.
+  const [reports, setReports] = useState({});
+  const [activeReportType, setActiveReportType] = useState('A');
+  const [generatingType, setGeneratingType] = useState(null);
+  const [reportError, setReportError] = useState(null);
+
+  const requestReport = useCallback(async (letter) => {
+    setActiveReportType(letter);
+    setReportError(null);
+
+    // Already built: just show it.
+    if (reports[letter] || !sessionId) return;
+
+    setGeneratingType(letter);
+    try {
+      const data = await generateReport(sessionId, letter);
+      setReports((prev) => ({ ...prev, [letter]: data }));
+    } catch (err) {
+      setReportError(err.message || 'Something went wrong while generating the report.');
+    } finally {
+      setGeneratingType(null);
+    }
+  }, [reports, sessionId]);
+
+  const startNewSession = useCallback(() => {
+    // A new upload invalidates every report built from the previous one.
+    setReports({});
+    setActiveReportType('A');
+    setReportError(null);
+  }, []);
 
   const getTabStyle = (tab) => ({
     padding: '10px 4px',
@@ -31,15 +62,17 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* NAVBAR */}
-      <nav style={{
+      {/* Padding, gaps and wrapping live in dashboard.css (.app-nav) rather than here:
+          inline styles beat media queries, so anything that has to change at a
+          breakpoint can't be set on the element. */}
+      <nav className="app-nav" style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '14px 32px',
         background: 'white',
         borderBottom: '1px solid #e2e8f0'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="app-nav__brand" style={{ display: 'flex', alignItems: 'center' }}>
           <div style={{
             width: '34px',
             height: '34px',
@@ -60,7 +93,7 @@ export default function App() {
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '32px' }}>
+        <div className="app-nav__tabs" style={{ display: 'flex' }}>
           {['upload', 'analysis', 'reports', 'settings'].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -68,11 +101,10 @@ export default function App() {
           ))}
         </div>
 
-        <button style={{
+        <button className="app-nav__signin" style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          padding: '8px 16px',
           background: 'white',
           border: '1px solid #cbd5e1',
           borderRadius: '6px',
@@ -92,7 +124,7 @@ export default function App() {
         </button>
       </nav>
 
-      <main style={{ padding: '32px 40px' }}>
+      <main className="app-main">
         {activeTab === 'upload' && (
           <UploadDashboard
             files={files}
@@ -100,6 +132,7 @@ export default function App() {
             setSessionId={setSessionId}
             setRecommendations={setRecommendations}
             setFileProfiles={setFileProfiles}
+            onStart={startNewSession}
             onDone={() => setActiveTab('analysis')}
           />
         )}
@@ -108,11 +141,27 @@ export default function App() {
             files={files}
             sessionId={sessionId}
             recommendations={recommendations}
-            setReport={setReport}
-            onDone={() => setActiveTab('reports')}
+            reports={reports}
+            generatingType={generatingType}
+            errorMsg={reportError}
+            onGenerate={async (index) => {
+              await requestReport(REPORT_TYPE_LETTERS[index] || 'A');
+              setActiveTab('reports');
+            }}
           />
         )}
-        {activeTab === 'reports' && <ReportsDashboard report={report} />}
+        {activeTab === 'reports' && (
+          <ReportsDashboard
+            reports={reports}
+            activeType={activeReportType}
+            onSelectType={requestReport}
+            recommendations={recommendations}
+            sessionId={sessionId}
+            fileProfiles={fileProfiles}
+            generatingType={generatingType}
+            errorMsg={reportError}
+          />
+        )}
         {activeTab === 'settings' && <SettingsDashboard />}
       </main>
     </div>

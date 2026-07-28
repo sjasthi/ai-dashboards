@@ -36,7 +36,7 @@ class Aggregation(BaseModel):
     # former open-ended {"column": "func"} dict so the whole response is expressible
     # as a closed JSON Schema (a requirement for provider-side structured decoding -
     # an arbitrary-key object has no schema). func is a closed enum for the same
-    # reason, and it matches chart_builder._AGG_SUFFIXES so "{column}_{func}" outputs
+    # reason, and it matches chart_builder.AGG_SUFFIXES so "{column}_{func}" outputs
     # still humanize correctly.
     column: str
     func: Literal["sum", "mean", "count", "min", "max", "median", "std", "nunique"]

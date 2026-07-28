@@ -29,8 +29,11 @@ try:
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
-    from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes
+    from app.data.report_builder import (
+        METADATA_COLUMNS, generate_report, report_type_to_index, resolve_plotly_axes,
+    )
     from app.data.chart_builder import build_chart_figure
+    from app.data.report_stats import build_report_stats
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
@@ -162,7 +165,7 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             file_metadata.append({
                 "name": file.filename,
                 "size": len(content),
-                "rows": 500,  # TODO: REVIEW - [MOCK] placeholder row count — not computed from real data even when pipeline succeeds
+                "rows": None,  # filled in from the real FileProfile once profiling runs
             })
 
         if not file_paths:
@@ -218,6 +221,17 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
                 system_prompt=system_prompt,
             )
 
+            # Backfill the real row/column counts now that profiling has produced
+            # them. file_metadata is what the frontend actually renders, and it was
+            # previously reporting a hardcoded 500 rows for every file regardless of
+            # what had been uploaded.
+            by_name = {p.filename: p for p in file_profiles}
+            for meta in file_metadata:
+                profile = by_name.get(meta["name"])
+                if profile:
+                    meta["rows"] = profile.row_count
+                    meta["columns"] = len(profile.columns)
+
             print(f"[API] Analysis complete!")
 
           except Exception as e:
@@ -245,8 +259,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
         }
         
         # NOTE: this "file_profiles" response field is actually `file_metadata`
-        # (name/size/[MOCK] placeholder rows) — the real per-column `file_profiles`
-        # computed above is only stored in SESSIONS, never returned to the caller.
+        # (name/size/rows/columns). The full per-column `file_profiles` computed above
+        # stays in SESSIONS; the report endpoint reads temporal granularity out of it.
         return {
             "session_id": session_id,
             "status": "complete",
@@ -268,6 +282,77 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
         # Clean up temp directory
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
+
+
+# ============================================================================
+# REPORT RESPONSE HELPERS
+# ============================================================================
+
+# How many report rows travel to the browser for the table view. The full set stays
+# in SESSIONS; a 50k-row report should not become a 50k-row JSON payload.
+MAX_ROWS_RETURNED = 500
+
+
+def _json_safe_records(df, limit):
+    """Report rows as JSON-safe dicts.
+
+    Routed through pandas' own JSON writer because a report DataFrame routinely holds
+    Timestamps, numpy scalars, NaN and ordered Categoricals - none of which the
+    default JSON encoder will accept.
+    """
+    import json as _json
+    try:
+        return _json.loads(df.head(limit).to_json(orient="records", date_format="iso"))
+    except Exception as e:
+        print(f"[API] Warning: could not serialize report rows: {type(e).__name__}: {e}")
+        return []
+
+
+def _axis_granularity(file_profiles, column):
+    """The temporal granularity (daily/weekly/monthly/yearly) profiled for `column`.
+
+    Lets report_stats format date labels at the dataset's own resolution - "Mar 2023"
+    for a monthly report rather than "1 Mar 2023", which implies a precision the data
+    doesn't have.
+    """
+    if not column or not file_profiles:
+        return None
+    for profile in file_profiles:
+        for col in getattr(profile, "columns", []) or []:
+            if col.name == column and getattr(col, "temporal_granularity", None):
+                return col.temporal_granularity
+    return None
+
+
+def _describe_operations(operations):
+    """One short human-readable line per pipeline step, for the provenance strip.
+
+    The reader is being asked to trust these numbers; showing which filters and
+    aggregations produced them is part of earning that.
+    """
+    described = []
+    for op in operations or []:
+        kind = op.get("operation_type")
+        if kind == "filter":
+            for cond in op.get("filter_conditions", []) or []:
+                col = cond.get("column", "?")
+                val = cond.get("condition", cond.get("value", ""))
+                described.append(f"filter {col} {val}".strip())
+        elif kind == "groupby":
+            keys = ", ".join(op.get("groupby_columns", []) or [])
+            aggs = ", ".join(
+                f"{a.get('func')}({a.get('column')})" for a in op.get("aggregations", []) or []
+            )
+            described.append(f"group by {keys}" + (f" → {aggs}" if aggs else " → count"))
+        elif kind == "derive":
+            for d in op.get("derive_columns", []) or []:
+                described.append(f"derive {d.get('new_column', '?')} ({d.get('method', '?')})")
+        elif kind == "sort_limit":
+            limit = op.get("limit")
+            described.append(f"top {limit}" if limit else "sort")
+        elif kind == "join":
+            described.append(f"join {', '.join(op.get('files_involved', []) or [])}")
+    return described
 
 
 # ----------------------------------------------------------------------------
@@ -337,7 +422,12 @@ def generate_report_endpoint(request: GenerateReportRequest):
         recs_list = recommendations.get("recommendations", [])
         rec_idx = report_type_to_index(report_type)
         selected_rec = recs_list[rec_idx] if rec_idx is not None and rec_idx < len(recs_list) else None
+
+        # Both initialised up front: axes_config used to be bound only inside the
+        # `if selected_rec:` branch, so anything reading it afterwards raised
+        # NameError on a report with no matching recommendation.
         chart = None
+        axes_config = None
         if selected_rec:
             try:
                 axes_config = resolve_plotly_axes(
@@ -349,26 +439,70 @@ def generate_report_endpoint(request: GenerateReportRequest):
             except Exception as e:
                 print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
 
-        # Store report in session
-        SESSIONS[session_id]["report"] = {
-            "type": report_type,
-            "generated_at": datetime.now().isoformat(),
-            "rows": len(report_df),
-            "columns": list(report_df.columns),
-            "data": report_df.to_dict(orient="records"),  # Store as list of dicts for JSON
-            "chart": chart
-        }
+        # Real statistics, computed from the report's own rows. These replace the
+        # model's pre-execution guesses (question_answered / data_quality_warning /
+        # rationale_bullets), which were written before any data was aggregated and
+        # were being displayed as though they were findings.
+        schema_warning = report_df.attrs.get("schema_warning")
+        stats = {"available": False}
+        try:
+            stats = build_report_stats(
+                report_df,
+                axes_config,
+                pattern=(selected_rec or {}).get("pattern_used"),
+                granularity=_axis_granularity(
+                    session.get("file_profiles"), (axes_config or {}).get("x_axis")
+                ),
+                llm_caveat=(selected_rec or {}).get("data_quality_warning"),
+                schema_warning=schema_warning,
+            )
+        except Exception as e:
+            # A stats failure must not cost the user their report or their chart.
+            print(f"[API] Warning: Failed to compute report stats: {type(e).__name__}: {e}")
 
-        return {
+        # The user's own columns, without the two bookkeeping columns report_builder
+        # prepends. Counting those made every report claim two extra columns.
+        data_columns = [c for c in report_df.columns if c not in METADATA_COLUMNS]
+        rows = _json_safe_records(report_df, MAX_ROWS_RETURNED)
+        generated_at = datetime.now().isoformat()
+
+        payload = {
             "session_id": session_id,
             "report_type": report_type,
             "status": "generated",
+            "report_name": selected_rec.get("report_name") if selected_rec else None,
             "report_rows": len(report_df),
             "columns": list(report_df.columns),
-            "report_name": selected_rec.get("report_name") if selected_rec else None,
+            "data_columns": data_columns,
             "chart": chart,
+            # The chart type the recommendation asked for. Reading it off the built
+            # figure instead reports Plotly's trace name, which labels every "line"
+            # recommendation as a "scatter".
+            "chart_type": ((selected_rec or {}).get("plotly_config") or {}).get("chart_type"),
+            "pattern_used": (selected_rec or {}).get("pattern_used"),
+            "question_answered": (selected_rec or {}).get("question_answered"),
+            "rationale_bullets": (selected_rec or {}).get("rationale_bullets", []),
+            "stats": stats,
+            "rows": rows,
+            "rows_truncated": len(report_df) > len(rows),
+            "schema_warning": schema_warning,
+            "generated_at": generated_at,
+            "source_files": sorted({
+                f for op in (selected_rec or {}).get("required_operations", []) or []
+                for f in op.get("files_involved", []) or []
+            }),
+            "operations": _describe_operations((selected_rec or {}).get("required_operations")),
             "message": f"Report generated successfully with {len(report_df)} rows"
         }
+
+        # Store the full report server-side; the response carries a capped slice.
+        SESSIONS[session_id]["report"] = {
+            **payload,
+            "generated_at": generated_at,
+            "data": report_df.to_dict(orient="records"),
+        }
+
+        return payload
     
     except HTTPException:
         # Already a deliberate HTTP error (e.g. the 422 above) - don't rewrap as a 500
