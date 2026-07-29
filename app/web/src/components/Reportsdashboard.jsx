@@ -140,7 +140,7 @@ function ReportHeader({
   return (
     <header className="report-header">
       <div className="report-header__top">
-        <div style={{ minWidth: 0 }}>
+        <div className="report-header__text">
           <span className="eyebrow">
             {report?.pattern_used || rec?.pattern_used || 'Report'}
           </span>
@@ -156,7 +156,7 @@ function ReportHeader({
           <Provenance report={report} fileProfiles={fileProfiles} />
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+        <div className="report-header__controls">
           <div className="segmented" role="group" aria-label="Choose report">
             {letters.map((letter) => (
               <button

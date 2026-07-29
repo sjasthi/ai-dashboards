@@ -100,7 +100,11 @@
 
 /* ---------- page + header ---------- */
 
-.reports-page {
+/* Every step shares one centred column, so moving Upload -> Analysis -> Results
+   doesn't slide the content sideways under the nav. */
+.reports-page,
+.upload-page,
+.analysis-page {
   max-width: 1280px;
   margin: 0 auto;
   font-family: var(--font-ui);
@@ -109,11 +113,22 @@
 
 .report-header { margin-bottom: 20px; }
 
+/* Stacked, not a space-between row: as a row the A/B/C group's position depended on
+   how long the provenance line happened to be, so it sat below the metadata on a
+   report with three source files and jumped up to the far right on a report with one. */
 .report-header__top {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 20px;
+}
+
+.report-header__text { min-width: 0; }
+
+.report-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -609,7 +624,6 @@
 
 @media (max-width: 640px) {
   .kpi-row { grid-template-columns: 1fr; }
-  .report-header__top { flex-direction: column; align-items: stretch; }
   /* Two readable columns beat four cramped ones once the phone width is reached. */
   .stat-strip { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
 }
