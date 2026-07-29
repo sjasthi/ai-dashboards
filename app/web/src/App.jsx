@@ -112,7 +112,7 @@ export default function App() {
             onDone={() => setActiveTab('reports')}
           />
         )}
-        {activeTab === 'reports' && <ReportsDashboard report={report} />}
+        {activeTab === 'reports' && <ReportsDashboard report={report} sessionId={sessionId} />}
         {activeTab === 'settings' && <SettingsDashboard />}
       </main>
     </div>

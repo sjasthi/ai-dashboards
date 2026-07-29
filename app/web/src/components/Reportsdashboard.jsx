@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
+const API_BASE = 'http://localhost:8000';
 const PLOTLY_CDN = 'https://cdn.plot.ly/plotly-2.32.0.min.js';
 
 function loadPlotly() {
@@ -68,7 +69,9 @@ function InsightCard({ icon, title, titleColor, children }) {
   );
 }
 
-function ExportCard({ title }) {
+function ExportCard({ title, exportType, sessionId, hasReport, onExport, exportingKey }) {
+  const disabled = !sessionId || !hasReport;
+
   return (
     <div style={{
       background: 'white',
@@ -81,29 +84,95 @@ function ExportCard({ title }) {
         {title}
       </div>
       <div style={{ display: 'flex', gap: '8px' }}>
-        {['PDF', 'HTML', 'Email'].map(fmt => (
-          <button key={fmt} style={{
-            padding: '6px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            color: '#334155',
-            background: 'white',
-            border: '1px solid #cbd5e1',
-            borderRadius: '6px',
-            cursor: 'pointer'
-          }}>
-            {fmt}
-          </button>
-        ))}
+        {['PDF', 'HTML', 'Email'].map(fmt => {
+          const key = `${exportType}-${fmt}`;
+          const isBusy = exportingKey === key;
+          return (
+            <button
+              key={fmt}
+              disabled={disabled || isBusy}
+              onClick={() => onExport(exportType, fmt.toLowerCase())}
+              style={{
+                padding: '6px 14px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#334155',
+                background: 'white',
+                border: '1px solid #cbd5e1',
+                borderRadius: '6px',
+                cursor: (disabled || isBusy) ? 'not-allowed' : 'pointer',
+                opacity: (disabled || isBusy) ? 0.5 : 1
+              }}
+            >
+              {isBusy ? '…' : fmt}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-export default function ReportsDashboard({ report }) {
+export default function ReportsDashboard({ report, sessionId }) {
   const chartRef = useRef(null);
   const hasReport = !!report;
   const chart = report?.chart;
+  const [exportingKey, setExportingKey] = useState(null);
+  const [exportError, setExportError] = useState(null);
+
+  const handleExport = async (exportType, format) => {
+    if (!sessionId) return;
+    const key = `${exportType}-${format}`;
+
+    if (format === 'email') {
+      // Gmail's web compose window, not mailto: - works with no desktop mail
+      // client installed/configured, which mailto: depends on. Can't attach
+      // the actual PDF/HTML file this way (Gmail's compose URL doesn't support
+      // pre-attached files), so this prefills subject/body only; the person
+      // can attach the downloaded file themselves, or ask for real SMTP
+      // sending with an attachment if that's what's actually needed.
+      const subject = encodeURIComponent(`${report?.report_name || 'Report'} — ${exportType} export`);
+      const bodyLines = [
+        report?.stats?.top_insight_text,
+        report?.stats?.anomaly_text,
+        report?.stats?.recommendation_text,
+      ].filter(Boolean);
+      const body = encodeURIComponent(bodyLines.join('\n\n') || 'See attached report.');
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${subject}&body=${body}`;
+      window.open(gmailUrl, '_blank');
+      return;
+    }
+
+    setExportError(null);
+    setExportingKey(key);
+    try {
+      const url = `${API_BASE}/api/export/${sessionId}?export_type=${exportType}&format=${format}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.detail || `Export failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match ? match[1] : `${exportType}.${format}`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      setExportError(err.message || 'Something went wrong while exporting.');
+    } finally {
+      setExportingKey(null);
+    }
+  };
 
   useEffect(() => {
     if (!chart || !chartRef.current) return;
@@ -195,10 +264,17 @@ export default function ReportsDashboard({ report }) {
         <div style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.05em', color: '#94a3b8', marginBottom: '14px' }}>
           EXPORT
         </div>
+
+        {exportError && (
+          <div style={{ marginBottom: '16px', padding: '12px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', color: '#b91c1c' }}>
+            {exportError}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '16px' }}>
-          <ExportCard title="Summary Report" />
-          <ExportCard title="Full Analysis" />
-          <ExportCard title="Recommendations" />
+          <ExportCard title="Summary Report" exportType="summary" sessionId={sessionId} hasReport={hasReport} onExport={handleExport} exportingKey={exportingKey} />
+          <ExportCard title="Full Analysis" exportType="full" sessionId={sessionId} hasReport={hasReport} onExport={handleExport} exportingKey={exportingKey} />
+          <ExportCard title="Recommendations" exportType="recommendations" sessionId={sessionId} hasReport={hasReport} onExport={handleExport} exportingKey={exportingKey} />
         </div>
       </div>
     </div>

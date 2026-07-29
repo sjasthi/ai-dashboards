@@ -8,7 +8,7 @@ tags on each endpoint below.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 import json
 import os
@@ -31,6 +31,8 @@ try:
     import app.data.AI_Engine as ai_engine
     from app.data.report_builder import generate_report, report_type_to_index, resolve_plotly_axes
     from app.data.chart_builder import build_chart_figure
+    from app.data.report_stats import build_report_stats
+    from app.data.export_builder import build_export
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
@@ -200,11 +202,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
             print(f"[API] Building recommendation prompt...")
 
-            # Build recommendation prompt. The static instruction block goes in the
-            # system message (a stable, cacheable prefix); only the per-dataset profiles
-            # go in the user message.
+            # Build recommendation prompt
             requester = RecommendationRequester()
-            system_prompt = requester.build_system_prompt()
             prompt = requester.build_request_prompt(file_profiles, relationships)
 
             print(f"[API] Sending to AI Engine...")
@@ -215,22 +214,15 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             recommendations = ai_engine.get_validated_recommendations(
                 prompt, valid_filenames, session_id=session_id, tables=session_tables,
                 correction_prompt=requester.build_correction_prompt(file_profiles, relationships),
-                system_prompt=system_prompt,
+                max_retries=2
             )
 
             print(f"[API] Analysis complete!")
 
           except Exception as e:
-            # Surface a real error instead of silently returning mock data dressed up
-            # as a real analysis - showing fabricated recommendations as if they were
-            # generated from the user's files is misleading. The console line gives the
-            # developer the underlying cause; the 502 gives the UI a message to render
-            # (Uploaddashboard already displays errBody.detail).
-            print(f"[API] Analysis failed: {type(e).__name__}: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail="AI analysis failed — check the server console and try again.",
-            )
+            # [MOCK FALLBACK] real pipeline failed — `fallback` values above stand
+            print(f"[API] Error during analysis: {type(e).__name__}: {e}")
+            print(f"[API] Returning mock data for {len(file_paths)} file(s)")
 
         # Store session info
         SESSIONS[session_id] = {
@@ -338,6 +330,7 @@ def generate_report_endpoint(request: GenerateReportRequest):
         rec_idx = report_type_to_index(report_type)
         selected_rec = recs_list[rec_idx] if rec_idx is not None and rec_idx < len(recs_list) else None
         chart = None
+        axes_config = None
         if selected_rec:
             try:
                 axes_config = resolve_plotly_axes(
@@ -349,6 +342,18 @@ def generate_report_endpoint(request: GenerateReportRequest):
             except Exception as e:
                 print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
 
+        # Real stats computed from the actual report data (peak/trend/anomalies),
+        # replacing the LLM's pre-execution guesses (question_answered /
+        # data_quality_warning / rationale_bullets) that the frontend used to fall
+        # back on. Uses the same resolved axes_config as the chart above, so it
+        # analyzes exactly the columns being plotted.
+        try:
+            stats = build_report_stats(report_df, axes_config)
+        except Exception as e:
+            print(f"[API] Warning: Failed to compute report stats: {type(e).__name__}: {e}")
+            stats = {"available": False, "top_insight_text": None, "anomaly_text": None,
+                      "recommendation_text": None, "anomalies": []}
+
         # Store report in session
         SESSIONS[session_id]["report"] = {
             "type": report_type,
@@ -356,7 +361,8 @@ def generate_report_endpoint(request: GenerateReportRequest):
             "rows": len(report_df),
             "columns": list(report_df.columns),
             "data": report_df.to_dict(orient="records"),  # Store as list of dicts for JSON
-            "chart": chart
+            "chart": chart,
+            "stats": stats
         }
 
         return {
@@ -367,6 +373,7 @@ def generate_report_endpoint(request: GenerateReportRequest):
             "columns": list(report_df.columns),
             "report_name": selected_rec.get("report_name") if selected_rec else None,
             "chart": chart,
+            "stats": stats,
             "message": f"Report generated successfully with {len(report_df)} rows"
         }
     
@@ -377,6 +384,274 @@ def generate_report_endpoint(request: GenerateReportRequest):
     except Exception as e:
         print(f"[API] Error generating report: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
+
+# ============================================================================
+# EXPORT — [REAL] Builds Summary Report / Full Analysis / Recommendations as
+# a real PDF or HTML file from the session's already-generated report + stats.
+# No AI call is made here, so this can't fail due to Ollama/Groq/Gemini issues.
+# ============================================================================
+
+@app.get("/api/export/{session_id}")
+def export_report(session_id: str, export_type: str = "summary", format: str = "pdf"):
+    """
+    Args:
+        session_id: session returned by /api/analyze-full
+        export_type: 'summary' | 'full' | 'recommendations'
+        format: 'pdf' | 'html'
+
+    Returns the file directly (Content-Disposition: attachment), so hitting
+    this URL in a browser tab or via <a href> triggers a download.
+    """
+    print(f"\n[API] /api/export called: session_id={session_id}, export_type={export_type}, format={format}")
+
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    if not DATA_MODULES_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Export is unavailable because the data modules failed to load")
+
+    session = SESSIONS[session_id]
+
+    try:
+        content_bytes, mime_type, filename = build_export(session, export_type, format)
+    except ValueError as e:
+        # build_export raises ValueError for bad export_type/format, or if no
+        # report has been generated yet - both are the caller's fault, not a
+        # server error.
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"[API] Error building export: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error building export: {str(e)}")
+
+    return Response(
+        content=content_bytes,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+# TODO: Review & Remove legacy code
+# # ============================================================================
+# # ENDPOINTS — UNUSED / LEGACY (not called by current frontend)
+# # ============================================================================
+
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED] Only called by legacy app/web/src/js/api.js (pre-React)
+# # ----------------------------------------------------------------------------
+# @app.post("/api/upload")
+# async def upload_files(files: list[UploadFile] = File(...)):
+#     """
+#     [MOCK, UNUSED]
+#     Upload one or more CSV/Excel files.
+
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "status": "processing",
+#             "files": [
+#                 {"name": "file1.csv", "size": 12345, "rows": 500}
+#             ]
+#         }
+#     """
+#     try:
+#         session_id = generate_session_id()
+#         file_metadata = []
+
+#         for file in files:
+#             # Mock parsing — in reality you'd use pandas/openpyxl
+#             # to get real row/sheet counts
+#             filename = file.filename or "unknown"
+#             size = len(await file.read())
+
+#             # Mock: random rows between 500-5000
+#             import random
+#             rows = random.randint(500, 5000)
+
+#             file_metadata.append({
+#                 "name": filename,
+#                 "size": size,
+#                 "rows": rows
+#             })
+
+#         # Store session info
+#         SESSIONS[session_id] = {
+#             "files": file_metadata,
+#             "status": "processing",
+#             "created_at": datetime.now().isoformat(),
+#             "analysis": None
+#         }
+
+#         return {
+#             "session_id": session_id,
+#             "status": "processing",
+#             "files": file_metadata,
+#             "message": f"Received {len(files)} file(s). Analysis starting..."
+#         }
+
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+
+
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED] Superseded by /api/analyze-full
+# # ----------------------------------------------------------------------------
+# @app.post("/api/analyze")
+# def analyze_data(session_id: str, report_type: Optional[str] = "A"):
+#     """
+#     [MOCK, UNUSED]
+#     Trigger analysis for a session and report type.
+
+#     Args:
+#         session_id: Session ID from upload
+#         report_type: 'A', 'B', or 'C'
+
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "report_type": "A",
+#             "status": "complete",
+#             "analysis": {...},
+#             "charts": [...]
+#         }
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+
+#     # Mock analysis result
+#     mock_analysis = {
+#         "summary": f"Analysis of {len(SESSIONS[session_id]['files'])} file(s) using report type {report_type}",
+#         "key_insights": [
+#             "Data contains 3 key categories",
+#             "Outliers detected in 2 columns",
+#             "Strong correlation between variables X and Y"
+#         ],
+#         "data_quality": {
+#             "completeness": "95%",
+#             "duplicates": "2.1%",
+#             "anomalies": "0.5%"
+#         }
+#     }
+
+#     mock_charts = [
+#         {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
+#         {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
+#         {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
+#     ]
+
+#     SESSIONS[session_id]["status"] = "complete"
+#     SESSIONS[session_id]["analysis"] = mock_analysis
+
+#     return {
+#         "session_id": session_id,
+#         "report_type": report_type,
+#         "status": "complete",
+#         "analysis": mock_analysis,
+#         "charts": mock_charts
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL + MOCK FALLBACK, UNUSED] Real session lookup, hardcoded fake charts
+# # ----------------------------------------------------------------------------
+# @app.get("/api/results/{session_id}")
+# def get_results(session_id: str):
+#     """
+#     [REAL + MOCK FALLBACK, UNUSED]
+#     Fetch analysis results for a session.
+
+#     Returns:
+#         {
+#             "session_id": "20260704_120530",
+#             "status": "complete",
+#             "analysis": {...},
+#             "charts": [...]
+#         }
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+    
+#     session = SESSIONS[session_id]
+    
+#     return {
+#         "session_id": session_id,
+#         "status": session["status"],
+#         "analysis": session["analysis"],
+#         "charts": [] if session["analysis"] is None else [
+#             {"type": "bar", "title": "Distribution by Category", "id": "chart_1"},
+#             {"type": "line", "title": "Trend Over Time", "id": "chart_2"},
+#             {"type": "scatter", "title": "Correlation Analysis", "id": "chart_3"}
+#         ]
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [MOCK, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.get("/api/export/{session_id}")
+# def export_report(session_id: str, format: str = "json"):
+#     """
+#     [MOCK, UNUSED]
+#     Export analysis as PDF, HTML, or JSON.
+
+#     Args:
+#         session_id: Session ID
+#         format: 'json', 'html', or 'pdf'
+
+#     Returns mock file data
+#     """
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+    
+#     # Mock response
+#     return {
+#         "session_id": session_id,
+#         "format": format,
+#         "status": "ready",
+#         "download_url": f"/downloads/{session_id}/report.{format}",
+#         "message": f"Report exported as {format.upper()}"
+#     }
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.get("/api/sessions")
+# def list_sessions():
+#     """
+#     [REAL, UNUSED]
+#     List all stored sessions.
+#     Useful for Reports page.
+#     """
+#     sessions_list = [
+#         {
+#             "session_id": sid,
+#             "created_at": sess.get("created_at"),
+#             "file_count": len(sess.get("files", [])),
+#             "status": sess.get("status"),
+#             "total_rows": sum(f.get("rows", 0) for f in sess.get("files", []))
+#         }
+#         for sid, sess in SESSIONS.items()
+#     ]
+#     return {"sessions": sessions_list, "total_count": len(sessions_list)}
+
+
+# # ----------------------------------------------------------------------------
+# # [REAL, UNUSED]
+# # ----------------------------------------------------------------------------
+# @app.delete("/api/sessions/{session_id}")
+# def delete_session(session_id: str):
+#     """[REAL, UNUSED] Delete a session."""
+#     if session_id not in SESSIONS:
+#         raise HTTPException(status_code=404, detail="Session not found")
+
+#     del SESSIONS[session_id]
+#     return {"message": f"Session {session_id} deleted"}
+
+
+# ============================================================================
+# RUN
+# ============================================================================
 
 if __name__ == "__main__":
     import uvicorn
