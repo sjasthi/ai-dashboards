@@ -17,8 +17,12 @@ load_dotenv()
 # ============================================================================
 # DEBUG CONFIGURATION
 # ============================================================================
-# Toggle this to enable/disable saving raw and cleaned responses to files
-SAVE_DEBUG_FILES = True  # Set to False to disable file saving
+# Writes each LLM exchange to session_data/<session_id>/ (raw_response.txt and
+# cleaned_response.json). Off by default so a normal run leaves no artifacts;
+# set SAVE_DEBUG_FILES=true in .env when you need them - notably before using
+# scripts/replay_report.py, which replays cleaned_response.json and has nothing
+# to read without this enabled.
+SAVE_DEBUG_FILES = os.getenv("SAVE_DEBUG_FILES", "false").strip().lower() in ("1", "true", "yes")
 
 # ============================================================================
 # AI BACKEND CONFIGURATION

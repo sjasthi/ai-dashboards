@@ -1,22 +1,11 @@
-# DataLens — AI Report Builder
+# AI-Dashboard — Frontend
 
-A Vite-powered web app for uploading spreadsheet data and generating AI-powered analysis reports.
+A **React 18 + Vite** single-page app for uploading spreadsheet data and viewing
+AI-generated analysis reports.
 
----
-
-## What is Vite?
-
-Vite is a **build tool and development server** for web projects. It does two things:
-
-**1. In development** — runs a local server (`localhost:5173`) with instant hot reload.
-When you save a file, only that module is swapped in the browser — no full page refresh.
-This makes editing CSS and JS feel nearly instantaneous.
-
-**2. At build time** — bundles your source files into an optimized `dist/` folder.
-CSS gets combined and minified. JS gets bundled and fingerprinted for cache-busting.
-That `dist/` folder is what you deploy to your hosting provider.
-
-You write in many small, readable files. Your users receive one fast, optimized file.
+> This app is only half the system. It calls a FastAPI backend on
+> `http://localhost:8000`, which must be running for anything beyond the static UI to
+> work. See [RUNNING_APP.md](../../RUNNING_APP.md) for the full two-terminal setup.
 
 ---
 
@@ -25,190 +14,142 @@ You write in many small, readable files. Your users receive one fast, optimized 
 - [Node.js](https://nodejs.org/) v18 or higher
 - npm (comes with Node)
 
-Check your versions:
-```bash
-node --version   # should be v18+
-npm --version    # should be v9+
-```
-
 ---
 
-## Getting started (local development)
+## Getting started
 
+All commands use `--prefix app/web` so they work from the repository root. If you `cd`
+into `app/web` first, drop the prefix.
 
 ```bash
-# 1. Install dependencies (only needed once, or after pulling new changes)
+# 1. Install dependencies (once, or after pulling new changes)
 npm --prefix app/web ci
 
-# 2. Start the dev server
-npm --prefix app/web run dev  
-```
+# 2. Start the dev server on http://localhost:5173
+npm --prefix app/web run dev
 
-Open `http://localhost:5173` in your browser. The page reloads automatically when you save any file.
-
-**To stop the dev server:** press `Ctrl + C` in the terminal.
-
----
-
-## Building for production
-
-```bash
-npm run build
-```
-
-This creates a `dist/` folder with your optimized app. You can preview it locally first:
-
-```bash
-npm run preview
-# → http://localhost:4173
-```
-
----
-
-## Deploying
-
-Build produces a `dist/` folder containing the production-ready static site. You can deploy `dist/` to any static hosting provider (Netlify, GitHub Pages, S3, Cloudflare Pages, etc.) or serve it from your own server.
-
-Option A — Static hosts (Netlify / Cloudflare Pages / S3)
-
-1. Push this project to a Git repository.
-2. Connect the repo in your host's dashboard and configure the build command `npm run build` and publish directory `dist/`.
-
-Option B — Serve locally or on a VM
-
-Build locally then serve the `dist/` folder with any static file server:
-
-```bash
-# build
+# 3. Production build -> app/web/dist/
 npm --prefix app/web run build
 
-# serve (example using a simple static server)
-npm install -g serve
-serve -s app/web/dist -l 8080
+# 4. Preview the production build locally
+npm --prefix app/web run preview
 ```
 
-Option C — Manual upload
+Remember to start the backend in a second terminal, or every upload will fail:
 
-Run `npm run build` locally, then upload the `dist/` folder to your hosting provider.
+```bash
+uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
+```
 
 ---
 
 ## Project structure
 
 ```
-datalens/
-├── index.html              ← App shell: navbar, page sections, footer
-├── package.json            ← Project metadata and npm scripts
-├── vite.config.js          ← Vite configuration (if needed)
-│
+app/web/
+├── index.html                  # App shell. Loads /src/main.jsx and the Plotly CDN
+│                               # script; the entire UI mounts into <div id="root">
+├── vite.config.js              # Vite + @vitejs/plugin-react
+├── package.json
+├── public/
+│   └── favicon.svg             # Copied verbatim into dist/
 └── src/
-    ├── main.js             ← Entry point: imports CSS + JS, wires event listeners
-    │
-    ├── css/
-    │   ├── tokens.css      ← Design tokens (colors, fonts, spacing) — edit here to restyle
-    │   ├── base.css        ← Reset, body, shared utilities (buttons, cards)
-    │   ├── navbar.css      ← Navbar and user menu
-    │   ├── footer.css      ← Footer
-    │   ├── upload.css      ← Step 1: Upload page
-    │   ├── analysis.css    ← Step 2: Analysis / report selection
-    │   ├── results.css     ← Step 3: Results, chart, export
-    │   └── settings.css    ← Settings page
-    │
-    └── js/
-        ├── state.js        ← Shared app state (files, selectedReport, auth)
-        ├── router.js       ← navigate() — shows/hides pages, syncs nav
-        ├── files.js        ← Drag & drop, file parsing, file list rendering
-        ├── reports.js      ← Report card selection logic
-        ├── export.js       ← Export button handlers (PDF, HTML, Email)
-        ├── user.js         ← User menu dropdown and auth stubs
-        └── utils.js        ← Shared helpers (escHtml, etc.)
+    ├── main.jsx                # Entry point: createRoot -> <App>, imports both stylesheets
+    ├── App.jsx                 # Nav, tab routing, and ALL shared session state
+    │                           # (files, sessionId, recommendations, reports cache)
+    ├── api.js                  # fetch client: API_BASE, generateReport, REPORT_TYPE_LETTERS
+    ├── format.js               # compactNumber / exactNumber / humanizeColumn / clockTime
+    ├── chartLayout.js          # Plotly layout theming applied in Plot.jsx
+    ├── components/
+    │   ├── Uploaddashboard.jsx    # Step 1 — file picker; POSTs /api/analyze-full
+    │   ├── Analysisdashboard.jsx  # Step 2 — recommendation cards
+    │   ├── Reportsdashboard.jsx   # Step 3 — chart, stat tiles, data table, compare view
+    │   ├── Settingsdashboard.jsx  # Settings — UI only, nothing is persisted yet
+    │   └── ui/                    # Shared primitives
+    │       ├── Card.jsx           #   The white surface every panel sits on
+    │       ├── DataTable.jsx      #   Sortable report table
+    │       ├── Plot.jsx           #   Plotly wrapper (reads window.Plotly from the CDN)
+    │       ├── Section.jsx        #   Titled section wrapper
+    │       ├── Sparkline.jsx      #   Inline trend line for stat tiles
+    │       └── StatTile.jsx       #   Single KPI tile
+    └── css/
+        ├── tokens.css          # Design tokens: colors, spacing, radii, fonts
+        └── dashboard.css       # All component styling
 ```
+
+Only these two stylesheets exist, and both are imported by `main.jsx`. There is no
+per-page CSS layer — the seven page-specific stylesheets that used to live here
+belonged to the pre-React app and were removed on 2026-07-28.
 
 ---
 
-## Customizing the design
+## State and data flow
 
-All colors, fonts, spacing, and radii live in one place: **`src/css/tokens.css`**.
+`App.jsx` owns all cross-tab state; the dashboards are presentational and receive it
+as props.
+
+```
+Upload tab      Uploaddashboard POSTs /api/analyze-full
+                  -> setSessionId, setRecommendations, setFileProfiles
+                  -> switches to the Analysis tab
+
+Analysis tab    Recommendation cards. Choosing one calls requestReport(letter)
+
+requestReport   POSTs /api/generate-report unless that letter is already cached
+                in the `reports` map, so switching between A/B/C — or opening the
+                compare view — never re-requests a report the server already built
+
+Reports tab     Renders reports[activeType]: chart, stat tiles, table, compare view
+```
+
+A new upload calls `startNewSession()`, which clears the report cache — reports built
+from the previous dataset are invalid.
+
+---
+
+## Styling
+
+Design tokens live in `src/css/tokens.css` and are consumed both by `dashboard.css`
+and directly in a few components via `var(--color-...)`. To restyle the app, start
+there.
 
 ```css
 :root {
-  --color-accent:       #2563EB;   /* Change to your brand color */
-  --color-bg:           #F8F9FA;   /* Page background */
-  --color-surface:      #FFFFFF;   /* Card/panel backgrounds */
-  --font-ui:            'Inter', system-ui, sans-serif;
-  --content-max:        900px;     /* Max content width */
-  --radius-md:          8px;       /* Card/button corner radius */
+  --color-accent: #2563EB;
+  --color-text: #111827;
+  /* ... */
 }
 ```
 
-Changing `--color-accent` updates every button, highlight, and active state simultaneously.
+Note that a fair amount of layout is still written as inline `style={{}}` objects in
+the JSX (a holdover from the React migration). Anything that must respond to a
+breakpoint has to live in `dashboard.css` instead — inline styles beat media queries.
 
 ---
 
-## Adding a logo
+## Charts
 
-In `index.html`, find:
-```html
-<!-- Logo: replace this <svg> with <img src="/logo.png"> when ready -->
-```
-
-Replace the inner `<svg>` with:
-```html
-<img src="/logo.png" alt="DataLens" style="height:28px; object-fit:contain;" />
-```
-
-Put your logo file in the `public/` folder — Vite copies everything there to `dist/` automatically.
+Plotly is loaded from a **CDN script tag** in `index.html`, not bundled — `Plot.jsx`
+reads `window.Plotly`. The figure itself (traces, axes, colors) is built server-side
+in `app/data/chart_builder.py`; `chartLayout.js` only applies presentation theming on
+top of what the backend sends.
 
 ---
 
-## Adding npm packages
-
-With Vite you can install any npm package and import it directly:
-
-```bash
-# Example: add SheetJS for real file parsing
-npm install xlsx
-
-# Example: add Chart.js for real charts
-npm install chart.js
-```
-
-Then import in the relevant module:
-```js
-// src/js/files.js
-import * as XLSX from 'xlsx';
-```
-
-Vite handles the bundling automatically — no CDN links needed.
-
----
-
-## What's implemented
+## Current gaps
 
 | Feature | Status |
 |---|---|
-| Navbar with page routing | ✅ Done |
-| Drag & drop file upload | ✅ Done |
-| File list with row/sheet counts | ✅ Done (simulated — see `files.js`) |
-| Analyze files summary bar | ✅ Done |
-| Report type selection (3 options) | ✅ Done |
-| Selected state + checkmark | ✅ Done |
-| Generate report gating | ✅ Done |
-| Results page with placeholders | ✅ Done |
-| Export buttons (PDF/HTML/Email) | ✅ Buttons wired, logic not implemented |
-| Settings page | ✅ Placeholder shown |
-| User menu (sign in/out) | ✅ UI done, auth not wired |
-| Footer (all pages) | ✅ Done |
+| Upload, analysis, report generation | Working end-to-end |
+| Chart, stat tiles, data table, compare view | Working |
+| Settings | UI renders but nothing is saved — the controls are local state only |
+| Export (PDF / HTML / CSV / email) | **Not implemented.** The buttons render disabled; there is no `/api/export` endpoint on the backend |
+| Sign-in | Removed 2026-07-28. There was an inert button with no auth behind it |
 
 ---
 
-## Next steps
+## History
 
-| Task | Where to edit | Notes |
-|---|---|---|
-| Real file parsing | `src/js/files.js` → `parseFileMeta()` | Use [SheetJS](https://sheetjs.com/) |
-| Real charts | `index.html` chart section | Use [Chart.js](https://www.chartjs.org/) or [Recharts](https://recharts.org/) |
-| Authentication | `src/js/user.js` → `signIn()` / `signOut()` | [Clerk](https://clerk.com), [Auth0](https://auth0.com), or [Supabase Auth](https://supabase.com/docs/guides/auth) |
-| PDF export | `src/js/export.js` → `handleExport()` | [jsPDF](https://github.com/parallax/jsPDF) |
-| AI analysis API | Wire up `analyzeBtn` in `main.js` | POST files to your backend |
-| Settings UI | `index.html` `#page-settings` + `src/css/settings.css` | Build out preference controls |
+This app was migrated from vanilla JS to React on 2026-07-17. The dead vanilla files
+(`main.js`, `src/js/*`, `template.html`, and seven stylesheets) were removed on
+2026-07-28. See [docs/REACT_MIGRATION_SUMMARY.md](../../docs/REACT_MIGRATION_SUMMARY.md).

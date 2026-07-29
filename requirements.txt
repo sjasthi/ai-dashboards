@@ -1,0 +1,27 @@
+# Runtime dependencies for the AI-Dashboards backend.
+# Pinned to the versions verified working on Python 3.13.
+#   pip install -r requirements.txt
+
+# Web API
+fastapi==0.139.0
+uvicorn==0.50.0
+python-multipart==0.0.32     # required by FastAPI for UploadFile (app/api.py)
+
+# Data loading and transformation
+pandas==2.3.3
+numpy==2.3.5
+openpyxl==3.1.5              # pandas engine for .xlsx
+xlrd==2.0.2                  # pandas engine for .xls
+
+# Charts
+plotly==6.8.0
+matplotlib==3.10.0
+
+# LLM providers
+groq==1.5.0
+google-genai==2.9.0
+ollama==0.6.2
+
+# Support
+json_repair==0.61.2
+python-dotenv==1.2.2

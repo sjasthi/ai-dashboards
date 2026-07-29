@@ -1,4 +1,3 @@
-import React from 'react';
 
 /**
  * A 12-point shape cue for a stat tile - the line is drawn in the de-emphasis grey

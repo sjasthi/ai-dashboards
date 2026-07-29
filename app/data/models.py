@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional
 
 from .recommendation_requester import RecommendationRequester
 

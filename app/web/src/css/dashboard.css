@@ -67,14 +67,13 @@
 
 /* ---------- app shell ---------- */
 
-/* The nav's three groups (brand, tabs, sign-in) each shrink before they wrap. Left to
-   itself flexbox squeezed the outer two until "AI-Dashboard" and "Sign in" broke
-   mid-phrase, which reads as a layout bug rather than as a narrow screen. */
+/* The nav's two groups (brand, tabs) each shrink before they wrap. Left to itself
+   flexbox squeezed the brand until "AI-Dashboard" broke mid-phrase, which reads as
+   a layout bug rather than as a narrow screen. */
 .app-nav { padding: 14px 32px; gap: 16px; }
 .app-nav__brand { gap: 10px; flex-shrink: 0; }
 .app-nav__brand span { white-space: nowrap; }
 .app-nav__tabs { gap: 32px; }
-.app-nav__signin { padding: 8px 16px; white-space: nowrap; flex-shrink: 0; }
 
 .app-main { padding: 32px 40px; }
 
@@ -84,8 +83,8 @@
   .app-main { padding: 24px 20px; }
 }
 
-/* Below this the three groups genuinely don't fit on one line, so the tabs get their
-   own full-width row instead of being crushed into the gap between the other two. */
+/* Below this the brand and tabs genuinely don't fit on one line, so the tabs get their
+   own full-width row instead of being crushed against the brand. */
 @media (max-width: 640px) {
   .app-nav { flex-wrap: wrap; padding: 12px 16px; }
   .app-nav__tabs {

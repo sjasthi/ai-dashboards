@@ -1,4 +1,3 @@
-import React from 'react';
 import { REPORT_TYPE_LETTERS } from '../api';
 
 function PatternBadge({ pattern }) {

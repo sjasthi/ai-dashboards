@@ -1,22 +1,20 @@
 """
 FastAPI server for AI Dashboard backend.
 
-Some endpoints call the real data pipeline; others return mock data.
-See the per-endpoint [REAL] / [MOCK] / [REAL + MOCK FALLBACK] / [UNUSED]
-tags on each endpoint below.
+Every endpoint runs the real data pipeline. If the pipeline modules fail to
+import at startup, the analysis endpoint returns 503 rather than substituting
+placeholder data - fabricated results presented as a real analysis are worse
+than an outage, because nothing on screen tells the user they aren't real.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import json
 import os
 import sys
 import tempfile
 import shutil
 from datetime import datetime
-from typing import Optional
 
 # Ensure the project root is on sys.path so data modules can be imported
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,8 +35,10 @@ try:
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
+    # The server still boots so /health answers and the import error is visible
+    # in one place; /api/analyze-full refuses with 503 instead of faking a result.
     DATA_MODULES_AVAILABLE = False
-    print(f"[API] Data modules not available: {e} — will use mock data")
+    print(f"[API] Data modules not available: {e} — /api/analyze-full will return 503")
 
 app = FastAPI(
     title="AI Dashboard API",
@@ -77,24 +77,6 @@ def generate_session_id():
 
 
 # ============================================================================
-# ANALYZE-FULL MOCK FALLBACK HELPERS
-# ============================================================================
-
-def _mock_analyze_full_fallback(file_paths):
-    """[MOCK] Fallback values used when DATA_MODULES_AVAILABLE is False
-    or the real pipeline raises during /api/analyze-full."""
-    return {
-        "file_profiles": [],
-        "prompt": "Mock prompt (AI_Engine integration pending)",
-        "recommendations": {
-            "summary": "Mock analysis - integrate your AI_Engine code",
-            "key_insights": [f"Processed {len(file_paths)} file(s)", "Files received and ready for analysis"],
-            "recommendations": ["Connect your data pipeline to process files"],
-        },
-    }
-
-
-# ============================================================================
 # ENDPOINTS — ACTIVE (wired to current React frontend)
 # ============================================================================
 
@@ -108,12 +90,12 @@ def health_check():
 
 
 # ----------------------------------------------------------------------------
-# [REAL + MOCK FALLBACK] Used by Uploaddashboard.jsx
+# [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/analyze-full")
 async def analyze_files_full(files: list[UploadFile] = File(...)):
     """
-    [REAL + MOCK FALLBACK]
+    [REAL]
     Full analysis workflow:
     1. Accept files
     2. Create file summaries
@@ -122,8 +104,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
     5. Return results and place on analysis page
 
     Runs the real DataLoader -> SummaryGenerator -> RecommendationRequester ->
-    AI_Engine pipeline when DATA_MODULES_AVAILABLE and no exception occurs;
-    otherwise falls back to _mock_analyze_full_fallback() values.
+    AI_Engine pipeline. Returns 503 if those modules failed to import and 502 if
+    the pipeline raises - never placeholder data.
 
     Returns:
         {
@@ -135,9 +117,17 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             "analysis": {...}
         }
     """
+    if not DATA_MODULES_AVAILABLE:
+        # Checked before any file I/O: without the pipeline there is nothing this
+        # endpoint can honestly return, so fail before touching the upload.
+        raise HTTPException(
+            status_code=503,
+            detail="Analysis pipeline unavailable — the server could not load its data modules.",
+        )
+
     session_id = generate_session_id()
     temp_dir = None
-    
+
     try:
         # Validate files
         if not files or len(files) == 0:
@@ -171,22 +161,15 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
         if not file_paths:
             raise HTTPException(status_code=400, detail="No valid files provided")
 
-        # [MOCK] default/fallback values — overwritten below if the real pipeline succeeds
-        fallback = _mock_analyze_full_fallback(file_paths)
-        file_profiles = fallback["file_profiles"]
-        prompt = fallback["prompt"]
-        recommendations = fallback["recommendations"]
-
         # Loaded DataFrames kept in memory for /api/generate-report. The uploaded
         # files themselves are deleted below, and worksheets never existed as files,
         # so this is the only way the report step can reach the user's data.
         session_tables = {}
 
-        if DATA_MODULES_AVAILABLE:
-          # ------------------------------------------------------------------
-          # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
-          # ------------------------------------------------------------------
-          try:
+        # ------------------------------------------------------------------
+        # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
+        # ------------------------------------------------------------------
+        try:
             print(f"[API] Loading {len(file_paths)} files...")
 
             # Load files
@@ -234,7 +217,10 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
             print(f"[API] Analysis complete!")
 
-          except Exception as e:
+        except HTTPException:
+            raise
+
+        except Exception as e:
             # Surface a real error instead of silently returning mock data dressed up
             # as a real analysis - showing fabricated recommendations as if they were
             # generated from the user's files is misleading. The console line gives the

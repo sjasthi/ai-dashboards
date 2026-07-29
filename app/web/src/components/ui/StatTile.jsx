@@ -1,4 +1,3 @@
-import React from 'react';
 import Card from './Card';
 import Sparkline from './Sparkline';
 import { compactNumber, directionGlyph, signedPercent } from '../../format';

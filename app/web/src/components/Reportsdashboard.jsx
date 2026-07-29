@@ -23,7 +23,6 @@ export default function ReportsDashboard({
   activeType = 'A',
   onSelectType,
   recommendations,
-  sessionId,
   fileProfiles,
   generatingType,
   errorMsg,
@@ -66,7 +65,6 @@ export default function ReportsDashboard({
         comparing={comparing}
         onToggleCompare={() => setComparing((c) => !c)}
         fileProfiles={fileProfiles}
-        sessionId={sessionId}
       />
 
       {comparing ? (

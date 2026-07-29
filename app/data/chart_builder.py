@@ -90,21 +90,17 @@ def split_agg_suffix(column: str) -> Tuple[str, Optional[str]]:
     return column, None
 
 
-# Kept as a private alias so existing internal call sites read unchanged.
-_humanize_column = humanize_column
-
-
 def _resolve_axis_label(column: str, llm_label: Optional[str]) -> str:
     """Pick the axis title for `column`, preferring the LLM's `llm_label` but
     falling back to a mechanically-derived one whenever the LLM's text isn't
     trustworthy for this column - see the module-level comment on
     _AGG_IMPLYING_WORDS for why that check exists."""
     if not llm_label:
-        return _humanize_column(column)
+        return humanize_column(column)
 
     is_aggregated = split_agg_suffix(column)[1] is not None
     if not is_aggregated and _AGG_IMPLYING_WORDS.search(llm_label):
-        return _humanize_column(column)
+        return humanize_column(column)
 
     return llm_label
 

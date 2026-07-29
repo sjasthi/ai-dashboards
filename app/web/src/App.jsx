@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
@@ -101,27 +101,6 @@ export default function App() {
           ))}
         </div>
 
-        <button className="app-nav__signin" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: 'white',
-          border: '1px solid #cbd5e1',
-          borderRadius: '6px',
-          fontSize: '14px',
-          fontWeight: 600,
-          color: '#1e293b',
-          cursor: 'pointer'
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="8" r="4" stroke="#1e293b" strokeWidth="2" />
-            <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="#1e293b" strokeWidth="2" />
-          </svg>
-          Sign in
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
-            <path d="M6 9l6 6 6-6" stroke="#64748b" strokeWidth="2" />
-          </svg>
-        </button>
       </nav>
 
       <main className="app-main">
@@ -138,7 +117,6 @@ export default function App() {
         )}
         {activeTab === 'analysis' && (
           <AnalysisDashboard
-            files={files}
             sessionId={sessionId}
             recommendations={recommendations}
             reports={reports}
@@ -156,7 +134,6 @@ export default function App() {
             activeType={activeReportType}
             onSelectType={requestReport}
             recommendations={recommendations}
-            sessionId={sessionId}
             fileProfiles={fileProfiles}
             generatingType={generatingType}
             errorMsg={reportError}

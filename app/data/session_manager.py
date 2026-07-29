@@ -1,8 +1,5 @@
 from pathlib import Path
 from datetime import datetime
-from dataclasses import asdict
-from typing import List
-import json
 
 class SessionManager:
     """Centralized session logging and file persistence."""
@@ -23,21 +20,6 @@ class SessionManager:
         session_dir = self.logs_dir / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_id
-    
-    def save_profiles(self, profiles, filename="profiles.json") -> None:
-        """Save file profiles to session directory."""
-        for profile in profiles:
-            output_file = self.logs_dir / self.session_id / f"{profile.filename.replace('.csv', '')}_profile.json"
-            with open(output_file, 'w') as f:
-                json.dump(asdict(profile), f, indent=2, default=str)
-            print(f"Profile saved: {output_file}")
-    
-    def save_prompt(self, prompt: str, filename="prompt_request.txt") -> None:
-        """Save LLM prompt request to session directory."""
-        log_file = self.logs_dir / self.session_id / filename
-        with open(log_file, 'w') as f:
-            f.write(prompt)
-        print(f"Prompt saved: {log_file}")
     
     def save_response(self, response: str, filename="prompt_response.txt") -> None:
         """Save LLM response to session directory."""
