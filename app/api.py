@@ -1,22 +1,21 @@
 """
 FastAPI server for AI Dashboard backend.
 
-Some endpoints call the real data pipeline; others return mock data.
-See the per-endpoint [REAL] / [MOCK] / [REAL + MOCK FALLBACK] / [UNUSED]
-tags on each endpoint below.
+Every endpoint runs the real data pipeline. If the pipeline modules fail to
+import at startup, the analysis endpoint returns 503 rather than substituting
+placeholder data - fabricated results presented as a real analysis are worse
+than an outage, because nothing on screen tells the user they aren't real.
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import json
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 import os
 import sys
 import tempfile
 import shutil
 from datetime import datetime
-from typing import Optional
 
 # Ensure the project root is on sys.path so data modules can be imported
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,8 +36,29 @@ try:
     DATA_MODULES_AVAILABLE = True
     print("[API] Data modules loaded successfully")
 except ImportError as e:
+    # The server still boots so /health answers and the import error is visible
+    # in one place; /api/analyze-full refuses with 503 instead of faking a result.
     DATA_MODULES_AVAILABLE = False
-    print(f"[API] Data modules not available: {e} — will use mock data")
+    print(f"[API] Data modules not available: {e} — /api/analyze-full will return 503")
+
+# Export gets its own flag rather than joining the block above. Its dependencies
+# (xhtml2pdf, jinja2, pillow) are unrelated to the analysis pipeline, and a broken
+# PDF library must not take /api/analyze-full down with it.
+try:
+    from app.data.export_builder import (
+        render_export_html, render_export_pdf, export_filename, ExportRenderError,
+        MAX_APPENDIX_ROWS,
+    )
+    from app.data.emailer import (
+        send_report_email, smtp_configured, smtp_config_error, validate_recipients,
+        EmailNotConfigured, EmailSendFailed,
+    )
+    EXPORT_AVAILABLE = True
+    print("[API] Export modules loaded successfully")
+except ImportError as e:
+    EXPORT_AVAILABLE = False
+    MAX_APPENDIX_ROWS = 200
+    print(f"[API] Export modules not available: {e} — /api/export/* will return 503")
 
 app = FastAPI(
     title="AI Dashboard API",
@@ -53,6 +73,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Content-Disposition isn't a CORS-safelisted response header, so without this
+    # the frontend reads null for the filename of every export it downloads.
+    expose_headers=["Content-Disposition"],
 )
 
 # ============================================================================
@@ -64,6 +87,28 @@ class GenerateReportRequest(BaseModel):
     session_id: str
     report_type: str = "A"
 
+
+class ExportRequest(BaseModel):
+    """Request body for downloading one or more generated reports.
+
+    chart_images maps a report letter to a base64 PNG data URL rendered by the
+    browser. They come from the client because all of the chart's theming lives in
+    the frontend's chartLayout.js - rendering server-side would produce a chart
+    that doesn't match the one the user just looked at. Anything unusable here is
+    dropped and the document says the chart is missing; it is never fatal.
+    """
+    report_types: list[str] = Field(..., min_length=1, max_length=8)
+    format: Literal["pdf", "html"] = "pdf"
+    chart_images: dict[str, str] = Field(default_factory=dict)
+    include_appendix: bool = True
+    appendix_row_limit: int = Field(MAX_APPENDIX_ROWS, ge=0, le=5000)
+
+
+class EmailExportRequest(ExportRequest):
+    """As ExportRequest, plus who to send it to."""
+    recipients: list[str] = Field(..., min_length=1, max_length=10)
+    message: Optional[str] = None
+
 # ============================================================================
 # SESSIONS
 # ============================================================================
@@ -74,24 +119,6 @@ SESSIONS = {}  # Store uploaded file metadata by session_id
 def generate_session_id():
     """Generate a unique session ID."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-# ============================================================================
-# ANALYZE-FULL MOCK FALLBACK HELPERS
-# ============================================================================
-
-def _mock_analyze_full_fallback(file_paths):
-    """[MOCK] Fallback values used when DATA_MODULES_AVAILABLE is False
-    or the real pipeline raises during /api/analyze-full."""
-    return {
-        "file_profiles": [],
-        "prompt": "Mock prompt (AI_Engine integration pending)",
-        "recommendations": {
-            "summary": "Mock analysis - integrate your AI_Engine code",
-            "key_insights": [f"Processed {len(file_paths)} file(s)", "Files received and ready for analysis"],
-            "recommendations": ["Connect your data pipeline to process files"],
-        },
-    }
 
 
 # ============================================================================
@@ -108,12 +135,12 @@ def health_check():
 
 
 # ----------------------------------------------------------------------------
-# [REAL + MOCK FALLBACK] Used by Uploaddashboard.jsx
+# [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/analyze-full")
 async def analyze_files_full(files: list[UploadFile] = File(...)):
     """
-    [REAL + MOCK FALLBACK]
+    [REAL]
     Full analysis workflow:
     1. Accept files
     2. Create file summaries
@@ -122,8 +149,8 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
     5. Return results and place on analysis page
 
     Runs the real DataLoader -> SummaryGenerator -> RecommendationRequester ->
-    AI_Engine pipeline when DATA_MODULES_AVAILABLE and no exception occurs;
-    otherwise falls back to _mock_analyze_full_fallback() values.
+    AI_Engine pipeline. Returns 503 if those modules failed to import and 502 if
+    the pipeline raises - never placeholder data.
 
     Returns:
         {
@@ -135,9 +162,17 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             "analysis": {...}
         }
     """
+    if not DATA_MODULES_AVAILABLE:
+        # Checked before any file I/O: without the pipeline there is nothing this
+        # endpoint can honestly return, so fail before touching the upload.
+        raise HTTPException(
+            status_code=503,
+            detail="Analysis pipeline unavailable — the server could not load its data modules.",
+        )
+
     session_id = generate_session_id()
     temp_dir = None
-    
+
     try:
         # Validate files
         if not files or len(files) == 0:
@@ -171,22 +206,15 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
         if not file_paths:
             raise HTTPException(status_code=400, detail="No valid files provided")
 
-        # [MOCK] default/fallback values — overwritten below if the real pipeline succeeds
-        fallback = _mock_analyze_full_fallback(file_paths)
-        file_profiles = fallback["file_profiles"]
-        prompt = fallback["prompt"]
-        recommendations = fallback["recommendations"]
-
         # Loaded DataFrames kept in memory for /api/generate-report. The uploaded
         # files themselves are deleted below, and worksheets never existed as files,
         # so this is the only way the report step can reach the user's data.
         session_tables = {}
 
-        if DATA_MODULES_AVAILABLE:
-          # ------------------------------------------------------------------
-          # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
-          # ------------------------------------------------------------------
-          try:
+        # ------------------------------------------------------------------
+        # [REAL] DataLoader -> SummaryGenerator -> RecommendationRequester -> AI_Engine
+        # ------------------------------------------------------------------
+        try:
             print(f"[API] Loading {len(file_paths)} files...")
 
             # Load files
@@ -234,7 +262,10 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
             print(f"[API] Analysis complete!")
 
-          except Exception as e:
+        except HTTPException:
+            raise
+
+        except Exception as e:
             # Surface a real error instead of silently returning mock data dressed up
             # as a real analysis - showing fabricated recommendations as if they were
             # generated from the user's files is misleading. The console line gives the
@@ -496,11 +527,20 @@ def generate_report_endpoint(request: GenerateReportRequest):
         }
 
         # Store the full report server-side; the response carries a capped slice.
-        SESSIONS[session_id]["report"] = {
+        #
+        # Keyed by report type, because export needs every report the user has
+        # generated, not just the last one. A single slot here meant generating A
+        # then B left only B on the server, while the browser still showed both -
+        # so a combined export of A and B was impossible to fulfil.
+        stored = {
             **payload,
             "generated_at": generated_at,
             "data": report_df.to_dict(orient="records"),
         }
+        SESSIONS[session_id].setdefault("reports", {})[report_type] = stored
+        # Legacy single slot, same object rather than a copy. Kept because
+        # tests/test_generate_report_api.py still reads it.
+        SESSIONS[session_id]["report"] = stored
 
         return payload
     
@@ -511,6 +551,201 @@ def generate_report_endpoint(request: GenerateReportRequest):
     except Exception as e:
         print(f"[API] Error generating report: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
+# ============================================================================
+# EXPORT — download / email generated reports
+# ============================================================================
+
+_MEDIA_TYPES = {"pdf": "application/pdf", "html": "text/html; charset=utf-8"}
+_ATTACHMENT_MIMETYPES = {"pdf": ("application", "pdf"), "html": ("text", "html")}
+
+
+def _resolve_export(session_id: str, report_types: list[str]):
+    """Validate an export request and return (session, letters).
+
+    Letters are uppercased, de-duplicated and sorted so that the same selection
+    always produces the same filename and the same section order.
+
+    Raises:
+        HTTPException: 503 if the export dependencies are missing, 404 for an
+            unknown session, 400 for a report the user hasn't generated yet.
+    """
+    if not EXPORT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Export isn't available on this server — the PDF/HTML modules "
+                   "failed to import. Check the API startup log.",
+        )
+
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    session = SESSIONS[session_id]
+    generated = session.get("reports") or {}
+
+    letters = sorted({str(t).strip().upper() for t in report_types if str(t).strip()})
+    if not letters:
+        raise HTTPException(status_code=400, detail="No reports were selected.")
+
+    missing = [letter for letter in letters if letter not in generated]
+    if missing:
+        which = ", ".join(missing)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Report {which} hasn't been generated yet — open it on the "
+                   f"Reports page first, then export.",
+        )
+
+    return session, letters
+
+
+def _render_export(session, letters, request: ExportRequest):
+    """Render the selected reports, returning (bytes, filename)."""
+    # Only the selected reports' images are of any use, and a stray key would
+    # otherwise ride along into the template context.
+    images = {k.upper(): v for k, v in (request.chart_images or {}).items()
+              if k.upper() in letters}
+
+    kwargs = dict(
+        chart_images=images,
+        include_appendix=request.include_appendix,
+        appendix_row_limit=request.appendix_row_limit,
+    )
+
+    try:
+        if request.format == "pdf":
+            body = render_export_pdf(session, letters, **kwargs)
+        else:
+            body = render_export_html(session, letters, **kwargs).encode("utf-8")
+    except ExportRenderError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Could not build the {request.format.upper()} export: {e}"
+        )
+    except Exception as e:
+        print(f"[API] Export render failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not build the {request.format.upper()} export: "
+                   f"{type(e).__name__}: {e}",
+        )
+
+    return body, export_filename(session, letters, request.format)
+
+
+# ----------------------------------------------------------------------------
+# [REAL] Used by Reportsdashboard.jsx
+# ----------------------------------------------------------------------------
+@app.get("/api/export/{session_id}/status")
+def export_status(session_id: str):
+    """[REAL] What this session can currently export.
+
+    The UI asks before rendering the panel so it can disable the email row with the
+    reason showing, rather than accepting an address and failing afterwards.
+    """
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    return {
+        "session_id": session_id,
+        "export_available": EXPORT_AVAILABLE,
+        "generated": sorted((SESSIONS[session_id].get("reports") or {}).keys()),
+        "email_configured": bool(EXPORT_AVAILABLE and smtp_configured()),
+    }
+
+
+# ----------------------------------------------------------------------------
+# [REAL] Used by Reportsdashboard.jsx
+# ----------------------------------------------------------------------------
+@app.post("/api/export/{session_id}")
+def export_reports(session_id: str, request: ExportRequest):
+    """[REAL] Download the selected reports as one PDF or HTML file.
+
+    One report selected gives a single-report document; two or more give one
+    combined comparative document, since comparing them is the reason to export
+    several at once.
+
+    A POST rather than a GET because the browser-rendered chart PNGs travel in the
+    body - too large for a query string.
+    """
+    session, letters = _resolve_export(session_id, request.report_types)
+    body, filename = _render_export(session, letters, request)
+
+    return Response(
+        content=body,
+        media_type=_MEDIA_TYPES[request.format],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ----------------------------------------------------------------------------
+# [REAL] Used by Reportsdashboard.jsx
+# ----------------------------------------------------------------------------
+@app.post("/api/export/{session_id}/email")
+def email_reports(session_id: str, request: EmailExportRequest):
+    """[REAL] Email the selected reports as a file attachment.
+
+    Every failure below maps to its own status code and a message the user can act
+    on. The one outcome that must never happen is a 200 with nothing delivered -
+    the user has no reason to check, and finds out days later.
+    """
+    session, letters = _resolve_export(session_id, request.report_types)
+
+    # Address syntax is checked before the document is built: no point spending a
+    # PDF render on a request that can't be delivered.
+    try:
+        recipients = validate_recipients(request.recipients)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Checked here as well as inside send_report_email so the render below is not
+    # spent on a request that can't be delivered. The message comes from the
+    # emailer so the two checks can't disagree.
+    config_error = smtp_config_error()
+    if config_error:
+        raise HTTPException(status_code=503, detail=config_error)
+
+    body, filename = _render_export(session, letters, request)
+
+    names = ", ".join(letters)
+    plural = "reports" if len(letters) > 1 else "report"
+    lines = [
+        f"Attached is the AI-Dashboard {plural} you exported ({names}).",
+        f"Session {session_id}.",
+    ]
+    if request.message:
+        lines += ["", request.message]
+    lines += [
+        "",
+        "Statistics in the attachment are labelled with where they came from: "
+        "'computed' means calculated from the report's own rows, 'AI note' means "
+        "the model's own words, which were not checked against the data.",
+    ]
+
+    try:
+        send_report_email(
+            recipients=recipients,
+            subject=f"AI-Dashboard {plural} {names} · session {session_id}",
+            body_text="\n".join(lines),
+            attachment=body,
+            filename=filename,
+            mimetype=_ATTACHMENT_MIMETYPES[request.format],
+        )
+    except EmailNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except EmailSendFailed as e:
+        status = {"auth": 502, "recipients": 400, "unreachable": 504}.get(e.kind, 502)
+        raise HTTPException(status_code=status, detail=str(e))
+
+    return {
+        "status": "sent",
+        "recipients": recipients,
+        "report_types": letters,
+        "format": request.format,
+        "filename": filename,
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

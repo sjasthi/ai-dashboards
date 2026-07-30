@@ -39,6 +39,12 @@ Three new packages were added to `app/web/package.json`:
 
 ## Orphaned Files
 
+> **Update 2026-07-28 — all of the files listed below have since been deleted**, except
+> `tokens.css`, which was wrong to list here: it was re-imported by `main.jsx` shortly
+> after this document was written and is live. `dashboard.css` (created after this
+> migration) is the other live stylesheet. The list is kept as the record of what the
+> migration left behind. See `CLEANUP_SUMMARY.md`.
+
 The following files under `app/web/src/` are no longer imported by `main.jsx`, `App.jsx`, or any of the `*dashboard.jsx` components. None have been deleted — they're just no longer reachable from `index.html`.
 
 **Entry point**
@@ -62,3 +68,13 @@ The following files under `app/web/src/` are no longer imported by `main.jsx`, `
 ### Known Gap
 
 `export.js` and `user.js` had real functionality (export buttons, sign-in menu) that hasn't been reimplemented in React yet, so those two features are currently non-functional in the new UI — not just dead code.
+
+> **Update 2026-07-28.** Re-examined and resolved:
+>
+> - **Export** — `export.js` turned out to be a client for `GET /api/export/{id}`, an
+>   endpoint that was never built (the backend has only three routes). It contained no
+>   export logic of its own — no PDF, HTML or CSV generation — so there was nothing to
+>   port. Deleted. Export remains unimplemented and the buttons stay disabled; the
+>   intended contract is recorded in `CLEANUP_SUMMARY.md`.
+> - **Sign-in** — abandoned. `user.js` and the inert "Sign in" button in `App.jsx` were
+>   both removed.

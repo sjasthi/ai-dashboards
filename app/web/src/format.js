@@ -50,19 +50,6 @@ export function directionGlyph(direction) {
   return '—';
 }
 
-/** Bytes -> "1.2 MB". */
-export function fileSize(bytes) {
-  if (!bytes && bytes !== 0) return null;
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let n = bytes;
-  let i = 0;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i += 1;
-  }
-  return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
-}
-
 /** An ISO timestamp as a local wall-clock time. */
 export function clockTime(iso) {
   if (!iso) return null;

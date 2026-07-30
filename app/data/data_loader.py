@@ -68,7 +68,4 @@ class DataLoader:
         get a sheet's data back after loading."""
         return {os.path.basename(name): df for name, df in self.files}
 
-    def clear(self):
-        self.files = []
-
 

@@ -81,8 +81,9 @@ def build_report_stats(
     DataFrame, using the same resolved axes the chart was drawn from.
 
     `pattern` is the recommendation's pattern_used (RANKING / DISTRIBUTION / TREND /
-    COMPOSITION / COMPARISON / OUTLIER). It selects which optional block leads the
-    narrative; the core descriptive stats are computed regardless.
+    COMPOSITION / COMPARISON / OUTLIER). It is passed through to the response as
+    metadata only - which optional blocks appear is decided from the data itself
+    (see _is_ordered_axis and the labels check below), not from this hint.
 
     Returns a dict with `available: bool` plus always-present prose fields
     (`top_insight_text` / `anomaly_text` / `recommendation_text` / `quality_text`),

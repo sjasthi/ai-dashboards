@@ -13,7 +13,6 @@ const INK_SECONDARY = '#6B7280';
 const INK_MUTED = '#9CA3AF';
 const SURFACE = '#FFFFFF';
 const GRID = '#EEF0F2';
-const ACCENT = '#2563EB';
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
 
 /** Chart types with no cartesian axes to decorate. */
@@ -227,5 +226,3 @@ function formatTick(value) {
   if (typeof value !== 'number') return String(value);
   return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2);
 }
-
-export { ACCENT, INK_MUTED };

@@ -16,6 +16,21 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+def _debug_files_enabled() -> bool:
+    """Whether to write report-generation traces to session_data/.
+
+    Read on each call rather than captured at import: this module is imported (via
+    response_validator) partway through AI_Engine's own imports, which is *before*
+    AI_Engine calls load_dotenv() - so a module-level read here would miss anything
+    set in .env and silently enable only half the debug output.
+
+    The env var is deliberately the same one AI_Engine uses, so one setting governs
+    every debug artifact a run produces. It isn't imported from AI_Engine because
+    AI_Engine -> response_validator -> report_builder already, and importing it back
+    would close an import cycle.
+    """
+    return os.getenv("SAVE_DEBUG_FILES", "false").strip().lower() in ("1", "true", "yes")
+
 # Bookkeeping columns prepended to every successful report so a stored DataFrame can
 # be traced back to the recommendation that produced it. They are not part of the
 # user's data: anything counting or displaying "the report's columns" must exclude
@@ -122,15 +137,6 @@ def generate_report(
         return _failed_report(session_id, report_type, debug_lines,
                               f"Error executing pipeline for recommendation {rec_idx + 1}: {e}")
 
-    # ==================== TEMPORARY OUTPUT ====================
-    print(f"\n{'='*80}")
-    print(f"[TEMPORARY OUTPUT] Report Data (type {report_type}):")
-    print(f"{'='*80}\n")
-    print(final_df.head(15).to_string())
-    print(f"\n{'='*80}")
-    print(f"[TEMPORARY OUTPUT] Report shape: {final_df.shape} (rows, cols)")
-    print(f"{'='*80}\n")
-
     _save_debug_output(session_id, report_type, debug_lines, final_df)
 
     return final_df
@@ -170,8 +176,11 @@ def _save_debug_output(
     debug_lines: List[str],
     final_df: pd.DataFrame
 ) -> None:
-    """Write the report-generation trace to session_data/<session_id>/ for debugging."""
-    if not session_id:
+    """Write the report-generation trace to session_data/<session_id>/ for debugging.
+
+    Off unless the SAVE_DEBUG_FILES env var is set, so a normal run leaves no artifacts.
+    """
+    if not session_id or not _debug_files_enabled():
         return
 
     session_dir = Path(__file__).resolve().parent.parent.parent / "session_data" / session_id
