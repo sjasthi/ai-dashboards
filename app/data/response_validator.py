@@ -5,7 +5,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from .models import RecommendationsResponse
-from .report_builder import _normalize_join_keys
+from .report_builder import _infer_groupby_columns, _normalize_join_keys
 from .summary_builder import _comparable_value_sets
 
 # Below this share of overlapping values, a proposed join key is treated as not a
@@ -63,6 +63,43 @@ def _canonicalize_filenames(
             op.files_involved = resolved
 
     return unknown
+
+
+def _check_groupby_columns(parsed: RecommendationsResponse) -> List[str]:
+    """Report every groupby step that names no column to group by and whose key can't
+    be recovered from the rest of its recommendation.
+
+    "groupby_columns": [] is schema-valid (a List[str] with a default), so Pydantic
+    accepts it and the failure only surfaces much later, as a raw "No groupby columns
+    specified" on the user's report card. Catching it here instead puts it in the
+    correction text sent back to the LLM, where it can still be fixed.
+
+    Steps whose key report_builder can infer are deliberately NOT reported: that repair
+    is deterministic and free, and spending a retry (a full extra generation) on a
+    report that will build correctly anyway is exactly the quota this validator's
+    filename repair already exists to save.
+    """
+    problems = []
+
+    for rec in parsed.recommendations:
+        rec_dict = rec.model_dump()
+        for op in rec_dict.get("required_operations", []):
+            if op.get("operation_type") != "groupby" or op.get("groupby_columns"):
+                continue
+            if not op.get("aggregations"):
+                continue  # a wholly empty groupby is a no-op the report builder skips
+            if _infer_groupby_columns(rec_dict, op):
+                continue
+
+            problems.append(
+                f'"{rec.report_name}": a "groupby" step has an empty "groupby_columns", '
+                f"so there is nothing to group by and the report cannot be built. Name the "
+                f"categorical column this report breaks its measure down by, and make sure "
+                f"that same column also appears in expected_output_schema and as "
+                f"plotly_config.x_axis."
+            )
+
+    return problems
 
 
 def _verify_joins(
@@ -148,16 +185,18 @@ def parse_and_validate(
     filename - any string satisfies it). Filenames that differ only by case or by
     space/underscore/hyphen are repaired in place rather than rejected.
 
-    When `tables` is given, proposed joins are additionally verified against the
-    real data (see _verify_joins).
+    Groupby steps are checked for an empty groupby_columns (see
+    _check_groupby_columns), and when `tables` is given, proposed joins are
+    additionally verified against the real data (see _verify_joins).
 
     Returns the validated response with filenames canonicalized to the real
     uploaded names, so downstream lookups by filename resolve.
 
     Raises:
         ValueError: If the response fails Pydantic validation, references
-            an unknown filename, or proposes an unusable join. The message is
-            written to be fed back to the LLM as correction text.
+            an unknown filename, proposes an unusable join, or contains a groupby
+            with no usable group key. The message is written to be fed back to the
+            LLM as correction text.
     """
     try:
         parsed = RecommendationsResponse.model_validate(raw)
@@ -170,6 +209,13 @@ def parse_and_validate(
         raise ValueError(
             f"required_operations referenced file(s) not among the uploaded files "
             f"{sorted(valid_filenames)}: {sorted(unknown_files)}"
+        )
+
+    groupby_problems = _check_groupby_columns(parsed)
+    if groupby_problems:
+        raise ValueError(
+            "These groupby steps do not name a column to group by:\n"
+            + "\n".join(f"- {p}" for p in groupby_problems)
         )
 
     if tables:

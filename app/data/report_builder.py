@@ -14,7 +14,9 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
+from .chart_builder import split_agg_suffix
 
 def _debug_files_enabled() -> bool:
     """Whether to write report-generation traces to session_data/.
@@ -105,6 +107,13 @@ def generate_report(
         return _failed_report(session_id, report_type, debug_lines,
                               f"Recommendation {rec_idx + 1} "
                               f"({rec.get('report_name', 'Untitled')}): no operations specified")
+
+    # Logged after the pipeline above, so the debug trace shows what the LLM actually
+    # sent first and then what we changed about it.
+    operations, repairs = _repair_missing_groupby_columns(operations, rec)
+    for note in repairs:
+        print(f"[ReportBuilder] {note}")
+        debug_lines.append(f"REPAIR: {note}")
 
     try:
         final_df = _execute_pipeline(operations, file_paths, tables)
@@ -318,6 +327,80 @@ def _execute_groupby(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFram
         result = df.groupby(valid_groupby, as_index=False).agg(**agg_named)
 
     return result
+
+
+def _infer_groupby_columns(rec: Dict[str, Any], operation: Dict[str, Any]) -> List[str]:
+    """Recover the group key(s) a groupby step should have named, from the rest of the
+    same recommendation.
+
+    The LLM intermittently returns "groupby_columns": [] on an otherwise correct
+    groupby step, while still naming the group key everywhere else it describes the
+    same report - expected_output_schema and plotly_config.x_axis. That single empty
+    field is a hard failure at execution time (_execute_groupby raises), so the key it
+    plainly meant is recovered here rather than losing the whole report to one slip.
+
+    Aggregation outputs are excluded on both counts: this step's own "{column}_{func}"
+    names, and any name carrying a known aggregation suffix - a schema entry like
+    "close_value_sum" is the measure being aggregated, never the key it's grouped by.
+
+    Returns [] when nothing can be inferred, leaving the step to fail with the original
+    error rather than guessing at a column.
+    """
+    agg_outputs = {
+        f"{col}_{func}"
+        for col, func in _normalize_aggregations(operation.get("aggregations", []))
+    }
+
+    def is_group_key(name: Optional[str]) -> bool:
+        return bool(name) and name not in agg_outputs and split_agg_suffix(name)[1] is None
+
+    inferred = [
+        col.get("name") for col in rec.get("expected_output_schema") or []
+        if is_group_key(col.get("name"))
+    ]
+
+    if not inferred:
+        x_axis = (rec.get("plotly_config") or {}).get("x_axis")
+        inferred = [x_axis] if is_group_key(x_axis) else []
+
+    return list(dict.fromkeys(inferred))  # de-duplicated, order preserved
+
+
+def _repair_missing_groupby_columns(
+    operations: List[Dict[str, Any]],
+    rec: Dict[str, Any]
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Fill in the groupby steps whose groupby_columns the LLM left empty (see
+    _infer_groupby_columns), returning (operations, notes describing each repair).
+
+    A step with neither columns nor aggregations is left alone - that one is a stray
+    no-op _execute_groupby already skips, and inventing a groupby for it would turn a
+    harmless empty step into a real (and wrong) aggregation.
+
+    Operations are copied rather than mutated: the recommendations dict passed in is
+    the same object the API hands back to the frontend, and a report run should not
+    quietly rewrite it.
+    """
+    repaired: List[Dict[str, Any]] = []
+    notes: List[str] = []
+
+    for op in operations:
+        is_empty_groupby = (
+            (op.get("operation_type") or "").lower() == "groupby"
+            and not op.get("groupby_columns")
+            and _normalize_aggregations(op.get("aggregations", []))
+        )
+        if is_empty_groupby:
+            inferred = _infer_groupby_columns(rec, op)
+            if inferred:
+                op = {**op, "groupby_columns": inferred}
+                notes.append(
+                    f"groupby step specified no groupby_columns; inferred {inferred} from "
+                    f"the recommendation's expected_output_schema/plotly_config"
+                )
+        repaired.append(op)
+
+    return repaired, notes
 
 
 def _execute_filter(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame:
