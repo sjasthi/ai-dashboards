@@ -1,0 +1,749 @@
+/* ============================================================
+   REPORTS DASHBOARD
+   Layout follows an inverted pyramid: headline numbers first,
+   then the chart and its findings, then the raw detail.
+   All colour/spacing values come from tokens.css.
+   ============================================================ */
+
+/* ---------- shared primitives ---------- */
+
+/* Available to screen readers, out of the visual flow. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.eyebrow {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.eyebrow--accent { color: var(--color-accent); }
+
+/* A quiet marker of where a claim came from. Every computed card carries one, so
+   the model's text is never mistaken for a measurement. */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  white-space: nowrap;
+}
+
+.chip--computed {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+  border-color: #BFDBFE;
+}
+
+.chip--ai {
+  color: #7C3AED;
+  background: #F5F3FF;
+  border-color: #DDD6FE;
+}
+
+/* ---------- app shell ---------- */
+
+/* The nav's two groups (brand, tabs) each shrink before they wrap. Left to itself
+   flexbox squeezed the brand until "AI-Dashboard" broke mid-phrase, which reads as
+   a layout bug rather than as a narrow screen. */
+.app-nav { padding: 14px 32px; gap: 16px; }
+.app-nav__brand { gap: 10px; flex-shrink: 0; }
+.app-nav__brand span { white-space: nowrap; }
+.app-nav__tabs { gap: 32px; }
+
+.app-main { padding: 32px 40px; }
+
+@media (max-width: 900px) {
+  .app-nav { padding: 12px 20px; }
+  .app-nav__tabs { gap: 20px; }
+  .app-main { padding: 24px 20px; }
+}
+
+/* Below this the brand and tabs genuinely don't fit on one line, so the tabs get their
+   own full-width row instead of being crushed against the brand. */
+@media (max-width: 640px) {
+  .app-nav { flex-wrap: wrap; padding: 12px 16px; }
+  .app-nav__tabs {
+    order: 3;
+    width: 100%;
+    gap: 18px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .app-nav__tabs::-webkit-scrollbar { display: none; }
+  .app-main { padding: 20px 16px; }
+}
+
+/* ---------- page + header ---------- */
+
+/* Every step shares one centred column, so moving Upload -> Analysis -> Results
+   doesn't slide the content sideways under the nav. */
+.reports-page,
+.upload-page,
+.analysis-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  font-family: var(--font-ui);
+  color: var(--color-text-primary);
+}
+
+.report-header { margin-bottom: 20px; }
+
+/* Stacked, not a space-between row: as a row the A/B/C group's position depended on
+   how long the provenance line happened to be, so it sat below the metadata on a
+   report with three source files and jumped up to the far right on a report with one. */
+.report-header__top {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.report-header__text { min-width: 0; }
+
+.report-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.report-header__title {
+  margin: 6px 0 0 0;
+  font-size: var(--size-2xl);
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
+}
+
+/* The model's question. Kept, but demoted to context - it answers "what was this
+   report for", never "what did we find". */
+.report-header__question {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 0 0;
+  font-size: var(--size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.report-header__question em { font-style: italic; }
+
+/* Provenance: what produced these numbers, and when. */
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 12px;
+  font-size: var(--size-xs);
+  color: var(--color-text-muted);
+}
+
+.provenance__sep { color: var(--color-border); }
+
+.provenance code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+/* ---------- segmented control (report A / B / C) ---------- */
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.segmented__btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.segmented__btn:hover:not(:disabled) { color: var(--color-text-primary); }
+
+.segmented__btn[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-accent);
+  box-shadow: var(--shadow-card);
+}
+
+.segmented__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.segmented__btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ---------- KPI row ---------- */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-tile {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stat-tile__label {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary);
+}
+
+/* Proportional figures deliberately: tabular-nums gives every digit the width of a
+   zero, which makes a value like 121 look loose at this size. */
+.stat-tile__value {
+  font-size: 28px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.stat-tile__value--empty { color: var(--color-text-muted); }
+
+.stat-tile__sub {
+  font-size: var(--size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.stat-tile__delta {
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile__delta--up { color: var(--color-success); }
+.stat-tile__delta--down { color: var(--color-danger); }
+.stat-tile__delta--flat { color: var(--color-text-secondary); }
+
+.stat-tile__spark { margin-top: 2px; }
+
+/* ---------- results grid: chart + insight rail ---------- */
+
+.results-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.chart-card { padding: 22px 24px 16px; min-width: 0; }
+
+.chart-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chart-card__title {
+  margin: 0;
+  font-size: var(--size-lg);
+  font-weight: var(--weight-semibold);
+}
+
+/* Height is a floor, not a cap: the plot needs room for its own x-axis band, and a
+   fixed height that excludes it leaves the card with a tiny nested scrollbar. */
+.chart-card__plot {
+  width: 100%;
+  min-height: 420px;
+}
+
+.chart-card__placeholder {
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  color: var(--color-text-muted);
+  font-size: var(--size-sm);
+  line-height: 1.6;
+}
+
+.insight-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.insight-card { padding: 16px 18px; }
+
+.insight-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.insight-card__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.insight-card__body {
+  font-size: var(--size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.55;
+}
+
+/* Amber is reserved for a warning that was actually detected. A card that always
+   renders amber teaches the reader to ignore it. */
+.insight-card--warn { border-color: #FDE68A; background: #FFFBEB; }
+.insight-card--warn .insight-card__title { color: var(--color-warning); }
+.insight-card--warn .insight-card__body { color: #78350F; }
+
+.insight-card--good .insight-card__title { color: var(--color-success); }
+
+.outlier-list {
+  margin: 12px 0 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outlier-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--size-xs);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(217, 119, 6, 0.18);
+}
+
+.outlier-list__label { color: #78350F; }
+
+.outlier-list__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
+  color: #78350F;
+  white-space: nowrap;
+}
+
+.insight-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.insight-note__label {
+  display: inline-block;
+  margin-right: 6px;
+  font-weight: var(--weight-bold);
+  color: #7C3AED;
+}
+
+/* ---------- distribution strip ---------- */
+
+/* A grid, not a wrapping flex row: flex sizes each row independently, so when the
+   items spilled onto a second row its dividers landed at different x positions than
+   the first row's and the strip read as broken rather than as a table. */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  margin-bottom: 20px;
+  /* Also what trims the dividers: see .stat-strip__item. */
+  overflow: hidden;
+}
+
+/* Dividers are drawn per cell as a right + bottom hairline, rather than as gaps over a
+   tinted backdrop. A backdrop would show through wherever the final row runs out of
+   items, painting the leftover grid cells grey. These shadows instead land exactly on
+   the container's edge for the last column and last row, where `overflow: hidden`
+   clips them - so the interior is ruled and the outside stays clean. */
+.stat-strip__item {
+  padding: 14px 18px;
+  box-shadow:
+    1px 0 0 var(--color-border),
+    0 1px 0 var(--color-border);
+}
+
+.stat-strip__label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.stat-strip__value {
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* ---------- data table ---------- */
+
+.section { margin-bottom: 28px; }
+
+.section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-family: inherit;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.table-toggle:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
+
+.table-wrap {
+  overflow: auto;
+  max-height: 460px;
+  border-radius: var(--radius-lg);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--size-xs);
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table thead th:hover { color: var(--color-text-primary); }
+
+.data-table thead th[aria-sort='ascending'],
+.data-table thead th[aria-sort='descending'] { color: var(--color-accent); }
+
+.data-table__sort { margin-left: 4px; opacity: 0.7; }
+
+/* Columns of numbers are exactly where equal-width digits belong. */
+.data-table td.is-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+.data-table th.is-numeric { text-align: right; }
+
+.data-table tbody tr:hover { background: var(--color-accent-muted); }
+
+.data-table__null { color: var(--color-text-muted); font-style: italic; }
+
+.table-footnote {
+  padding: 10px 14px;
+  font-size: var(--size-xs);
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ---------- compare view ---------- */
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.compare-card {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.compare-card--active { border-color: var(--color-accent); }
+
+.compare-card__title {
+  margin: 0;
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+.compare-card__plot { width: 100%; height: 130px; }
+
+.compare-card__finding {
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.compare-card__foot { margin-top: auto; }
+
+.link-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-family: inherit;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.link-btn:hover:not(:disabled) { background: var(--color-accent-muted); }
+.link-btn:disabled { opacity: 0.55; cursor: not-allowed; color: var(--color-text-muted); }
+
+/* ---------- export ---------- */
+
+.export-panel {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.export-panel__links { display: flex; gap: 8px; }
+
+.export-panel__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.export-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.export-choice:hover { border-color: var(--color-border-focus); }
+.export-choice input { margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent); }
+.export-choice__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.export-choice__name {
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+.export-choice__meta { font-size: var(--size-xs); color: var(--color-text-secondary); }
+
+/* A report that hasn't been generated has no chart figure in state, so there is
+   nothing to rasterise for it. Shown greyed with the reason rather than hidden -
+   the letters are the same A/B/C the reader has been choosing between all along,
+   and a silently missing one reads as a bug. */
+.export-choice--unavailable {
+  cursor: not-allowed;
+  background: var(--color-bg);
+  border-style: dashed;
+}
+
+.export-choice--unavailable:hover { border-color: var(--color-border); }
+.export-choice--unavailable .export-choice__name { color: var(--color-text-muted); }
+
+.export-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.export-panel__row--email { border-top: 1px solid var(--color-border); padding-top: 16px; }
+
+.export-panel__label {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.export-panel__input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+
+.export-panel__input:focus { outline: none; border-color: var(--color-accent); }
+.export-panel__input:disabled { background: var(--color-bg); cursor: not-allowed; }
+
+.export-panel__hint {
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.export-panel__hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--color-bg);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+
+.export-status {
+  font-size: var(--size-sm);
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+}
+
+.export-status--ok {
+  border-color: #BBF7D0;
+  background: #F0FDF4;
+  color: #15803D;
+}
+
+.export-status--error {
+  border-color: #FECACA;
+  background: var(--color-danger-muted);
+  color: #B91C1C;
+}
+
+/* ---------- empty / error states ---------- */
+
+.empty-state {
+  padding: 40px 32px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--size-sm);
+  line-height: 1.65;
+}
+
+.empty-state__title {
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+}
+
+.error-banner {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-muted);
+  border: 1px solid #FECACA;
+  font-size: var(--size-sm);
+  color: #B91C1C;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1080px) {
+  .results-grid { grid-template-columns: minmax(0, 1fr); }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .kpi-row { grid-template-columns: 1fr; }
+  /* Two readable columns beat four cramped ones once the phone width is reached. */
+  .stat-strip { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+}

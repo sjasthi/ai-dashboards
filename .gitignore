@@ -6,9 +6,11 @@ __pycache__/
 *.pyd
 
 # Virtual envs
+ai-env/
 .venv/
 venv/
 .env/
+.env
 
 # Editor/OS
 .vscode/

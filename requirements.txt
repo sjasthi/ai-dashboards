@@ -1,40 +1,36 @@
+# Runtime dependencies for the AI-Dashboards backend.
+# Pinned to the versions verified working on Python 3.13.
+#   pip install -r requirements.txt
 
-Technology Stack:   Front End (HTML, CSS, JS, JQuery, Bootstrap)
-                    Server (PHP)
-                    Backend (MySQL)
+# Web API
+fastapi==0.139.0
+uvicorn==0.50.0
+python-multipart==0.0.32     # required by FastAPI for UploadFile (app/api.py)
 
+# Data loading and transformation
+pandas==2.3.3
+numpy==2.3.5
+openpyxl==3.1.5              # pandas engine for .xlsx
+xlrd==2.0.2                  # pandas engine for .xls
 
-Requirements
+# Charts
+plotly==6.8.0
+matplotlib==3.10.0
 
-1. Users will give 1 or more excel or CSV files.
-2. Our system analyzes those files and produces visualizations, reports, summaries, recommendations, etc.
-3. users can download those reports as PDF or HTML or send those reports to themselves or to others through email.
+# LLM providers
+groq==1.5.0
+google-genai==2.9.0
+ollama==0.6.2
 
-You should NOT take any assumption on the number of files, number of columns, number of rows and the format (can be CSV or excel).
+# Report export — PDF / HTML download and email (app/data/export_builder.py).
+# All pure-Python wheels: no GTK, Cairo, wkhtmltopdf or browser download needed,
+# which is why xhtml2pdf is used here rather than WeasyPrint or Playwright.
+# Chart images are rasterised in the browser (app/web/src/export.js), so Kaleido
+# is deliberately not a dependency.
+jinja2==3.1.6
+xhtml2pdf==0.2.17
+pillow==12.2.0               # validates the chart PNGs the browser posts up
 
-
-
-FP2: requirements.md file Requirements Elaboration
-FP3:  what is your 8 week plan to wrap up the projects. What is coming in FP3? You should demonstrate it
-FP4: UI - great start
-[1] Home - which outlines the capablities of app; It gives big picture overview (how many users? how many excels? provides counts)
-
-[2] Uploads - what are the different styles? go from simple to complex
-one excel - one worksheet
-one excel - multiple worksheets
-multiple excels - one worksheet each
-multiple excels - each excel having multiple worksheets
-
-And in each case, your system (runtime AI) will figure out
-- the columns
-- the data types
-- relationships between those columns
-- relationships between different excels
-and produces multiple reports and visualizations.
-
-YOu should not take any assumption on the number of columns, number of worksheets and number of excels.
-
-
-[3] You keep track of all the files that are getting analyzed.
-Ability to save, share the analysis reports with other.
-
+# Support
+json_repair==0.61.2
+python-dotenv==1.2.2

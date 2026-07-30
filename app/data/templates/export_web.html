@@ -1,0 +1,219 @@
+{#
+  export_web.html — the standalone HTML shell.
+
+  Calls the same macros in the same order as export_pdf.html, so the two documents
+  carry identical content and identical provenance labelling. What differs is only
+  presentation: a real browser is rendering this, so grid, sticky table headers and
+  a print stylesheet are all available.
+
+  Hard requirement: zero network requests. This file gets opened out of a Downloads
+  folder, months later, with the app shut down - so no CDN fonts, no external
+  stylesheets, no linked images. Charts are already inline data URIs.
+#}
+{% import '_macros.html' as m %}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{% if combined %}Comparative Report &middot; AI-Dashboard{% else %}{{ reports[0].report_name }} &middot; AI-Dashboard{% endif %}</title>
+
+<style>
+  :root {
+    --bg: #F8F9FA; --surface: #FFFFFF; --border: #DEE2E6; --rule: #EEF0F2;
+    --accent: #2563EB; --accent-muted: #EFF6FF; --ink: #111827; --ink-2: #6B7280;
+    --ink-3: #9CA3AF; --good: #16A34A; --warn: #D97706; --warn-bg: #FFFBEB;
+    --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
+         font-size: 15px; line-height: 1.55; }
+  .page { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; }
+  .doc { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+         padding: 32px; margin-bottom: 24px; }
+
+  /* ---------- type ---------- */
+  .eyebrow { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+             color: var(--ink-2); font-weight: 600; }
+  .title { font-size: 30px; font-weight: 700; margin: 4px 0 10px; line-height: 1.2; }
+  .h2 { font-size: 17px; font-weight: 600; margin: 30px 0 12px;
+        padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .h2:first-child { margin-top: 0; }
+  p { margin: 0 0 10px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--bg);
+         color: var(--ink-2); padding: 2px 5px; border-radius: 4px; }
+  .footnote, .caption { font-size: 13px; color: var(--ink-2); }
+  .caption--lead { border-left: 3px solid var(--warn); background: var(--warn-bg);
+                   color: #92400E; padding: 10px 14px; border-radius: 0 8px 8px 0;
+                   margin: 0 0 14px; }
+  .bullets { margin: 8px 0 0; padding-left: 20px; }
+  .bullets li { margin-bottom: 6px; }
+
+  /* ---------- chips ---------- */
+  .chip { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase;
+          letter-spacing: 0.06em; padding: 2px 7px; border-radius: 999px;
+          border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+  .chip--computed { color: var(--good); border-color: var(--good); }
+  .chip--ai { color: var(--accent); border-color: var(--accent); }
+
+  .legend { border-collapse: collapse; }
+  .legend td { vertical-align: top; padding: 0 16px 0 0; font-size: 13px; }
+  .legend__text { display: block; margin-top: 4px; color: var(--ink-2); }
+
+  /* ---------- provenance / banners ---------- */
+  .provenance { font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap;
+                gap: 6px; align-items: center; margin-bottom: 16px; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 16px;
+            border: 1px solid var(--border); }
+  .banner--warn { border-color: var(--warn); background: var(--warn-bg); color: #92400E; }
+
+  /* ---------- KPI ---------- */
+  .kpi { border-collapse: separate; border-spacing: 10px 0; margin: 8px -10px 20px; width: 100%; }
+  .kpi__cell { vertical-align: top; padding: 14px 16px; border: 1px solid var(--border);
+               border-radius: 10px; background: var(--surface); }
+  .kpi__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+                color: var(--ink-2); font-weight: 600; }
+  .kpi__value { font-size: 26px; font-weight: 700; line-height: 1.15; padding: 4px 0; }
+  .kpi__sub { font-size: 12px; color: var(--ink-2); }
+  .kpi__chip { padding-top: 8px; }
+
+  /* ---------- chart ---------- */
+  .chart { margin: 8px 0 20px; }
+  .chart__img { max-width: 100%; height: auto; display: block; }
+  .chart--empty { border: 1px solid var(--border); background: var(--bg); border-radius: 8px;
+                  padding: 28px; color: var(--ink-2); font-size: 14px; }
+
+  /* ---------- findings ---------- */
+  .finding { border: 1px solid var(--border); border-left: 3px solid var(--border);
+             border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+  .finding--warn { border-color: var(--warn); border-left-color: var(--warn);
+                   background: var(--warn-bg); }
+  .finding--good { border-left-color: var(--good); }
+  .finding__head { display: flex; justify-content: space-between; align-items: center;
+                   gap: 12px; margin-bottom: 6px; }
+  .finding__title { font-weight: 600; }
+  .finding__body { font-size: 14px; }
+  .finding__body p:last-child { margin-bottom: 0; }
+
+  .mini { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  .mini td { font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+  .mini__label { color: var(--ink-2); }
+  .mini__value { text-align: right; font-weight: 600; }
+  .mini__z { color: var(--ink-2); font-weight: 400; margin-left: 6px; }
+
+  .ai-note { border: 1px dashed var(--accent); background: var(--accent-muted);
+             border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 10px; }
+
+  /* ---------- distribution ---------- */
+  .strip { width: 100%; border-collapse: collapse; border: 1px solid var(--border);
+           border-radius: 8px; overflow: hidden; }
+  .strip__cell { padding: 12px 6px; text-align: center; border-right: 1px solid var(--rule); }
+  .strip__cell:last-child { border-right: none; }
+  .strip__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+                  color: var(--ink-2); }
+  .strip__value { font-size: 15px; font-weight: 600; padding-top: 3px; }
+
+  /* ---------- data / matrix ---------- */
+  .table-wrap { overflow-x: auto; }
+  .data, .matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data th, .matrix th { position: sticky; top: 0; background: var(--bg); text-align: left;
+                         font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+                         color: var(--ink-2); padding: 10px 12px;
+                         border-bottom: 1px solid var(--border); }
+  .data td, .matrix td { padding: 8px 12px; border-bottom: 1px solid var(--rule);
+                         vertical-align: top; }
+  .data tbody tr:nth-child(even) { background: #FCFCFD; }
+  .matrix__rowhead { background: var(--bg); font-size: 12px; color: var(--ink-2);
+                     font-weight: 600; width: 18%; }
+  .matrix__row--emphasis td { font-weight: 700; background: var(--accent-muted); }
+  .matrix__absent { color: var(--ink-3); font-style: italic; }
+
+  /* ---------- cover / sections ---------- */
+  .cover__title { font-size: 38px; font-weight: 700; margin: 6px 0; letter-spacing: -0.02em; }
+  .cover__sub { font-size: 16px; color: var(--ink-2); margin-bottom: 24px; }
+  .cover__list { width: 100%; border-collapse: collapse; margin: 16px 0 20px; }
+  .cover__list td { padding: 12px 10px; border-bottom: 1px solid var(--border);
+                    vertical-align: top; }
+  .cover__letter { font-size: 22px; font-weight: 700; color: var(--accent); width: 44px; }
+  .cover__name { font-weight: 600; }
+  .cover__meta { font-size: 13px; color: var(--ink-2); }
+
+  .exec { width: 100%; border-collapse: collapse; }
+  .exec td { padding: 6px 0; vertical-align: top; font-size: 14px; }
+  .exec__letter { font-weight: 700; color: var(--accent); width: 32px; }
+
+  .method { margin-bottom: 18px; }
+  .method__head { font-weight: 600; margin-bottom: 4px; }
+
+  /* Printing this file from the browser gets the same pagination discipline as the
+     PDF export, so a reader who chooses Ctrl+P instead of downloading the PDF
+     doesn't get findings split across a page boundary. */
+  @media print {
+    body { background: #FFFFFF; font-size: 10pt; }
+    .page { max-width: none; padding: 0; }
+    .doc { border: none; border-radius: 0; padding: 0; margin: 0; }
+    .break { page-break-before: always; }
+    .finding, .kpi__cell, .strip, .chart { page-break-inside: avoid; }
+    .h2 { page-break-after: avoid; }
+    .data th, .matrix th { position: static; }
+  }
+
+  @media (max-width: 640px) {
+    .doc { padding: 20px 16px; }
+    .kpi, .kpi tr, .kpi__cell { display: block; width: auto; }
+    .kpi__cell { margin-bottom: 10px; }
+    .title { font-size: 24px; }
+    .cover__title { font-size: 28px; }
+  }
+</style>
+
+<div class="page">
+{% if combined %}
+
+  <div class="doc">
+    {{ m.cover({'reports': reports, 'session_id': session_id,
+                'generated_at': generated_at, 'all_source_files': all_source_files}) }}
+  </div>
+
+  <div class="doc break">
+    {{ m.comparison_matrix({'reports': reports, 'comparison_rows': comparison_rows}) }}
+  </div>
+
+  <div class="doc break">
+    {{ m.executive_summary({'reports': reports}) }}
+    {{ m.method_section({'reports': reports}) }}
+  </div>
+
+  {% for r in reports %}
+  <div class="doc break">
+    {{ m.report_overview(r) }}
+    {{ m.report_analysis(r) }}
+  </div>
+  {% endfor %}
+
+  <div class="doc break">
+    {{ m.recommendations_section({'reports': reports}) }}
+  </div>
+
+  {% if include_appendix %}
+    {% for r in reports %}
+      {% if r.appendix %}
+      <div class="doc break"><div class="table-wrap">{{ m.data_table(r) }}</div></div>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+
+{% else %}
+  {% set r = reports[0] %}
+
+  <div class="doc">
+    {{ m.report_overview(r) }}
+    {{ m.report_analysis(r) }}
+    <h2 class="h2">How to read the labels</h2>
+    {{ m.label_legend() }}
+  </div>
+
+  {% if r.appendix %}
+  <div class="doc break"><div class="table-wrap">{{ m.data_table(r) }}</div></div>
+  {% endif %}
+{% endif %}
+</div>
