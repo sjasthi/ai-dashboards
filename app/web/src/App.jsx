@@ -130,6 +130,7 @@ export default function App() {
         )}
         {activeTab === 'reports' && (
           <ReportsDashboard
+            sessionId={sessionId}
             reports={reports}
             activeType={activeReportType}
             onSelectType={requestReport}

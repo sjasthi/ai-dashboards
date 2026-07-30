@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Card from './ui/Card';
 import DataTable from './ui/DataTable';
 import Plot from './ui/Plot';
 import Section from './ui/Section';
 import StatTile from './ui/StatTile';
 import { clockTime, compactNumber, signedPercent } from '../format';
+import { emailReports, exportReports, fetchExportStatus } from '../api';
+import { collectChartImages, triggerDownload } from '../export';
 
 /**
  * STEP 3 — RESULTS.
@@ -26,6 +28,7 @@ export default function ReportsDashboard({
   fileProfiles,
   generatingType,
   errorMsg,
+  sessionId,
 }) {
   const [showTable, setShowTable] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -119,10 +122,18 @@ export default function ReportsDashboard({
               </Card>
             )}
           </Section>
-
-          <ExportSection />
         </>
       )}
+
+      {/* Outside the branch above: the export panel selects across reports, so it
+          belongs in the compare view too - that is exactly when a reader wants the
+          combined document. */}
+      <ExportPanel
+        sessionId={sessionId}
+        reports={reports}
+        recList={recList}
+        generatingType={generatingType}
+      />
     </div>
   );
 }
@@ -522,33 +533,232 @@ function CompareView({ reports, recList, activeType, onSelectType, generatingTyp
 /* ------------------------------------------------------------------ export */
 
 /**
- * Scaffolding only — there is no /api/export endpoint yet.
+ * Download or email the generated reports.
  *
- * These render disabled rather than as live-looking buttons that silently do
- * nothing, which is the worse of the two failure modes.
+ * The unit of export is a report, A/B/C - not the three tiers ("Summary report",
+ * "Full analysis", "Recommendations") this section used to offer, which named
+ * nothing the app produces. Selecting one gives a single-report document; selecting
+ * several gives one combined comparative document, because comparing them is the
+ * reason to export more than one.
+ *
+ * A report that hasn't been generated can't be offered. Only generated reports have
+ * a chart figure in state, and Plot.jsx purges its node on unmount, so there is
+ * nothing to rasterise for the others - the checkbox is disabled rather than
+ * failing at render time.
  */
-function ExportSection() {
+function ExportPanel({ sessionId, reports, recList, generatingType }) {
+  const letters = recList.map((_, i) => String.fromCharCode(65 + i));
+  const generated = letters.filter((l) => reports[l]);
+
+  const [selected, setSelected] = useState(() => new Set(generated));
+  const [recipients, setRecipients] = useState('');
+  const [emailFormat, setEmailFormat] = useState('pdf');
+  const [status, setStatus] = useState(null); // { kind: 'info'|'error'|'ok', text }
+  const [busy, setBusy] = useState(false);
+  const [emailConfigured, setEmailConfigured] = useState(null); // null = unknown yet
+
+  // Asked up front so the email row can explain itself before the user types an
+  // address, rather than after.
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    let live = true;
+    fetchExportStatus(sessionId)
+      .then((s) => { if (live) setEmailConfigured(!!s.email_configured); })
+      .catch(() => { if (live) setEmailConfigured(false); })
+    return () => { live = false; };
+  }, [sessionId]);
+
+  // A freshly generated report joins the selection: the user just asked for it, so
+  // it is almost certainly one they want in the file.
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((l) => reports[l]));
+      generated.forEach((l) => { if (!prev.has(l) && !next.has(l)) next.add(l); });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generated.join(',')]);
+
+  const chosen = generated.filter((l) => selected.has(l));
+  const disabled = busy || !!generatingType || !sessionId;
+
+  if (!generated.length) {
+    return (
+      <Section title="Export">
+        <Card>
+          <div className="empty-state" style={{ padding: '24px' }}>
+            Generate a report first — then you can download it as a PDF or an HTML
+            file, or email it.
+          </div>
+        </Card>
+      </Section>
+    );
+  }
+
+  const toggle = (letter) => {
+    setStatus(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(letter)) next.delete(letter); else next.add(letter);
+      return next;
+    });
+  };
+
+  /** Rasterise the selected charts, then hand the payload to `send`. */
+  const withPayload = async (verb, send) => {
+    setBusy(true);
+    setStatus({ kind: 'info', text: 'Rendering charts…' });
+    try {
+      const chartImages = await collectChartImages(reports, chosen);
+      setStatus({ kind: 'info', text: `${verb}…` });
+      await send(chartImages);
+    } catch (err) {
+      setStatus({ kind: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = (format) => withPayload(
+    `Building the ${format.toUpperCase()}`,
+    async (chartImages) => {
+      const { blob, filename } = await exportReports(sessionId, {
+        reportTypes: chosen, format, chartImages,
+      });
+      const name = filename || `ai-dashboard-reports-${chosen.join('').toLowerCase()}.${format}`;
+      triggerDownload(blob, name);
+      setStatus({ kind: 'ok', text: `Downloaded ${name}` });
+    },
+  );
+
+  const sendEmail = () => withPayload('Sending', async (chartImages) => {
+    const result = await emailReports(sessionId, {
+      reportTypes: chosen, format: emailFormat, chartImages,
+      recipients: [recipients],
+    });
+    setStatus({ kind: 'ok', text: `Sent to ${result.recipients.join(', ')}.` });
+    setRecipients('');
+  });
+
   return (
-    <Section title="Export" chip={<span className="chip">not yet available</span>}>
-      <div className="compare-grid">
-        {['Summary report', 'Full analysis', 'Recommendations'].map((title) => (
-          <Card key={title} className="compare-card">
-            <div className="compare-card__title">{title}</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {['PDF', 'HTML', 'Email'].map((fmt) => (
-                <button
-                  key={fmt}
-                  className="link-btn"
-                  disabled
-                  title="Export isn’t implemented yet"
-                >
-                  {fmt}
-                </button>
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
+    <Section
+      title="Export"
+      actions={
+        <div className="export-panel__links">
+          <button
+            className="link-btn"
+            disabled={disabled || chosen.length === generated.length}
+            onClick={() => { setStatus(null); setSelected(new Set(generated)); }}
+          >
+            Select all
+          </button>
+          <button
+            className="link-btn"
+            disabled={disabled || !chosen.length}
+            onClick={() => { setStatus(null); setSelected(new Set()); }}
+          >
+            Clear
+          </button>
+        </div>
+      }
+    >
+      <Card className="export-panel">
+        <div className="export-panel__choices">
+          {letters.map((letter) => {
+            const report = reports[letter];
+            const rec = recList[letter.charCodeAt(0) - 65];
+            return (
+              <label
+                key={letter}
+                className={`export-choice${report ? '' : ' export-choice--unavailable'}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(letter)}
+                  disabled={disabled || !report}
+                  onChange={() => toggle(letter)}
+                />
+                <span className="export-choice__body">
+                  <span className="export-choice__name">
+                    {letter} — {report?.report_name || rec?.report_name || `Report ${letter}`}
+                  </span>
+                  <span className="export-choice__meta">
+                    {report
+                      ? `${report.pattern_used || 'report'} · ${(report.report_rows || 0).toLocaleString()} data points`
+                      : 'not generated yet — open it above first'}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="export-panel__row">
+          <button className="link-btn" disabled={disabled || !chosen.length}
+                  onClick={() => download('pdf')}>
+            Download PDF
+          </button>
+          <button className="link-btn" disabled={disabled || !chosen.length}
+                  onClick={() => download('html')}>
+            Download HTML
+          </button>
+          <span className="export-panel__hint">
+            {chosen.length === 0
+              ? 'Choose at least one report.'
+              : chosen.length === 1
+                ? `Report ${chosen[0]} as one document.`
+                : `${chosen.length} reports as one combined document, with a comparison table.`}
+          </span>
+        </div>
+
+        <div className="export-panel__row export-panel__row--email">
+          <label className="export-panel__label" htmlFor="export-email">Email to</label>
+          <input
+            id="export-email"
+            type="text"
+            className="export-panel__input"
+            placeholder="you@example.com, teammate@example.com"
+            value={recipients}
+            disabled={disabled || emailConfigured === false}
+            onChange={(e) => { setRecipients(e.target.value); setStatus(null); }}
+          />
+          <div className="segmented" role="group" aria-label="Email format">
+            {['pdf', 'html'].map((fmt) => (
+              <button
+                key={fmt}
+                type="button"
+                className="segmented__btn"
+                aria-pressed={emailFormat === fmt}
+                disabled={disabled || emailConfigured === false}
+                onClick={() => setEmailFormat(fmt)}
+              >
+                {fmt.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <button
+            className="link-btn"
+            disabled={disabled || !chosen.length || !recipients.trim() || emailConfigured === false}
+            onClick={sendEmail}
+          >
+            Send
+          </button>
+        </div>
+
+        {emailConfigured === false && (
+          <div className="export-panel__hint">
+            Email isn’t configured on this server — set SMTP_HOST, SMTP_USER and
+            SMTP_PASSWORD in <code>.env</code> (see <code>.env.example</code>) and
+            restart the API. Downloads work either way.
+          </div>
+        )}
+
+        {status && (
+          <div className={`export-status export-status--${status.kind}`} role="status">
+            {status.text}
+          </div>
+        )}
+      </Card>
     </Section>
   );
 }

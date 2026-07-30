@@ -57,13 +57,17 @@ app/web/
     ├── main.jsx                # Entry point: createRoot -> <App>, imports both stylesheets
     ├── App.jsx                 # Nav, tab routing, and ALL shared session state
     │                           # (files, sessionId, recommendations, reports cache)
-    ├── api.js                  # fetch client: API_BASE, generateReport, REPORT_TYPE_LETTERS
+    ├── api.js                  # fetch client: API_BASE, generateReport, REPORT_TYPE_LETTERS,
+    │                           # exportReports / emailReports / fetchExportStatus
+    ├── export.js               # chartPngDataUrl (offscreen Plotly render), triggerDownload
     ├── format.js               # compactNumber / exactNumber / humanizeColumn / clockTime
-    ├── chartLayout.js          # Plotly layout theming applied in Plot.jsx
+    ├── chartLayout.js          # Plotly layout theming applied in Plot.jsx — and reused by
+    │                           # export.js, which is what makes an exported chart match the screen
     ├── components/
     │   ├── Uploaddashboard.jsx    # Step 1 — file picker; POSTs /api/analyze-full
     │   ├── Analysisdashboard.jsx  # Step 2 — recommendation cards
-    │   ├── Reportsdashboard.jsx   # Step 3 — chart, stat tiles, data table, compare view
+    │   ├── Reportsdashboard.jsx   # Step 3 — chart, stat tiles, data table, compare view,
+    │   │                           # and the export panel
     │   ├── Settingsdashboard.jsx  # Settings — UI only, nothing is persisted yet
     │   └── ui/                    # Shared primitives
     │       ├── Card.jsx           #   The white surface every panel sits on
@@ -100,6 +104,17 @@ requestReport   POSTs /api/generate-report unless that letter is already cached
                 compare view — never re-requests a report the server already built
 
 Reports tab     Renders reports[activeType]: chart, stat tiles, table, compare view
+
+Export panel    Tick any generated reports, then Download PDF / HTML or email them.
+                export.js redraws each selected chart into an offscreen Plotly node
+                with the real buildLayout() and posts the PNGs up with the request -
+                the server never renders a chart, so the file matches the screen and
+                no headless browser is needed. One report selected produces a
+                single-report document; two or more produce one combined document
+                with a comparison table.
+                Only generated reports can be ticked: the others have no chart
+                figure in state, and Plot.jsx purges its node on unmount, so there
+                is nothing to rasterise for them.
 ```
 
 A new upload calls `startNewSession()`, which clears the report cache — reports built
@@ -143,7 +158,8 @@ top of what the backend sends.
 | Upload, analysis, report generation | Working end-to-end |
 | Chart, stat tiles, data table, compare view | Working |
 | Settings | UI renders but nothing is saved — the controls are local state only |
-| Export (PDF / HTML / CSV / email) | **Not implemented.** The buttons render disabled; there is no `/api/export` endpoint on the backend |
+| Export — PDF / HTML download, email | Working. Select any generated reports; several produce one combined comparative document. Email needs `SMTP_*` in `.env`, and the panel disables that row with the reason when it isn't set |
+| Export — CSV | Not implemented. Settings still lists it as a format; the dropdown is decorative |
 | Sign-in | Removed 2026-07-28. There was an inert button with no auth behind it |
 
 ---

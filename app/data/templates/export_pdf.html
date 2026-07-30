@@ -1,0 +1,193 @@
+{#
+  export_pdf.html — the print shell, rendered by xhtml2pdf.
+
+  Layout is table-based throughout because this renderer has no flexbox, no grid
+  and no `position`. Sizes are pt/%, colours are literal hex mirroring tokens.css
+  (keep them in step), and there are no CSS variables - xhtml2pdf ignores them and
+  would silently drop every rule that used one.
+#}
+{% import '_macros.html' as m %}
+<meta charset="utf-8" />
+<title>{% if combined %}Comparative Report{% else %}{{ reports[0].report_name }}{% endif %}</title>
+
+<style>
+  @page {
+    size: letter portrait;
+    margin: 1.8cm 1.6cm 2.2cm 1.6cm;
+
+    @frame footer {
+      -pdf-frame-content: footerContent;
+      bottom: 1.1cm;
+      margin-left: 1.6cm;
+      margin-right: 1.6cm;
+      height: 1cm;
+    }
+  }
+
+  body { font-family: Helvetica, sans-serif; font-size: 9.5pt; color: #111827; line-height: 1.45; }
+
+  /* ---------- type ---------- */
+  .eyebrow { font-size: 7.5pt; letter-spacing: 0.6pt; text-transform: uppercase;
+             color: #6B7280; font-weight: bold; }
+  .title { font-size: 19pt; font-weight: bold; margin: 2pt 0 6pt 0; color: #111827; }
+  .h2 { font-size: 11.5pt; font-weight: bold; margin: 16pt 0 6pt 0; color: #111827;
+        border-bottom: 1px solid #DEE2E6; padding-bottom: 3pt; }
+  .h2__chip { font-weight: normal; }
+  p { margin: 0 0 6pt 0; }
+  code { font-family: Courier, monospace; font-size: 8pt; background-color: #F8F9FA;
+         color: #6B7280; padding: 1pt 3pt; }
+  .footnote { font-size: 8pt; color: #6B7280; margin-top: 4pt; }
+  .caption { font-size: 8.5pt; color: #6B7280; margin-top: 5pt; }
+  .caption--lead { border-left: 2pt solid #D97706; padding: 4pt 7pt; margin: 0 0 6pt 0;
+                   background-color: #FFFBEB; color: #92400E; }
+  .bullets { margin: 4pt 0 0 12pt; padding: 0; }
+  .bullets li { margin-bottom: 3pt; }
+
+  /* ---------- chips ---------- */
+  .chip { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.4pt;
+          padding: 1pt 4pt; border: 1px solid #DEE2E6; color: #6B7280; }
+  .chip--computed { color: #16A34A; border-color: #16A34A; }
+  .chip--ai { color: #2563EB; border-color: #2563EB; }
+
+  .legend { margin-top: 4pt; }
+  .legend td { vertical-align: top; padding: 0 6pt 0 0; font-size: 8pt; }
+  .legend__text { color: #6B7280; display: block; margin-top: 2pt; }
+
+  /* ---------- provenance / banners ---------- */
+  .provenance { font-size: 8pt; color: #6B7280; margin-bottom: 8pt; }
+  .banner { padding: 5pt 7pt; font-size: 8.5pt; margin-bottom: 8pt;
+            border: 1px solid #DEE2E6; }
+  .banner--warn { border-color: #D97706; color: #92400E; background-color: #FFFBEB; }
+
+  /* ---------- KPI ---------- */
+  .kpi { margin: 6pt 0 10pt 0; }
+  .kpi__cell { vertical-align: top; padding: 6pt 8pt; border: 1px solid #DEE2E6; }
+  .kpi__label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.45pt;
+                color: #6B7280; }
+  .kpi__value { font-size: 15pt; font-weight: bold; color: #111827; padding: 2pt 0; }
+  .kpi__sub { font-size: 7.5pt; color: #6B7280; }
+  .kpi__chip { padding-top: 3pt; }
+
+  /* ---------- chart ---------- */
+  .chart { margin: 4pt 0 8pt 0; }
+  .chart__img { width: 460pt; }
+  .chart--empty { border: 1px solid #DEE2E6; background-color: #F8F9FA; padding: 14pt;
+                  font-size: 8.5pt; color: #6B7280; }
+
+  /* ---------- findings ---------- */
+  .finding { border: 1px solid #DEE2E6; border-left: 3pt solid #DEE2E6;
+             padding: 6pt 8pt; margin-bottom: 6pt; }
+  .finding--warn { border-color: #D97706; border-left-color: #D97706;
+                   background-color: #FFFBEB; }
+  .finding--good { border-left-color: #16A34A; }
+  .finding__head { padding-bottom: 3pt; }
+  .finding__title { font-weight: bold; font-size: 9.5pt; }
+  .finding__body { font-size: 9pt; }
+
+  .mini { margin-top: 4pt; }
+  .mini td { font-size: 8.5pt; padding: 1.5pt 0; border-bottom: 1px solid #DEE2E6; }
+  .mini__label { color: #6B7280; }
+  .mini__value { text-align: right; font-weight: bold; }
+  .mini__z { color: #6B7280; font-weight: normal; }
+
+  .ai-note { border: 1px dotted #2563EB; background-color: #EFF6FF; padding: 5pt 7pt;
+             font-size: 8.5pt; margin-top: 5pt; }
+
+  /* ---------- distribution ---------- */
+  .strip { border: 1px solid #DEE2E6; }
+  .strip__cell { padding: 5pt 3pt; text-align: center; border-right: 1px solid #DEE2E6; }
+  .strip__label { font-size: 7pt; text-transform: uppercase; color: #6B7280; }
+  .strip__value { font-size: 9.5pt; font-weight: bold; padding-top: 1pt; }
+
+  /* ---------- data / matrix tables ---------- */
+  .data, .matrix { border: 1px solid #DEE2E6; }
+  .data th, .matrix th { background-color: #F8F9FA; font-size: 7.5pt; text-align: left;
+                         text-transform: uppercase; letter-spacing: 0.3pt; color: #6B7280;
+                         padding: 4pt 5pt; border-bottom: 1px solid #DEE2E6; }
+  .data td, .matrix td { font-size: 8pt; padding: 3pt 5pt;
+                         border-bottom: 1px solid #EEF0F2; }
+  .matrix__rowhead { background-color: #F8F9FA; font-size: 7.5pt; color: #6B7280;
+                     font-weight: bold; width: 18%; }
+  .matrix__row--emphasis td { font-weight: bold; background-color: #EFF6FF; }
+  .matrix__absent { color: #9CA3AF; font-style: italic; }
+
+  /* ---------- cover / sections ---------- */
+  .cover__title { font-size: 26pt; font-weight: bold; margin: 4pt 0; }
+  .cover__sub { font-size: 10pt; color: #6B7280; margin-bottom: 14pt; }
+  .cover__list { margin: 10pt 0 14pt 0; }
+  .cover__list td { padding: 5pt 6pt; border-bottom: 1px solid #DEE2E6;
+                    vertical-align: top; }
+  .cover__letter { font-size: 15pt; font-weight: bold; color: #2563EB; width: 26pt; }
+  .cover__name { font-weight: bold; font-size: 10pt; }
+  .cover__meta { font-size: 8pt; color: #6B7280; }
+
+  .exec td { padding: 3pt 0; vertical-align: top; font-size: 9pt; }
+  .exec__letter { font-weight: bold; color: #2563EB; width: 22pt; }
+
+  .method { margin-bottom: 8pt; }
+  .method__head { font-weight: bold; font-size: 9.5pt; margin-bottom: 2pt; }
+
+  .footer { font-size: 7.5pt; color: #9CA3AF; border-top: 1px solid #DEE2E6;
+            padding-top: 3pt; }
+
+  .break { page-break-before: always; }
+</style>
+
+<div id="footerContent" class="footer">
+  AI-Dashboard &middot; session {{ session_id }} &middot;
+  {% if combined %}reports {{ reports | map(attribute='letter') | join(', ') }}{% else %}report {{ reports[0].letter }}{% endif %}
+  &middot; page <pdf:pagenumber /> of <pdf:pagecount />
+</div>
+
+{% if combined %}
+
+  {# 1. Cover, with the label legend - the export gets forwarded, so the reader
+       who opens it never saw the chips explained in the app. #}
+  {{ m.cover({'reports': reports, 'session_id': session_id,
+              'generated_at': generated_at, 'all_source_files': all_source_files}) }}
+
+  {# 2. Comparison, ahead of the summary: it is the reason several reports were
+       exported together, and the summary below it is derived from the same numbers. #}
+  <div class="break">
+    {{ m.comparison_matrix({'reports': reports, 'comparison_rows': comparison_rows}) }}
+  </div>
+
+  {# 3-4 #}
+  <div class="break">
+    {{ m.executive_summary({'reports': reports}) }}
+    {{ m.method_section({'reports': reports}) }}
+  </div>
+
+  {# 5. Each report in full #}
+  {% for r in reports %}
+  <div class="break">
+    {{ m.report_overview(r) }}
+    {{ m.report_analysis(r) }}
+  </div>
+  {% endfor %}
+
+  {# 6 #}
+  <div class="break">
+    {{ m.recommendations_section({'reports': reports}) }}
+  </div>
+
+  {# 7 #}
+  {% if include_appendix %}
+    {% for r in reports %}
+      {% if r.appendix %}<div class="break">{{ m.data_table(r) }}</div>{% endif %}
+    {% endfor %}
+  {% endif %}
+
+{% else %}
+  {% set r = reports[0] %}
+
+  {{ m.report_overview(r) }}
+
+  <div class="break">
+    {{ m.report_analysis(r) }}
+    <h2 class="h2">How to read the labels</h2>
+    {{ m.label_legend() }}
+  </div>
+
+  {% if r.appendix %}<div class="break">{{ m.data_table(r) }}</div>{% endif %}
+{% endif %}

@@ -11,6 +11,9 @@ ai-dashboards/
 │   │                               #   GET  /health
 │   │                               #   POST /api/analyze-full     -> profiles + LLM recommendations
 │   │                               #   POST /api/generate-report  -> report rows + chart + stats
+│   │                               #   GET  /api/export/{sid}/status -> generated letters, email readiness
+│   │                               #   POST /api/export/{sid}        -> PDF/HTML download of selected reports
+│   │                               #   POST /api/export/{sid}/email  -> the same document, as an attachment
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── data_loader.py          # Reads CSV/Excel into DataFrames; handles multi-sheet workbooks
@@ -22,6 +25,12 @@ ai-dashboards/
 │   │   ├── report_builder.py       # Executes the operations pipeline into a report DataFrame
 │   │   ├── chart_builder.py        # Builds the Plotly figure for a report
 │   │   ├── report_stats.py         # Descriptive/trend/outlier stats + prose narrative
+│   │   ├── export_builder.py       # Renders reports to PDF (xhtml2pdf) and standalone HTML
+│   │   ├── emailer.py              # Sends an export over SMTP (SMTP_* in .env)
+│   │   ├── templates/              # Jinja templates for the exports
+│   │   │   ├── _macros.html        #   All content markup — shared by both targets
+│   │   │   ├── export_pdf.html     #   Print shell: @page, footer frame, table layout
+│   │   │   └── export_web.html     #   Standalone HTML shell: no external requests
 │   │   └── session_manager.py      # Writes per-session artifacts under session_data/
 │   └── web/                        # React + Vite frontend
 │       ├── index.html              # App shell: loads /src/main.jsx + the Plotly CDN
@@ -33,12 +42,13 @@ ai-dashboards/
 │           ├── main.jsx            # Entry point: mounts <App>, imports the two stylesheets
 │           ├── App.jsx             # Nav, tab routing, and all shared session state
 │           ├── api.js              # fetch client for the backend
+│           ├── export.js           # Rasterises charts to PNG for export; triggers downloads
 │           ├── format.js           # Number/label formatting helpers
-│           ├── chartLayout.js      # Plotly layout theming
+│           ├── chartLayout.js      # Plotly layout theming (reused to theme the export PNGs)
 │           ├── components/
 │           │   ├── Uploaddashboard.jsx    # Step 1 — file upload, POSTs /api/analyze-full
 │           │   ├── Analysisdashboard.jsx  # Step 2 — recommendation cards
-│           │   ├── Reportsdashboard.jsx   # Step 3 — chart, stats, table, compare view
+│           │   ├── Reportsdashboard.jsx   # Step 3 — chart, stats, table, compare view, export
 │           │   ├── Settingsdashboard.jsx  # Settings (UI only — not yet persisted)
 │           │   └── ui/                    # Card, DataTable, Plot, Section, Sparkline, StatTile
 │           └── css/
@@ -49,9 +59,12 @@ ai-dashboards/
 │                                   # with no LLM call (needs SAVE_DEBUG_FILES=true)
 ├── tests/
 │   ├── test_generate_report_api.py # Integration tests for POST /api/generate-report
+│   ├── test_export_api.py          # Integration tests for the /api/export/* routes
 │   └── test_report_stats.py        # Unit tests for report_stats.py
 ├── datasets/                       # Sample data — 8 folders, see below
 ├── docs/
+│   ├── EXPORT_FEATURE.md           # Report export: architecture, renderer constraints,
+│   │                               # document design. READ BEFORE touching export code.
 │   ├── REACT_MIGRATION_SUMMARY.md  # Record of the vanilla-JS -> React migration
 │   ├── course_requirements.md      # The original project brief
 │   ├── website mockup.png
@@ -83,6 +96,13 @@ Upload (Uploaddashboard.jsx)
      -> chart_builder            builds the Plotly figure
      -> report_stats             computes stats and narrative
   -> report view (Reportsdashboard.jsx)
+
+POST /api/export/{session_id}          (Reportsdashboard.jsx ExportPanel)
+  -> export.js rasterises each selected chart with chartLayout.buildLayout
+     (client-side, so the image matches the screen and Kaleido isn't needed)
+  -> export_builder                    renders the Jinja templates
+     -> xhtml2pdf                      PDF, or the standalone HTML shell
+  -> file download (one report = single layout, several = combined + comparison)
 ```
 
 ## Datasets

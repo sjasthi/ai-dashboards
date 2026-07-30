@@ -588,6 +588,126 @@
 .link-btn:hover:not(:disabled) { background: var(--color-accent-muted); }
 .link-btn:disabled { opacity: 0.55; cursor: not-allowed; color: var(--color-text-muted); }
 
+/* ---------- export ---------- */
+
+.export-panel {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.export-panel__links { display: flex; gap: 8px; }
+
+.export-panel__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.export-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.export-choice:hover { border-color: var(--color-border-focus); }
+.export-choice input { margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent); }
+.export-choice__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.export-choice__name {
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+.export-choice__meta { font-size: var(--size-xs); color: var(--color-text-secondary); }
+
+/* A report that hasn't been generated has no chart figure in state, so there is
+   nothing to rasterise for it. Shown greyed with the reason rather than hidden -
+   the letters are the same A/B/C the reader has been choosing between all along,
+   and a silently missing one reads as a bug. */
+.export-choice--unavailable {
+  cursor: not-allowed;
+  background: var(--color-bg);
+  border-style: dashed;
+}
+
+.export-choice--unavailable:hover { border-color: var(--color-border); }
+.export-choice--unavailable .export-choice__name { color: var(--color-text-muted); }
+
+.export-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.export-panel__row--email { border-top: 1px solid var(--color-border); padding-top: 16px; }
+
+.export-panel__label {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.export-panel__input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+
+.export-panel__input:focus { outline: none; border-color: var(--color-accent); }
+.export-panel__input:disabled { background: var(--color-bg); cursor: not-allowed; }
+
+.export-panel__hint {
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.export-panel__hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--color-bg);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+
+.export-status {
+  font-size: var(--size-sm);
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+}
+
+.export-status--ok {
+  border-color: #BBF7D0;
+  background: #F0FDF4;
+  color: #15803D;
+}
+
+.export-status--error {
+  border-color: #FECACA;
+  background: var(--color-danger-muted);
+  color: #B91C1C;
+}
+
 /* ---------- empty / error states ---------- */
 
 .empty-state {

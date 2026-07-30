@@ -26,6 +26,8 @@ renders the dashboard. Both must be running to use the app.
 | groq / google-genai / ollama | LLM providers (hosted, then local fallback) |
 | json_repair             | Recovering malformed JSON from LLM output   |
 | openpyxl / xlrd         | Excel (.xlsx / .xls) reading                |
+| jinja2 / xhtml2pdf      | Report export — HTML templating and PDF rendering |
+| pillow                  | Validates the chart images the browser posts for an export |
 | python-dotenv           | Loads `.env` configuration                  |
 | react / vite            | Frontend (declared in `app/web/package.json`) |
 
@@ -67,6 +69,11 @@ analysis endpoint will fail — there is no offline mock mode.
 cp .env.example .env
 ```
 
+Emailing a report additionally needs `SMTP_HOST`, `SMTP_USER` and `SMTP_PASSWORD`
+(Gmail requires an [app password](https://myaccount.google.com/apppasswords), not your
+account password). Leave them blank to skip it — the export panel then disables the
+email row and says why, and PDF/HTML downloads still work.
+
 Free keys: [Groq](https://console.groq.com/keys) or
 [Google AI Studio](https://aistudio.google.com/apikey). Alternatively set
 `AI_BACKEND=ollama` to use a local Ollama install with no key at all.
@@ -102,6 +109,7 @@ pytest
 | [RUNNING_APP.md](RUNNING_APP.md) | Detailed run instructions, API endpoints, troubleshooting |
 | [project_file_structure.md](project_file_structure.md) | Current repository layout |
 | [app/web/README.md](app/web/README.md) | Frontend architecture and styling |
+| [docs/EXPORT_FEATURE.md](docs/EXPORT_FEATURE.md) | Report export (PDF / HTML / email): architecture, renderer constraints, document design |
 | [docs/REACT_MIGRATION_SUMMARY.md](docs/REACT_MIGRATION_SUMMARY.md) | Record of the vanilla-JS → React migration |
 | [docs/course_requirements.md](docs/course_requirements.md) | The original project brief |
 | [docs/archive/](docs/archive/) | Superseded planning docs and retired code |

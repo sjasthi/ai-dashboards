@@ -22,6 +22,15 @@ groq==1.5.0
 google-genai==2.9.0
 ollama==0.6.2
 
+# Report export — PDF / HTML download and email (app/data/export_builder.py).
+# All pure-Python wheels: no GTK, Cairo, wkhtmltopdf or browser download needed,
+# which is why xhtml2pdf is used here rather than WeasyPrint or Playwright.
+# Chart images are rasterised in the browser (app/web/src/export.js), so Kaleido
+# is deliberately not a dependency.
+jinja2==3.1.6
+xhtml2pdf==0.2.17
+pillow==12.2.0               # validates the chart PNGs the browser posts up
+
 # Support
 json_repair==0.61.2
 python-dotenv==1.2.2
