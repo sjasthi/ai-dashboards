@@ -234,13 +234,65 @@ Failure mapping — every case actionable, **none silently succeeding**:
 | `EmailNotConfigured` | 503 (names the env vars and `.env.example`) |
 | Bad address syntax (checked *before* rendering) | 422 (names the address) |
 | `SMTPAuthenticationError` | 502 (mentions Gmail app passwords) |
+| No STARTTLS offered while credentials are set | 502 (refuses rather than sending the password in clear) |
 | `SMTPRecipientsRefused` | 400 |
 | timeout / `OSError` | 504 (20s timeout; without it a wrong host hangs for minutes) |
 | `ExportRenderError` | 500 |
 
 Config: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` in `.env`.
 Port 465 → implicit TLS (`SMTP_SSL`); anything else → STARTTLS. Leave `SMTP_HOST` blank
-to keep the feature off cleanly.
+to keep the feature off cleanly. `.env.example` carries recipes for Mailtrap, Yahoo,
+Gmail and Brevo — **all of them SMTP, so switching provider is never a code change.**
+Resist provider SDKs for that reason: they buy nothing this module doesn't already do
+and cost a dependency plus the typed failure mapping.
+
+The trade-off between them is who you're allowed to send to:
+
+| Provider | Delivers to | Cost of setup |
+|---|---|---|
+| Mailtrap **Sandbox** | nobody — captured in a web inbox, any recipient accepted | account only |
+| Mailtrap **Sending**, demo domain | only the Mailtrap account owner's own address | account only |
+| Mailtrap **Sending**, own domain | anyone | needs a domain you own |
+| Yahoo / Gmail | anyone | app password on a personal account |
+| Brevo | anyone | verified sender in their dashboard |
+
+Yahoo and Gmail reject a `SMTP_FROM` they don't own, so it must equal `SMTP_USER`.
+Mailtrap Sandbox is the best development target — it accepts any recipient and lets you
+download the attachment — but it is not a demo of delivery, because nothing leaves it.
+
+### Credentials are optional, but all-or-nothing
+
+`smtp_config_error()` is the single source of truth — the endpoint's pre-flight 503 and
+`send_report_email`'s own guard both call it, so they cannot drift. Four states:
+
+| `.env` | Result |
+|---|---|
+| no `SMTP_HOST` | off — the UI disables the row and says why |
+| host + user + password | authenticated relay |
+| host, **both** credentials blank | no-auth relay — a local mail catcher |
+| host + exactly one credential | **503 naming the empty one** |
+
+That last row is deliberate. A blank `SMTP_PASSWORD` next to a filled-in `SMTP_USER` is
+a typo, and silently dropping the login because of it would send mail somewhere nobody
+chose.
+
+STARTTLS is **negotiated, not assumed** (`server.has_extn("starttls")`). Calling it
+unconditionally is what made this module impossible to test without an account — mail
+catchers offer no STARTTLS and reject the command. The downgrade is guarded: if the
+server offers no STARTTLS *and* credentials are set, the send is refused rather than
+putting `SMTP_PASSWORD` on the wire in clear.
+
+### Verifying without credentials
+
+The only way to see a real PDF arrive as a real attachment without an account:
+
+```
+pip install aiosmtpd && python -m aiosmtpd -n -l localhost:1025   # or run Mailpit
+```
+
+then `SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, both credentials blank. Mailpit's UI on
+`:8025` lets you download the attachment and open it — which is the one assertion no
+unit test can make, since the tests fake `smtplib` and never render a real inbox.
 
 ---
 
@@ -261,7 +313,7 @@ same selection always yields the same filename and section order.
 ## Verification
 
 ```bash
-ai-env\Scripts\python -m pytest tests/ -q          # 119 pass (35 export)
+ai-env\Scripts\python -m pytest tests/ -q          # 124 pass (40 export)
 npm --prefix app/web run build
 ```
 
@@ -300,8 +352,11 @@ with all network aborted and rendered fully.
 - **CSV export.** `Settingsdashboard.jsx` still lists "Raw CSV" as a format; the
   dropdown is decorative. Cheap to add — `report_df.to_csv()`, no new dependencies.
 - **Settings "Default export format"** is not wired to the export panel.
-- **Email against a live SMTP server** has never been run. Code paths are covered with
-  a fake `smtplib.SMTP`; a real send needs credentials.
+- **Email through an authenticated public relay** has not been run — that needs an
+  account. A send over a real socket to a local `aiosmtpd` catcher *has*: the route
+  delivered an 18.6 KB `%PDF` attachment with no `smtplib` faking anywhere, which
+  proves the message construction and the protocol conversation. What remains unproven
+  is only `login()` against a real provider and the deliverability that follows.
 - **Inline HTML email body** — see the Email section.
 
 ## Dependencies added

@@ -43,7 +43,13 @@ def clean_sessions():
 
 @pytest.fixture(autouse=True)
 def smtp_env(monkeypatch):
-    """Configured by default, so only the tests that care opt out."""
+    """Configured by default, so only the tests that care opt out.
+
+    Tests opt out with setenv("SMTP_HOST", ""), never delenv: emailer calls
+    load_dotenv() on every read, which would refill a deleted key from the
+    developer's real .env and make the result depend on their local mail setup.
+    An empty value is already present, so load_dotenv leaves it alone.
+    """
     monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
     monkeypatch.setenv("SMTP_PORT", "587")
     monkeypatch.setenv("SMTP_USER", "sender@example.com")
@@ -363,7 +369,7 @@ def test_status_lists_generated_reports_and_email_readiness(client, monkeypatch)
 def test_status_reports_email_off_when_unconfigured(client, monkeypatch):
     sid, _, _ = make_session(monkeypatch)
     generate(client, sid, "A")
-    monkeypatch.delenv("SMTP_HOST")
+    monkeypatch.setenv("SMTP_HOST", "")
 
     assert client.get(f"/api/export/{sid}/status").json()["email_configured"] is False
 
@@ -377,13 +383,24 @@ def test_status_for_unknown_session_is_404(client):
 # ---------------------------------------------------------------------------
 
 class FakeSMTP:
-    """Records what a send would have transmitted."""
+    """Records what a send would have transmitted.
+
+    Stands in for both smtplib.SMTP and smtplib.SMTP_SSL, so `context=` has to be
+    accepted: SMTP_SSL is constructed with it, and a fake that couldn't take it is
+    the reason the port-465 branch went untested.
+    """
 
     sent = []
-    raises = None
+    raises = None            # raised from login()
+    raises_on_send = None    # raised from send_message()
+    offers_starttls = True   # a local mail catcher offers none; a real relay does
+    log = []                 # ("SSL"|"plain", method name) in call order
 
-    def __init__(self, host, port, timeout=None):
+    def __init__(self, host, port, timeout=None, context=None):
         self.host, self.port = host, port
+        FakeSMTP.log.append((self.flavour, "connect"))
+
+    flavour = "plain"
 
     def __enter__(self):
         return self
@@ -391,22 +408,42 @@ class FakeSMTP:
     def __exit__(self, *exc):
         return False
 
+    def ehlo(self):
+        FakeSMTP.log.append((self.flavour, "ehlo"))
+
+    def has_extn(self, name):
+        return name.lower() == "starttls" and FakeSMTP.offers_starttls
+
     def starttls(self, context=None):
-        pass
+        FakeSMTP.log.append((self.flavour, "starttls"))
 
     def login(self, user, password):
+        FakeSMTP.log.append((self.flavour, "login"))
         if FakeSMTP.raises:
             raise FakeSMTP.raises
 
     def send_message(self, msg):
+        FakeSMTP.log.append((self.flavour, "send"))
+        if FakeSMTP.raises_on_send:
+            raise FakeSMTP.raises_on_send
         FakeSMTP.sent.append(msg)
+
+
+class FakeSMTPSSL(FakeSMTP):
+    """The implicit-TLS flavour, so tests can tell the two branches apart."""
+
+    flavour = "SSL"
 
 
 @pytest.fixture
 def fake_smtp(monkeypatch):
     FakeSMTP.sent = []
     FakeSMTP.raises = None
+    FakeSMTP.raises_on_send = None
+    FakeSMTP.offers_starttls = True
+    FakeSMTP.log = []
     monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTPSSL)
     return FakeSMTP
 
 
@@ -470,7 +507,7 @@ def test_email_accepts_a_comma_separated_list(client, monkeypatch, fake_smtp):
 def test_email_without_smtp_config_is_503_and_says_what_to_set(client, monkeypatch):
     sid, _, _ = make_session(monkeypatch)
     generate(client, sid, "A")
-    monkeypatch.delenv("SMTP_HOST")
+    monkeypatch.setenv("SMTP_HOST", "")
 
     res = email(client, sid)
     assert res.status_code == 503
@@ -515,3 +552,110 @@ def test_email_for_an_ungenerated_report_is_rejected_before_sending(client, monk
     res = email(client, sid, report_types=["B"])
     assert res.status_code == 400
     assert fake_smtp.sent == []
+
+
+def test_port_465_uses_implicit_tls_and_never_calls_starttls(client, monkeypatch, fake_smtp):
+    """465 has no plaintext phase to upgrade - STARTTLS there is a protocol error."""
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    monkeypatch.setenv("SMTP_PORT", "465")
+
+    assert email(client, sid).status_code == 200
+    assert len(fake_smtp.sent) == 1
+
+    flavours = {flavour for flavour, _ in fake_smtp.log}
+    assert flavours == {"SSL"}, "port 465 must use SMTP_SSL, not SMTP"
+    assert "starttls" not in [call for _, call in fake_smtp.log]
+    assert ("SSL", "login") in fake_smtp.log
+
+
+def test_unreachable_host_is_504_naming_host_and_port(client, monkeypatch, fake_smtp):
+    """The typo'd-SMTP_HOST case: DNS failure and refused connections are OSError."""
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    fake_smtp.raises = OSError("[Errno 11001] getaddrinfo failed")
+
+    res = email(client, sid)
+    assert res.status_code == 504
+    detail = res.json()["detail"]
+    assert "smtp.example.com" in detail and "587" in detail
+    assert fake_smtp.sent == []
+
+
+def test_relay_without_credentials_is_configured_and_skips_login(client, monkeypatch, fake_smtp):
+    """A local mail catcher has no account - that's a valid setup, not a broken one."""
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    monkeypatch.setenv("SMTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("SMTP_PORT", "1025")
+    monkeypatch.setenv("SMTP_USER", "")
+    monkeypatch.setenv("SMTP_PASSWORD", "")
+    monkeypatch.setenv("SMTP_FROM", "ai-dashboard@localhost")
+    fake_smtp.offers_starttls = False  # catchers don't offer it
+
+    assert client.get(f"/api/export/{sid}/status").json()["email_configured"] is True
+
+    assert email(client, sid).status_code == 200, "no-auth relay should send"
+    assert len(fake_smtp.sent) == 1
+    assert "login" not in [call for _, call in fake_smtp.log]
+    assert "starttls" not in [call for _, call in fake_smtp.log]
+
+
+def test_credentials_are_never_sent_over_an_unencrypted_connection(client, monkeypatch, fake_smtp):
+    """Downgrading instead of refusing would put SMTP_PASSWORD on the wire in clear."""
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    fake_smtp.offers_starttls = False   # but SMTP_USER/PASSWORD are still set
+
+    res = email(client, sid)
+    assert res.status_code == 502
+    assert "STARTTLS" in res.json()["detail"]
+    assert fake_smtp.sent == []
+    assert "login" not in [call for _, call in fake_smtp.log]
+
+
+def test_a_disconnect_during_login_is_reported_as_a_credentials_problem(
+    client, monkeypatch, fake_smtp
+):
+    """Mailtrap drops the connection on bad credentials instead of returning 535.
+
+    Observed against the real server. Left unhandled this surfaces as 504 "couldn't
+    reach the mail server, check SMTP_HOST" - which is the one setting that was right.
+    """
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    fake_smtp.raises = smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+    res = email(client, sid)
+    assert res.status_code == 502, "a rejected login is not a connectivity failure"
+    detail = res.json()["detail"]
+    assert "SMTP_PASSWORD" in detail and "app password" in detail
+    assert fake_smtp.sent == []
+
+
+def test_protocol_errors_are_502_not_504(client, monkeypatch, fake_smtp):
+    """smtplib.SMTPException subclasses OSError, so order of `except` decides this.
+
+    Catching OSError first silently reclassified every protocol error as
+    "unreachable" - the bug this guards.
+    """
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    fake_smtp.raises_on_send = smtplib.SMTPDataError(554, b"message rejected")
+
+    res = email(client, sid)
+    assert res.status_code == 502
+    assert "refused the message" in res.json()["detail"]
+
+
+def test_half_filled_credentials_are_503_naming_the_empty_one(client, monkeypatch):
+    """A blank password next to a filled-in user is a typo, not a no-auth relay."""
+    sid, _, _ = make_session(monkeypatch)
+    generate(client, sid, "A")
+    monkeypatch.setenv("SMTP_PASSWORD", "")
+
+    assert client.get(f"/api/export/{sid}/status").json()["email_configured"] is False
+
+    res = email(client, sid)
+    assert res.status_code == 503
+    assert "SMTP_PASSWORD" in res.json()["detail"]

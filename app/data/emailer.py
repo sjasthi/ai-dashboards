@@ -67,14 +67,57 @@ def _smtp_settings() -> dict:
     }
 
 
+def _credential_state(settings: dict) -> str:
+    """Classify how the environment is filled in.
+
+    Credentials are optional - a relay that needs no login is a real
+    configuration, and it is the only way to test this module end to end without
+    an account (see the local mail catcher recipe in docs/EXPORT_FEATURE.md).
+    But they are all-or-nothing: a half-filled .env is a typo, not a mode, and
+    silently dropping the login because the password line is blank would send
+    mail somewhere nobody intended.
+
+    Returns:
+        "off" (no host), "auth", "noauth", or "partial".
+    """
+    if not settings["host"]:
+        return "off"
+    user, password = settings["user"], settings["password"]
+    if user and password:
+        return "auth"
+    if not user and not password:
+        return "noauth"
+    return "partial"
+
+
+def smtp_config_error() -> str:
+    """The reason email can't be sent, or "" when it can.
+
+    One source of truth: the endpoint uses this for its pre-flight 503 and
+    send_report_email re-checks it, so the two can't drift into disagreeing
+    about what counts as configured.
+    """
+    settings = _smtp_settings()
+    state = _credential_state(settings)
+
+    if state == "off":
+        return ("Email isn't configured on this server. Set SMTP_HOST, SMTP_USER and "
+                "SMTP_PASSWORD in .env (see .env.example) and restart the API.")
+    if state == "partial":
+        missing = "SMTP_PASSWORD" if settings["user"] else "SMTP_USER"
+        return (f"Email is half-configured: {missing} is empty in .env. Set both "
+                f"SMTP_USER and SMTP_PASSWORD, or leave both blank for a mail server "
+                f"that needs no login.")
+    return ""
+
+
 def smtp_configured() -> bool:
     """Whether email can be sent at all.
 
     The UI asks this up front so it can disable the email row with a reason
     showing, rather than accepting an address and failing afterwards.
     """
-    s = _smtp_settings()
-    return bool(s["host"] and s["user"] and s["password"])
+    return not smtp_config_error()
 
 
 def validate_recipients(recipients: Sequence[str]) -> List[str]:
@@ -101,6 +144,30 @@ def validate_recipients(recipients: Sequence[str]) -> List[str]:
             raise ValueError(f"Not a valid email address: {addr}")
 
     return flat
+
+
+def _login(server, user: str, password: str) -> None:
+    """Authenticate, if there is anything to authenticate with.
+
+    A rejected login is not always an SMTPAuthenticationError: some servers
+    (Mailtrap among them) simply drop the connection on bad credentials. That
+    arrives as SMTPServerDisconnected, which would otherwise be reported as
+    "couldn't reach the mail server" and send the user off to check SMTP_HOST -
+    the one setting that was right.
+    """
+    if not (user and password):
+        return
+    try:
+        server.login(user, password)
+    except smtplib.SMTPAuthenticationError:
+        raise  # already the clearest possible signal; handled by the caller
+    except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError) as e:
+        raise EmailSendFailed(
+            "The mail server closed the connection during login, which normally "
+            "means SMTP_USER or SMTP_PASSWORD is wrong. For Gmail and Yahoo this "
+            "must be an app password, not your account password.",
+            kind="auth",
+        ) from e
 
 
 def send_report_email(
@@ -130,11 +197,9 @@ def send_report_email(
         EmailSendFailed: the server refused or couldn't be reached.
     """
     settings = _smtp_settings()
-    if not (settings["host"] and settings["user"] and settings["password"]):
-        raise EmailNotConfigured(
-            "Email isn't configured on this server. Set SMTP_HOST, SMTP_USER and "
-            "SMTP_PASSWORD in .env (see .env.example) and restart the API."
-        )
+    problem = smtp_config_error()
+    if problem:
+        raise EmailNotConfigured(problem)
 
     to = validate_recipients(recipients)
 
@@ -148,6 +213,7 @@ def send_report_email(
     )
 
     host, port = settings["host"], settings["port"]
+    user, password = settings["user"], settings["password"]
     context = ssl.create_default_context()
 
     try:
@@ -155,12 +221,27 @@ def send_report_email(
         # else upgrade an initially plaintext connection.
         if port == 465:
             with smtplib.SMTP_SSL(host, port, timeout=_TIMEOUT_SECONDS, context=context) as server:
-                server.login(settings["user"], settings["password"])
+                _login(server, user, password)
                 server.send_message(msg)
         else:
             with smtplib.SMTP(host, port, timeout=_TIMEOUT_SECONDS) as server:
-                server.starttls(context=context)
-                server.login(settings["user"], settings["password"])
+                server.ehlo()
+                # Asked for rather than assumed: local mail catchers (Mailpit,
+                # aiosmtpd) offer no STARTTLS, and calling it unconditionally is
+                # what stopped this module from being testable without an account.
+                if server.has_extn("starttls"):
+                    server.starttls(context=context)
+                    server.ehlo()  # the server's extension list is reset by STARTTLS
+                elif user and password:
+                    # Refuse rather than downgrade. Anything else puts the password
+                    # on the wire in the clear.
+                    raise EmailSendFailed(
+                        f"{host}:{port} does not offer STARTTLS, so SMTP_USER and "
+                        f"SMTP_PASSWORD would be sent unencrypted. Use port 465, or "
+                        f"clear both if this server needs no login.",
+                        kind="other",
+                    )
+                _login(server, user, password)
                 server.send_message(msg)
 
     except smtplib.SMTPAuthenticationError as e:
@@ -183,12 +264,22 @@ def send_report_email(
             kind="unreachable",
         ) from e
 
-    except (OSError, smtplib.SMTPException) as e:
-        # OSError covers DNS failure and refused connections; SMTPException the
-        # rest of the protocol errors. Both mean nothing was delivered.
+    except smtplib.SMTPException as e:
+        # Must be caught BEFORE OSError, because smtplib.SMTPException subclasses
+        # it. Testing isinstance(e, OSError) to tell the two apart - as this used
+        # to - is always True, so every protocol error was reported as a
+        # connectivity failure telling the user to check a correct SMTP_HOST.
+        raise EmailSendFailed(
+            f"The mail server at {host}:{port} refused the message — "
+            f"{type(e).__name__}: {e}",
+            kind="other",
+        ) from e
+
+    except OSError as e:
+        # DNS failure, refused connection, dropped socket: never reached the server.
         raise EmailSendFailed(
             f"Couldn't send mail via {host}:{port} — {type(e).__name__}: {e}",
-            kind="unreachable" if isinstance(e, OSError) else "other",
+            kind="unreachable",
         ) from e
 
     return to

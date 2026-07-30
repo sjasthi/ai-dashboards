@@ -50,7 +50,7 @@ try:
         MAX_APPENDIX_ROWS,
     )
     from app.data.emailer import (
-        send_report_email, smtp_configured, validate_recipients,
+        send_report_email, smtp_configured, smtp_config_error, validate_recipients,
         EmailNotConfigured, EmailSendFailed,
     )
     EXPORT_AVAILABLE = True
@@ -697,12 +697,12 @@ def email_reports(session_id: str, request: EmailExportRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    if not smtp_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Email isn't configured on this server. Set SMTP_HOST, SMTP_USER "
-                   "and SMTP_PASSWORD in .env (see .env.example) and restart the API.",
-        )
+    # Checked here as well as inside send_report_email so the render below is not
+    # spent on a request that can't be delivered. The message comes from the
+    # emailer so the two checks can't disagree.
+    config_error = smtp_config_error()
+    if config_error:
+        raise HTTPException(status_code=503, detail=config_error)
 
     body, filename = _render_export(session, letters, request)
 

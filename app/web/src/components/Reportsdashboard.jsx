@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Card from './ui/Card';
 import DataTable from './ui/DataTable';
 import Plot from './ui/Plot';
@@ -559,14 +559,22 @@ function ExportPanel({ sessionId, reports, recList, generatingType }) {
 
   // Asked up front so the email row can explain itself before the user types an
   // address, rather than after.
-  useEffect(() => {
-    if (!sessionId) return undefined;
-    let live = true;
+  //
+  // Re-asked on window focus because the server reads .env on every request: fill
+  // in the credentials, alt-tab back, and the row unlocks. Without this the panel
+  // keeps telling you to do the thing you just did until you reload the page.
+  const refreshStatus = useCallback(() => {
+    if (!sessionId) return;
     fetchExportStatus(sessionId)
-      .then((s) => { if (live) setEmailConfigured(!!s.email_configured); })
-      .catch(() => { if (live) setEmailConfigured(false); })
-    return () => { live = false; };
+      .then((s) => setEmailConfigured(!!s.email_configured))
+      .catch(() => setEmailConfigured(false));
   }, [sessionId]);
+
+  useEffect(() => {
+    refreshStatus();
+    window.addEventListener('focus', refreshStatus);
+    return () => window.removeEventListener('focus', refreshStatus);
+  }, [refreshStatus]);
 
   // A freshly generated report joins the selection: the user just asked for it, so
   // it is almost certainly one they want in the file.
@@ -614,6 +622,7 @@ function ExportPanel({ sessionId, reports, recList, generatingType }) {
       await send(chartImages);
     } catch (err) {
       setStatus({ kind: 'error', text: err.message || 'Something went wrong.' });
+      refreshStatus();  // a 503 here means the server's view of .env has changed
     } finally {
       setBusy(false);
     }
