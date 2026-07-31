@@ -35,6 +35,43 @@ export function exactNumber(value) {
     : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
+/** 2411008 -> "2.3 MB". Binary units, matching what an OS file listing reports. */
+export function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return '—';
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n < 1024) return `${n} B`;
+
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  // One decimal below 10 — 1.4 MB reads better than 1 MB — and none above it.
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/**
+ * Shorten to `max` characters, dropping from the middle: "Sales_2024…Q2_Region".
+ *
+ * The middle rather than the tail because worksheets in one workbook routinely
+ * share a long prefix (Sales_2024_Q1 / Sales_2024_Q2) - truncating the end would
+ * render those identically.
+ *
+ * 20 sits just under the ~21 characters a sheet chip fits at four per row; going
+ * wider hands the job to the CSS ellipsis, which would clip a second time and
+ * leave two sets of dots in one label.
+ */
+export function truncateMiddle(text, max = 20) {
+  const s = String(text ?? '');
+  if (s.length <= max) return s;
+  const head = Math.ceil((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${s.slice(0, head)}…${tail ? s.slice(-tail) : ''}`;
+}
+
 /** "+3.2%" / "−3.2%" — a real minus sign, not a hyphen. */
 export function signedPercent(value) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';

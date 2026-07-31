@@ -7,10 +7,11 @@ placeholder data - fabricated results presented as a real analysis are worse
 than an outage, because nothing on screen tells the user they aren't real.
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Response
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
+import json
 import os
 import sys
 import tempfile
@@ -25,6 +26,7 @@ if _PROJECT_ROOT not in sys.path:
 # Try to import data pipeline modules at startup
 try:
     from app.data.data_loader import DataLoader
+    from app.data.workbook_probe import inspect_file
     from app.data.summary_builder import SummaryGenerator
     from app.data.recommendation_requester import RecommendationRequester
     import app.data.AI_Engine as ai_engine
@@ -137,8 +139,80 @@ def health_check():
 # ----------------------------------------------------------------------------
 # [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
+@app.post("/api/inspect")
+async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
+    """
+    [REAL]
+    Describe uploaded spreadsheets without analysing them, so the upload screen
+    can list a workbook's sheets and let the user deselect the ones they don't
+    want before committing to a full run.
+
+    Reads only worksheet dimensions, not cell data - see workbook_probe.
+
+    Returns:
+        {"files": [
+            {"name": "sales.xlsx", "size": 2411008, "kind": "excel", "rows": 12480,
+             "sheets": [{"name": "Orders", "rows": 8200, "columns": 12, "empty": false}]}
+        ]}
+    """
+    if not DATA_MODULES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Analysis pipeline unavailable — the server could not load its data modules.",
+        )
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    temp_dir = None
+    try:
+        temp_dir = tempfile.mkdtemp()
+        results = []
+
+        for file in files:
+            if not file.filename:
+                continue
+
+            content = await file.read()
+            # Unlike /api/analyze-full an empty file isn't fatal here: the upload
+            # screen shows the problem next to the file rather than rejecting the
+            # whole batch.
+            if len(content) == 0:
+                results.append({
+                    "name": file.filename, "size": 0, "kind": "unknown",
+                    "sheets": [], "rows": None, "columns": None,
+                    "error": "This file is empty.",
+                })
+                continue
+
+            filepath = os.path.join(temp_dir, file.filename)
+            with open(filepath, 'wb') as f:
+                f.write(content)
+
+            results.append(inspect_file(filepath, file.filename, len(content)))
+
+        return {"files": results}
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"[API] Inspect failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not inspect the uploaded files: {e}")
+
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+
+
+# ----------------------------------------------------------------------------
+# [REAL] Used by Uploaddashboard.jsx
+# ----------------------------------------------------------------------------
 @app.post("/api/analyze-full")
-async def analyze_files_full(files: list[UploadFile] = File(...)):
+async def analyze_files_full(
+    files: list[UploadFile] = File(...),
+    selections: Optional[str] = Form(None),
+):
     """
     [REAL]
     Full analysis workflow:
@@ -151,6 +225,10 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
     Runs the real DataLoader -> SummaryGenerator -> RecommendationRequester ->
     AI_Engine pipeline. Returns 503 if those modules failed to import and 502 if
     the pipeline raises - never placeholder data.
+
+    `selections` is an optional JSON object, {"sales.xlsx": ["Orders", "Items"]},
+    naming which worksheets of each workbook to analyse. Omitted or unparseable
+    means "every sheet", so older clients keep working unchanged.
 
     Returns:
         {
@@ -172,6 +250,23 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
     session_id = generate_session_id()
     temp_dir = None
+
+    # Reject a malformed selection rather than falling back to "analyze
+    # everything", which would hand the LLM sheets the user had unchecked. Only an
+    # absent field means "no preference".
+    sheet_selections = None
+    if selections is not None:
+        try:
+            sheet_selections = json.loads(selections)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="selections is not valid JSON")
+        if not isinstance(sheet_selections, dict) or not all(
+            isinstance(v, list) for v in sheet_selections.values()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="selections must map each filename to a list of sheet names",
+            )
 
     try:
         # Validate files
@@ -219,8 +314,16 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
 
             # Load files
             loader = DataLoader()
-            loader.add_files(file_paths)
+            loader.add_files(file_paths, sheet_selections)
             session_tables = loader.tables()
+
+            if not session_tables:
+                # Every sheet was deselected, or every one was empty. Fail rather
+                # than send the LLM an empty dataset list to invent against.
+                raise HTTPException(
+                    status_code=400,
+                    detail="No worksheets selected — nothing to analyze.",
+                )
 
             print(f"[API] Generating summaries...")
 
@@ -253,12 +356,23 @@ async def analyze_files_full(files: list[UploadFile] = File(...)):
             # them. file_metadata is what the frontend actually renders, and it was
             # previously reporting a hardcoded 500 rows for every file regardless of
             # what had been uploaded.
-            by_name = {p.filename: p for p in file_profiles}
+            # Group by originating upload rather than matching profile names to
+            # filenames: a multi-sheet workbook yields profiles called
+            # "Orders (sales).xlsx", which never equals "sales.xlsx", so an exact
+            # match left rows/columns null for every such file. loader.origins
+            # holds the mapping because the name can't be parsed back reliably.
+            rows_by_source = {}
+            cols_by_source = {}
+            for profile in file_profiles:
+                source = loader.origins.get(profile.filename, profile.filename)
+                rows_by_source[source] = rows_by_source.get(source, 0) + profile.row_count
+                cols_by_source[source] = max(
+                    cols_by_source.get(source, 0), len(profile.columns)
+                )
             for meta in file_metadata:
-                profile = by_name.get(meta["name"])
-                if profile:
-                    meta["rows"] = profile.row_count
-                    meta["columns"] = len(profile.columns)
+                if meta["name"] in rows_by_source:
+                    meta["rows"] = rows_by_source[meta["name"]]
+                    meta["columns"] = cols_by_source[meta["name"]]
 
             print(f"[API] Analysis complete!")
 
