@@ -735,6 +735,140 @@
   color: #B91C1C;
 }
 
+/* ---------- worksheet picker (upload step) ---------- */
+
+/* Four per row leaves each chip room for a checkbox plus ~21 characters, which is
+   the figure truncateMiddle's 20-character cap is derived from. */
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sheet-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--size-xs);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sheet-chip:hover { border-color: var(--color-border-focus); }
+.sheet-chip input { flex-shrink: 0; accent-color: var(--color-accent); margin: 0; }
+
+/* Sheet names are user data, so keep each chip on one line - a long name must not
+   push the grid out of alignment. */
+.sheet-chip__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Greyed rather than hidden: the loader drops empty worksheets, but a sheet the
+   user can see in Excel and not here reads as a bug. */
+.sheet-chip--empty {
+  cursor: not-allowed;
+  background: var(--color-bg);
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.sheet-chip--empty:hover { border-color: var(--color-border); }
+
+.sheet-menu { position: relative; flex-shrink: 0; }
+
+.sheet-menu__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sheet-menu__button:hover,
+.sheet-menu__button[aria-expanded="true"] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Positioned so opening the menu never reflows the file row underneath it;
+   z-index keeps it over the rows that follow in the DOM. */
+.sheet-menu__panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 168px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-elevated);
+}
+
+.sheet-menu__item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: var(--size-xs);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sheet-menu__item:hover:not(:disabled) {
+  background: var(--color-accent-muted);
+  color: var(--color-accent);
+}
+
+.sheet-menu__item:disabled { color: var(--color-text-muted); cursor: not-allowed; }
+
+.sheet-menu__divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border);
+}
+
+.sheet-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-family: inherit;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.sheet-toggle:hover { background: var(--color-accent-muted); }
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1080px) {
@@ -742,8 +876,13 @@
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
 }
 
+@media (max-width: 860px) {
+  .sheet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 640px) {
   .kpi-row { grid-template-columns: 1fr; }
   /* Two readable columns beat four cramped ones once the phone width is reached. */
   .stat-strip { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+  .sheet-grid { grid-template-columns: minmax(0, 1fr); }
 }

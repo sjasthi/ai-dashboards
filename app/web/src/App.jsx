@@ -11,6 +11,15 @@ export default function App() {
   // Raw File objects picked in the Upload tab
   const [files, setFiles] = useState([]);
 
+  // What /api/inspect reported about each file, which sheets are ticked, and which
+  // rows have their checkboxes showing - all keyed by fileKey. Held here rather
+  // than in the Upload page for the same reason as `reports`: that page unmounts on
+  // every tab switch, and rebuilding this would mean re-uploading each file and
+  // would throw away the sheet choices the user had made.
+  const [inspections, setInspections] = useState({});
+  const [selections, setSelections] = useState({});
+  const [expanded, setExpanded] = useState(() => new Set());
+
   // Populated once /api/analyze-full succeeds
   const [sessionId, setSessionId] = useState(null);
   const [recommendations, setRecommendations] = useState(null); // { recommendations: [...] }
@@ -108,6 +117,12 @@ export default function App() {
           <UploadDashboard
             files={files}
             setFiles={setFiles}
+            inspections={inspections}
+            setInspections={setInspections}
+            selections={selections}
+            setSelections={setSelections}
+            expanded={expanded}
+            setExpanded={setExpanded}
             setSessionId={setSessionId}
             setRecommendations={setRecommendations}
             setFileProfiles={setFileProfiles}
