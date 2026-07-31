@@ -72,8 +72,6 @@ export default function UploadDashboard({ files, setFiles, setSessionId, setReco
   };
 
   const actionsDisabled = !files || files.length === 0 || status === 'uploading';
-  // The confirmation prompt owns the interaction until it is answered.
-  const rowDisabled = actionsDisabled || confirmingRemoveAll;
 
   return (
     <div className="upload-page">
@@ -149,95 +147,117 @@ export default function UploadDashboard({ files, setFiles, setSessionId, setReco
           </div>
         )}
 
-        {confirmingRemoveAll && (
+        {/* The action row and the prompt share one slot: the prompt lays over the
+            buttons so the card keeps its height and the buttons stay out of the way
+            until the question is answered. */}
+        <div style={{ marginTop: '20px', position: 'relative' }}>
           <div style={{
-            marginTop: '16px',
-            padding: '12px 14px',
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: '6px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '12px',
-            flexWrap: 'wrap'
+            // `hidden` rather than unmounting: it holds the row's space open under
+            // the prompt, and drops the buttons out of the tab order meanwhile.
+            visibility: confirmingRemoveAll ? 'hidden' : 'visible'
           }}>
-            <span style={{ fontSize: '13px', color: '#b91c1c' }}>
-              {files.length === 1
-                ? 'Remove this file from the list?'
-                : `Remove all ${files.length} files from the list?`}
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {/* Cancel takes focus so a stray Enter backs out rather than deleting. */}
-              <button
-                autoFocus
-                onClick={() => setConfirmingRemoveAll(false)}
-                style={{
-                  padding: '7px 14px',
-                  background: 'white',
-                  color: '#475569',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={removeAllFiles}
-                style={{
-                  padding: '7px 14px',
-                  background: '#b91c1c',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Yes, remove all
-              </button>
-            </div>
+            <button
+              onClick={runAnalysis}
+              disabled={actionsDisabled}
+              style={{
+                padding: '10px 24px',
+                background: actionsDisabled ? '#cbd5e1' : '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: actionsDisabled ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {status === 'uploading' ? 'Analyzing…' : 'Upload & Analyze'}
+            </button>
+
+            <button
+              onClick={() => setConfirmingRemoveAll(true)}
+              disabled={actionsDisabled}
+              style={{
+                padding: '10px 24px',
+                background: actionsDisabled ? '#f8fafc' : '#fef2f2',
+                color: actionsDisabled ? '#cbd5e1' : '#b91c1c',
+                border: `1px solid ${actionsDisabled ? '#e2e8f0' : '#fecaca'}`,
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: actionsDisabled ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Remove All
+            </button>
           </div>
-        )}
 
-        <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button
-            onClick={runAnalysis}
-            disabled={rowDisabled}
-            style={{
-              padding: '10px 24px',
-              background: rowDisabled ? '#cbd5e1' : '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: rowDisabled ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {status === 'uploading' ? 'Analyzing…' : 'Upload & Analyze'}
-          </button>
-
-          <button
-            onClick={() => setConfirmingRemoveAll(true)}
-            disabled={rowDisabled}
-            style={{
-              padding: '10px 24px',
-              background: rowDisabled ? '#f8fafc' : '#fef2f2',
-              color: rowDisabled ? '#cbd5e1' : '#b91c1c',
-              border: `1px solid ${rowDisabled ? '#e2e8f0' : '#fecaca'}`,
-              borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: rowDisabled ? 'not-allowed' : 'pointer'
-            }}
-          >
-            Remove All
-          </button>
+          {confirmingRemoveAll && (
+            <div
+              role="alertdialog"
+              aria-label="Confirm removing all files"
+              style={{
+                // Centred on the row it covers: the prompt is a little taller than
+                // the buttons, so it spills evenly rather than shifting the card.
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                padding: '12px 14px',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap'
+              }}
+            >
+              <span style={{ fontSize: '13px', color: '#b91c1c' }}>
+                {files.length === 1
+                  ? 'Remove this file from the list?'
+                  : `Remove all ${files.length} files from the list?`}
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {/* Cancel takes focus so a stray Enter backs out rather than deleting. */}
+                <button
+                  autoFocus
+                  onClick={() => setConfirmingRemoveAll(false)}
+                  style={{
+                    padding: '7px 14px',
+                    background: 'white',
+                    color: '#475569',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={removeAllFiles}
+                  style={{
+                    padding: '7px 14px',
+                    background: '#b91c1c',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Yes, remove all
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
