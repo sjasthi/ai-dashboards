@@ -26,14 +26,16 @@ export default function ReportsDashboard({
   onSelectType,
   recommendations,
   fileProfiles,
-  generatingType,
-  errorMsg,
+  generating,
+  errors = {},
   sessionId,
 }) {
   const [showTable, setShowTable] = useState(false);
   const [comparing, setComparing] = useState(false);
 
+  const inFlight = generating || new Set();
   const report = reports[activeType];
+  const activeError = errors[activeType];
   const recList = recommendations?.recommendations || [];
   const stats = report?.stats;
   const hasStats = !!stats?.available;
@@ -57,14 +59,16 @@ export default function ReportsDashboard({
     <div className="reports-page">
       <div className="eyebrow eyebrow--accent" style={{ marginBottom: 20 }}>STEP 3 — RESULTS</div>
 
-      {errorMsg && <div className="error-banner">{errorMsg}</div>}
+      {/* Only the report being looked at. A background build that failed for another
+          letter is reported on that letter's own card, not here. */}
+      {activeError && report && <div className="error-banner">{activeError}</div>}
 
       <ReportHeader
         report={report}
         recList={recList}
         activeType={activeType}
         onSelectType={onSelectType}
-        generatingType={generatingType}
+        inFlight={inFlight}
         comparing={comparing}
         onToggleCompare={() => setComparing((c) => !c)}
         fileProfiles={fileProfiles}
@@ -76,13 +80,32 @@ export default function ReportsDashboard({
           recList={recList}
           activeType={activeType}
           onSelectType={(t) => { onSelectType(t); setComparing(false); }}
-          generatingType={generatingType}
+          inFlight={inFlight}
         />
       ) : !report ? (
+        /* Reached when the user clicks through faster than the background queue can
+           build. The tab switch no longer waits on the request, so this slot is what
+           they see in the meantime. */
         <Card>
           <div className="empty-state">
-            <div className="empty-state__title">Report {activeType} hasn’t been generated yet</div>
-            Choose it above to run it, or pick a different report.
+            {inFlight.has(activeType) ? (
+              <div className="empty-state__title">Building report {activeType}…</div>
+            ) : activeError ? (
+              <>
+                <div className="empty-state__title">Report {activeType} couldn’t be built</div>
+                {activeError}
+                <div style={{ marginTop: 12 }}>
+                  <button className="link-btn" onClick={() => onSelectType(activeType)}>
+                    Try again
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="empty-state__title">Report {activeType} hasn’t been generated yet</div>
+                Choose it above to run it, or pick a different report.
+              </>
+            )}
           </div>
         </Card>
       ) : (
@@ -132,7 +155,7 @@ export default function ReportsDashboard({
         sessionId={sessionId}
         reports={reports}
         recList={recList}
-        generatingType={generatingType}
+        inFlight={inFlight}
       />
     </div>
   );
@@ -141,7 +164,7 @@ export default function ReportsDashboard({
 /* ------------------------------------------------------------------ header */
 
 function ReportHeader({
-  report, recList, activeType, onSelectType, generatingType,
+  report, recList, activeType, onSelectType, inFlight,
   comparing, onToggleCompare, fileProfiles,
 }) {
   const letters = recList.map((_, i) => String.fromCharCode(65 + i));
@@ -169,16 +192,18 @@ function ReportHeader({
 
         <div className="report-header__controls">
           <div className="segmented" role="group" aria-label="Choose report">
+            {/* Never disabled: selecting a report that is still building should show
+                its building state, not refuse the click. */}
             {letters.map((letter) => (
               <button
                 key={letter}
                 type="button"
                 className="segmented__btn"
                 aria-pressed={letter === activeType && !comparing}
-                disabled={!!generatingType}
+                aria-busy={inFlight.has(letter)}
                 onClick={() => onSelectType(letter)}
               >
-                {generatingType === letter ? '…' : letter}
+                {inFlight.has(letter) ? '…' : letter}
               </button>
             ))}
           </div>
@@ -462,7 +487,7 @@ function DistributionStrip({ stats }) {
  * The model always returns exactly three; comparing them one tab-switch at a time
  * made it impossible to see which one actually answered the question.
  */
-function CompareView({ reports, recList, activeType, onSelectType, generatingType }) {
+function CompareView({ reports, recList, activeType, onSelectType, inFlight }) {
   return (
     <Section title="All reports">
       <div className="compare-grid">
@@ -488,7 +513,7 @@ function CompareView({ reports, recList, activeType, onSelectType, generatingTyp
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: 'var(--color-text-muted)', fontSize: 12,
                 }}>
-                  {generatingType === letter ? 'Generating…' : 'Not generated yet'}
+                  {inFlight.has(letter) ? 'Generating…' : 'Not generated yet'}
                 </div>
               )}
 
@@ -516,10 +541,12 @@ function CompareView({ reports, recList, activeType, onSelectType, generatingTyp
               <div className="compare-card__foot">
                 <button
                   className="link-btn"
-                  disabled={!!generatingType}
+                  disabled={inFlight.has(letter)}
                   onClick={() => onSelectType(letter)}
                 >
-                  {report ? 'Open full view' : 'Generate this report'}
+                  {inFlight.has(letter)
+                    ? 'Generating…'
+                    : report ? 'Open full view' : 'Generate this report'}
                 </button>
               </div>
             </Card>
@@ -546,7 +573,7 @@ function CompareView({ reports, recList, activeType, onSelectType, generatingTyp
  * nothing to rasterise for the others - the checkbox is disabled rather than
  * failing at render time.
  */
-function ExportPanel({ sessionId, reports, recList, generatingType }) {
+function ExportPanel({ sessionId, reports, recList, inFlight }) {
   const letters = recList.map((_, i) => String.fromCharCode(65 + i));
   const generated = letters.filter((l) => reports[l]);
 
@@ -588,7 +615,10 @@ function ExportPanel({ sessionId, reports, recList, generatingType }) {
   }, [generated.join(',')]);
 
   const chosen = generated.filter((l) => selected.has(l));
-  const disabled = busy || !!generatingType || !sessionId;
+  // Global rather than per-letter: export rasterises charts across every selected
+  // report, so it has to wait for the whole set to settle. With background
+  // prefetching that just means export unlocks a moment after the page opens.
+  const disabled = busy || inFlight.size > 0 || !sessionId;
 
   if (!generated.length) {
     return (
