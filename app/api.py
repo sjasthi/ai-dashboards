@@ -7,15 +7,19 @@ placeholder data - fabricated results presented as a real analysis are worse
 than an outage, because nothing on screen tells the user they aren't real.
 """
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response
+from fastapi import (
+    Depends, FastAPI, File, Form, Header, UploadFile, HTTPException, Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 import json
 import os
+import secrets
 import sys
 import tempfile
 import shutil
+import time
 from datetime import datetime
 from uuid import uuid4
 
@@ -62,6 +66,18 @@ except ImportError as e:
     EXPORT_AVAILABLE = False
     MAX_APPENDIX_ROWS = 200
     print(f"[API] Export modules not available: {e} — /api/export/* will return 503")
+
+# Telemetry gets its own guarded import for the same reason export does: usage
+# counting is not worth taking the analysis pipeline down for. Calls go through the
+# _track / _record_* helpers below, which absorb anything telemetry throws, so the
+# feature can fail at import time, at call time, or inside itself without a user
+# ever noticing.
+try:
+    from app.data import telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError as e:
+    TELEMETRY_AVAILABLE = False
+    print(f"[API] Telemetry not available: {e} — usage stats will be empty")
 
 # Ceiling on how many rows of a report are kept in SESSIONS, and the hard limit on
 # what an export may ask for. One constant for both so they cannot drift: anything
@@ -117,6 +133,87 @@ class EmailExportRequest(ExportRequest):
     recipients: list[str] = Field(..., min_length=1, max_length=10)
     message: Optional[str] = None
 
+
+class ClientEventRequest(BaseModel):
+    """One interface event reported by the browser.
+
+    Bounded on every axis, because this is the only endpoint that writes to the
+    telemetry database from unvalidated client input: an unbounded name or props
+    payload would let anyone fill the disk. Unrecognised names are still accepted
+    but get prefixed by telemetry.log_event, so a frontend typo is visible in the
+    data instead of silently lost.
+    """
+    event: str = Field(..., min_length=1, max_length=64)
+    props: dict = Field(default_factory=dict)
+    session_id: Optional[str] = Field(default=None, max_length=64)
+
+# ============================================================================
+# TELEMETRY PLUMBING
+# ============================================================================
+
+# Cap on how much of a client-supplied identifier is stored. The header comes from
+# the browser and is never trusted for anything but counting, but an unbounded
+# string still has no business reaching the database.
+MAX_CLIENT_ID_LEN = 64
+
+
+def client_id_header(x_client_id: Optional[str] = Header(default=None)) -> Optional[str]:
+    """The caller's anonymous browser id, if it sent one.
+
+    FastAPI maps the parameter name to the `X-Client-Id` header. Absent is normal
+    and fine: older clients, curl and the tests do not send it, and a request
+    without one is still counted, just not attributed to a person.
+    """
+    if not x_client_id:
+        return None
+    trimmed = x_client_id.strip()[:MAX_CLIENT_ID_LEN]
+    return trimmed or None
+
+
+def _telemetry_guard(what, call):
+    """Run a telemetry call, absorbing anything it throws.
+
+    Belt and braces: telemetry's own functions already swallow their runtime
+    errors, but that only protects against failures *inside* their try blocks. A
+    mistyped keyword argument here raises TypeError at call time, before any of
+    that runs -- and without this guard it would turn a perfectly good report into
+    a 500. Instrumentation must not be load-bearing, and the only way to guarantee
+    that is to refuse to trust it at the boundary too.
+    """
+    if not TELEMETRY_AVAILABLE:
+        return False
+    try:
+        return call()
+    except Exception as exc:
+        print(f"[API] telemetry {what} failed, continuing: "
+              f"{type(exc).__name__}: {exc}")
+        return False
+
+
+def _track(event, client_id=None, session_id=None, **props):
+    """Log one event if telemetry is importable. Never raises."""
+    return _telemetry_guard(
+        f"log_event({event})",
+        lambda: telemetry.log_event(event, client_id=client_id,
+                                    session_id=session_id, props=props),
+    )
+
+
+def _record_file(**kwargs):
+    """One files row. Never raises."""
+    return _telemetry_guard("record_file", lambda: telemetry.record_file(**kwargs))
+
+
+def _record_report(**kwargs):
+    """One reports row. Never raises."""
+    return _telemetry_guard("record_report", lambda: telemetry.record_report(**kwargs))
+
+
+def _ext_of(filename):
+    """Lowercased extension including the dot, for grouping uploads by type."""
+    return os.path.splitext(filename or "")[1].lower() or None
+
+
 # ============================================================================
 # SESSIONS
 # ============================================================================
@@ -157,7 +254,10 @@ def health_check():
 # [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/inspect")
-async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
+async def inspect_uploaded_files(
+    files: list[UploadFile] = File(...),
+    client_id: Optional[str] = Depends(client_id_header),
+):
     """
     [REAL]
     Describe uploaded spreadsheets without analysing them, so the upload screen
@@ -208,6 +308,23 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 
             results.append(inspect_file(filepath, file.filename, len(content)))
 
+        # Counted here rather than only at analysis time, because the gap between
+        # the two is itself the interesting number: files inspected but never
+        # analysed are uploads the user thought better of, or could not use.
+        _track(
+            "files_inspected",
+            client_id=client_id,
+            file_count=len(results),
+            ext_mix=sorted({_ext_of(r["name"]) for r in results if r.get("name")}),
+            total_bytes=sum(r.get("size") or 0 for r in results),
+            kinds=sorted({r.get("kind") for r in results if r.get("kind")}),
+            multi_sheet_count=sum(1 for r in results if len(r.get("sheets") or []) > 1),
+            empty_sheet_count=sum(
+                1 for r in results for s in (r.get("sheets") or []) if s.get("empty")
+            ),
+            error_count=sum(1 for r in results if r.get("error")),
+        )
+
         return {"files": results}
 
     except HTTPException:
@@ -229,6 +346,7 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 def analyze_files_full(
     files: list[UploadFile] = File(...),
     selections: Optional[str] = Form(None),
+    client_id: Optional[str] = Depends(client_id_header),
 ):
     """
     [REAL]
@@ -244,8 +362,9 @@ def analyze_files_full(
     the pipeline raises - never placeholder data.
 
     `selections` is an optional JSON object, {"sales.xlsx": ["Orders", "Items"]},
-    naming which worksheets of each workbook to analyse. Omitted or unparseable
-    means "every sheet", so older clients keep working unchanged.
+    naming which worksheets of each workbook to analyse. Omitting it means
+    "every sheet", so older clients keep working unchanged; sending something
+    unparseable is a 400, not a fallback to "every sheet" (see below).
 
     Deliberately a sync `def`, not `async def`. Every step below blocks: file
     writes, pandas profiling, and a synchronous LLM SDK call. On the event loop
@@ -274,6 +393,10 @@ def analyze_files_full(
 
     session_id = generate_session_id()
     temp_dir = None
+    started_at = time.perf_counter()
+    # Filled in by AI_Engine.send_prompt with the provider that actually answered,
+    # which is not necessarily the configured one.
+    llm_attribution = {}
 
     # Reject a malformed selection rather than falling back to "analyze
     # everything", which would hand the LLM sheets the user had unchecked. Only an
@@ -328,6 +451,22 @@ def analyze_files_full(
         if not file_paths:
             raise HTTPException(status_code=400, detail="No valid files provided")
 
+        _track(
+            "analysis_started",
+            client_id=client_id,
+            session_id=session_id,
+            file_count=len(file_paths),
+            ext_mix=sorted({_ext_of(m["name"]) for m in file_metadata}),
+            total_bytes=sum(m["size"] for m in file_metadata),
+            # Whether the user actually narrowed anything is the measure of whether
+            # sheet selection earns its complexity.
+            has_selections=sheet_selections is not None,
+            sheets_selected=(
+                sum(len(v) for v in sheet_selections.values())
+                if sheet_selections else None
+            ),
+        )
+
         # Loaded DataFrames kept in memory for /api/generate-report. The uploaded
         # files themselves are deleted below, and worksheets never existed as files,
         # so this is the only way the report step can reach the user's data.
@@ -377,6 +516,7 @@ def analyze_files_full(
                 prompt, valid_filenames, session_id=session_id, tables=session_tables,
                 correction_prompt=requester.build_correction_prompt(file_profiles, relationships),
                 system_prompt=system_prompt,
+                attribution=llm_attribution,
             )
 
             # Backfill the real row/column counts now that profiling has produced
@@ -403,6 +543,52 @@ def analyze_files_full(
 
             print(f"[API] Analysis complete!")
 
+            # One row per uploaded file. Counts come from the profiles, grouped by
+            # originating upload, so a multi-sheet workbook is one file row with
+            # its sheets' totals rather than one row per sheet.
+            # Skipped wholesale when telemetry is unavailable: the grouping below
+            # is real work, and there would be nowhere to put the result.
+            if TELEMETRY_AVAILABLE:
+                sheets_by_source = {}
+                for profile in file_profiles:
+                    source = loader.origins.get(profile.filename, profile.filename)
+                    sheets_by_source[source] = sheets_by_source.get(source, 0) + 1
+                for meta in file_metadata:
+                    _record_file(
+                        session_id=session_id, client_id=client_id,
+                        name=meta["name"], ext=_ext_of(meta["name"]),
+                        size_bytes=meta["size"], kind="excel"
+                        if _ext_of(meta["name"]) in (".xlsx", ".xls") else "csv",
+                        sheet_count=sheets_by_source.get(meta["name"]),
+                        sheets_selected=(
+                            len((sheet_selections or {}).get(meta["name"], []))
+                            or None
+                        ),
+                        rows=meta.get("rows"), columns=meta.get("columns"),
+                        load_ok=True,
+                    )
+
+            recs = (recommendations or {}).get("recommendations") or []
+            _track(
+                "analysis_completed",
+                client_id=client_id,
+                session_id=session_id,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                file_count=len(file_paths),
+                table_count=len(session_tables),
+                total_rows=sum(p.row_count for p in file_profiles),
+                relationships_detected=len(relationships or []),
+                prompt_chars=len(prompt or ""),
+                recommendation_count=len(recs),
+                patterns=[r.get("pattern_used") for r in recs],
+                chart_types=[
+                    (r.get("plotly_config") or {}).get("chart_type") for r in recs
+                ],
+                # Which provider really answered, plus whether a fallback fired.
+                # AI_BACKEND would record intent and be wrong on every failover.
+                **{f"llm_{k}": v for k, v in llm_attribution.items()},
+            )
+
         except HTTPException:
             raise
 
@@ -413,6 +599,20 @@ def analyze_files_full(
             # developer the underlying cause; the 502 gives the UI a message to render
             # (Uploaddashboard already displays errBody.detail).
             print(f"[API] Analysis failed: {type(e).__name__}: {e}")
+            # The error *class* is recorded, never the message: exception text can
+            # quote file contents, and that would put user data in the analytics DB
+            # by the back door.
+            _track(
+                "analysis_failed",
+                client_id=client_id,
+                session_id=session_id,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                error_type=type(e).__name__,
+                stage="pipeline",
+                file_count=len(file_paths),
+                ext_mix=sorted({_ext_of(m["name"]) for m in file_metadata}),
+                **{f"llm_{k}": v for k, v in llm_attribution.items()},
+            )
             raise HTTPException(
                 status_code=502,
                 detail="AI analysis failed — check the server console and try again.",
@@ -532,7 +732,10 @@ def _describe_operations(operations):
 # [REAL] Used by Analysisdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/generate-report")
-def generate_report_endpoint(request: GenerateReportRequest):
+def generate_report_endpoint(
+    request: GenerateReportRequest,
+    client_id: Optional[str] = Depends(client_id_header),
+):
     """
     [REAL]
     Generate a structured report from AI recommendations.
@@ -582,7 +785,14 @@ def generate_report_endpoint(request: GenerateReportRequest):
     cached = (session.get("reports") or {}).get(report_type)
     if cached:
         print(f"[API] Returning cached report {report_type} for session {session_id}")
+        # Logged as an event but deliberately NOT as a reports row: the report was
+        # already counted when it was built, and counting it again would inflate
+        # "reports built" every time the prefetcher raced a user's click.
+        _track("report_generated", client_id=client_id, session_id=session_id,
+               letter=report_type, is_cache_hit=True)
         return {k: v for k, v in cached.items() if k != "data"}
+
+    report_started_at = time.perf_counter()
 
     try:
         print(f"\n[API] Generating report for session {session_id}, type {report_type}")
@@ -703,14 +913,80 @@ def generate_report_endpoint(request: GenerateReportRequest):
         # tests/test_generate_report_api.py still reads it.
         SESSIONS[session_id]["report"] = stored
 
+        build_ms = int((time.perf_counter() - report_started_at) * 1000)
+        chart_type = ((selected_rec or {}).get("plotly_config") or {}).get("chart_type")
+        # "pattern_used" is the schema field (models.Recommendation), not "pattern".
+        # Reading the wrong key here fails silently -- every row records NULL and the
+        # pattern breakdown is quietly empty forever.
+        pattern = (selected_rec or {}).get("pattern_used")
+        rows_returned = len(payload.get("rows") or [])
+        is_truncated = len(report_df) > rows_returned
+        has_warning = bool((payload.get("stats") or {}).get("schema_warning"))
+
+        _record_report(
+                session_id=session_id, client_id=client_id, letter=report_type,
+                pattern=pattern, chart_type=chart_type,
+                rows_returned=rows_returned, is_truncated=is_truncated,
+                build_ms=build_ms, ok=True, has_schema_warning=has_warning,
+            )
+        _track("report_generated", client_id=client_id, session_id=session_id,
+               letter=report_type, pattern=pattern, chart_type=chart_type,
+               rows_returned=rows_returned, is_truncated=is_truncated,
+               build_ms=build_ms, has_schema_warning=has_warning,
+               is_cache_hit=False)
+
+        # Keep a replayable copy, if the deployment asked for one. Saved here
+        # rather than from the browser because `stored` holds up to
+        # MAX_STORED_ROWS rows while the client only ever receives
+        # MAX_ROWS_RETURNED of them -- saving client-side would silently keep the
+        # smaller version. telemetry.save_report is a no-op unless
+        # SAVE_REPORT_HISTORY is set.
+        _telemetry_guard("save_report", lambda: telemetry.save_report(
+            session_id=session_id, client_id=client_id, letter=report_type,
+            name=(selected_rec or {}).get("report_name"),
+            bundle={
+                "bundle_version": telemetry.BUNDLE_VERSION,
+                "saved_at": datetime.now().isoformat(),
+                "session_id": session_id,
+                "report_letter": report_type,
+                "report_name": (selected_rec or {}).get("report_name"),
+                # The exact /api/generate-report response, plus the wider row set.
+                "report": payload,
+                "rows_stored": stored["data"],
+                # Costs nothing to include and future-proofs a "rebuild from
+                # source" path -- which is what scripts/replay_report.py does.
+                "recommendations": recommendations,
+                # The JSON-safe per-file metadata the frontend renders, not the
+                # FileProfile objects, which do not serialise.
+                "file_profiles": session.get("files") or [],
+            },
+        ))
+
         return payload
-    
-    except HTTPException:
-        # Already a deliberate HTTP error (e.g. the 422 above) - don't rewrap as a 500
+
+    except HTTPException as e:
+        # Already a deliberate HTTP error (e.g. the 422 above) - don't rewrap as a
+        # 500. Still recorded: a 422 means the AI proposed a report that could not
+        # be built from the data, which is exactly the failure worth tracking.
+        _record_report(
+            session_id=session_id, client_id=client_id, letter=report_type,
+            build_ms=int((time.perf_counter() - report_started_at) * 1000),
+            ok=False, error_type=f"HTTP{e.status_code}",
+        )
+        _track("report_failed", client_id=client_id, session_id=session_id,
+               letter=report_type, error_type=f"HTTP{e.status_code}",
+               status_code=e.status_code)
         raise
 
     except Exception as e:
         print(f"[API] Error generating report: {type(e).__name__}: {e}")
+        _record_report(
+            session_id=session_id, client_id=client_id, letter=report_type,
+            build_ms=int((time.perf_counter() - report_started_at) * 1000),
+            ok=False, error_type=type(e).__name__,
+        )
+        _track("report_failed", client_id=client_id, session_id=session_id,
+               letter=report_type, error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
 
 # ============================================================================
@@ -818,7 +1094,11 @@ def export_status(session_id: str):
 # [REAL] Used by Reportsdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/export/{session_id}")
-def export_reports(session_id: str, request: ExportRequest):
+def export_reports(
+    session_id: str,
+    request: ExportRequest,
+    client_id: Optional[str] = Depends(client_id_header),
+):
     """[REAL] Download the selected reports as one PDF or HTML file.
 
     One report selected gives a single-report document; two or more give one
@@ -831,6 +1111,13 @@ def export_reports(session_id: str, request: ExportRequest):
     session, letters = _resolve_export(session_id, request.report_types)
     body, filename = _render_export(session, letters, request)
 
+    _track("report_exported", client_id=client_id, session_id=session_id,
+           format=request.format, letters=letters, letter_count=len(letters),
+           is_combined=len(letters) > 1,
+           has_appendix=request.include_appendix,
+           chart_image_count=len(request.chart_images or {}),
+           bytes_out=len(body))
+
     return Response(
         content=body,
         media_type=_MEDIA_TYPES[request.format],
@@ -842,7 +1129,11 @@ def export_reports(session_id: str, request: ExportRequest):
 # [REAL] Used by Reportsdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/export/{session_id}/email")
-def email_reports(session_id: str, request: EmailExportRequest):
+def email_reports(
+    session_id: str,
+    request: EmailExportRequest,
+    client_id: Optional[str] = Depends(client_id_header),
+):
     """[REAL] Email the selected reports as a file attachment.
 
     Every failure below maps to its own status code and a message the user can act
@@ -899,6 +1190,14 @@ def email_reports(session_id: str, request: EmailExportRequest):
         status = {"auth": 502, "recipients": 400, "unreachable": 504}.get(e.kind, 502)
         raise HTTPException(status_code=status, detail=str(e))
 
+    # recipient_count only. Email addresses are personal data with no analytical
+    # value here -- "how often is email used" is answerable without them, and
+    # storing them would make this database something it should never become.
+    _track("report_emailed", client_id=client_id, session_id=session_id,
+           format=request.format, letters=letters, letter_count=len(letters),
+           recipient_count=len(recipients),
+           has_custom_message=bool(request.message))
+
     return {
         "status": "sent",
         "recipients": recipients,
@@ -906,6 +1205,122 @@ def email_reports(session_id: str, request: EmailExportRequest):
         "format": request.format,
         "filename": filename,
     }
+
+
+# ============================================================================
+# USAGE TRACKING — client-reported events, and the aggregate counters
+# ============================================================================
+
+@app.post("/api/events")
+def record_client_event(
+    request: ClientEventRequest,
+    client_id: Optional[str] = Depends(client_id_header),
+):
+    """[REAL] Record one interface event the backend cannot observe for itself.
+
+    Things like "the user opened compare-all" or "switched tabs" leave no trace on
+    the server, so the browser reports them here.
+
+    Always answers 200, even for an event name it does not recognise or when
+    telemetry is unavailable. This endpoint exists to collect a nice-to-have, and
+    a 4xx would only teach the frontend to handle an error that does not matter --
+    the client sends these fire-and-forget and does not read the response.
+    """
+    recorded = _telemetry_guard(
+        f"log_event({request.event})",
+        lambda: telemetry.log_event(
+            request.event, client_id=client_id, session_id=request.session_id,
+            props=request.props,
+        ),
+    )
+    return {"status": "recorded" if recorded else "ignored"}
+
+
+@app.get("/api/stats")
+def usage_stats():
+    """[REAL] Aggregate usage counters for the home page.
+
+    Public and unauthenticated, because everything here is a count -- no filenames,
+    no column names, no cell values, and nothing scoped to an individual. Anything
+    that could identify a person or reveal what they uploaded lives behind the
+    admin endpoints instead.
+
+    Returns zeroed counters with available=false rather than an error when nothing
+    has been recorded yet, so the home page renders on a fresh install.
+    """
+    empty = {
+        "users": 0, "sessions": 0, "files_processed": 0, "reports_built": 0,
+        "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
+        "available": False,
+    }
+    # Guarded like every other telemetry call: the home page showing empty tiles is
+    # a far better outcome than the home page failing to load.
+    return _telemetry_guard("stats", telemetry.stats) or empty
+
+
+# ============================================================================
+# ADMIN — developer-only access to saved reports and the raw event log
+#
+# Not a user feature. Nothing in the UI links here, the home page never calls
+# these, and they are not scoped per client: the only gate is a shared secret.
+# ============================================================================
+
+def _admin_token():
+    """The configured admin secret, or None. Read per call, like the other flags."""
+    return (os.getenv("ADMIN_TOKEN") or "").strip() or None
+
+
+def require_admin(x_admin_token: Optional[str] = Header(default=None)):
+    """Gate for /api/admin/*.
+
+    404 rather than 401 when ADMIN_TOKEN is unset. An unconfigured deployment
+    should not advertise that these routes exist -- a 401 confirms the endpoint is
+    real and invites someone to go looking for the token.
+
+    A wrong token against a configured server does get 401, because there the
+    route's existence is not the secret.
+    """
+    configured = _admin_token()
+    if not configured:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    supplied = (x_admin_token or "").strip()
+    # Constant-time compare: these are short-lived dev secrets, but a length-
+    # dependent early exit is a free thing to avoid.
+    if not supplied or not secrets.compare_digest(supplied, configured):
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    return True
+
+
+@app.get("/api/admin/reports")
+def admin_list_reports(limit: int = 100, _: bool = Depends(require_admin)):
+    """[DEV] Saved report bundles, newest first, without their payloads."""
+    if not TELEMETRY_AVAILABLE:
+        return {"reports": [], "history_enabled": False}
+    return {
+        "reports": telemetry.list_saved_reports(limit),
+        # Surfaced so an empty list is distinguishable from a switched-off feature.
+        "history_enabled": telemetry.save_report_history_enabled(),
+    }
+
+
+@app.get("/api/admin/reports/{report_id}")
+def admin_get_report(report_id: int, _: bool = Depends(require_admin)):
+    """[DEV] One full bundle, enough to re-render the report with no LLM call."""
+    if not TELEMETRY_AVAILABLE:
+        raise HTTPException(status_code=404, detail="Report not found")
+    bundle = telemetry.get_saved_report(report_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return bundle
+
+
+@app.get("/api/admin/events")
+def admin_events(limit: int = 200, _: bool = Depends(require_admin)):
+    """[DEV] The raw event log, including props the public /api/stats aggregates away."""
+    if not TELEMETRY_AVAILABLE:
+        return {"events": []}
+    return {"events": telemetry.recent_events(limit)}
 
 
 if __name__ == "__main__":

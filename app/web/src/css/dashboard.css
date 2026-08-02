@@ -912,3 +912,263 @@
   .stat-strip { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
   .sheet-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ============================================================
+   HOME PAGE
+   The landing tab: what the app does, plus aggregate usage.
+   Uses tokens.css throughout so restyling the app restyles this.
+   ============================================================ */
+
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* --- hero ------------------------------------------------- */
+
+.home-hero__title {
+  margin: 0 0 12px;
+  font-size: 2rem;
+  line-height: 1.2;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+}
+
+.home-hero__lede {
+  margin: 0 0 20px;
+  max-width: 62ch;
+  font-size: var(--size-lg);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.home-cta {
+  padding: 10px 24px;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.home-cta:hover { background: var(--color-accent-hover); }
+
+/* --- how it works ----------------------------------------- */
+
+.home-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.home-step {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 18px;
+}
+
+.home-step__n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--color-accent-muted);
+  color: var(--color-accent);
+  font-size: var(--size-sm);
+  font-weight: var(--weight-bold);
+}
+
+.home-step__title {
+  margin: 0 0 6px;
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-step__body {
+  margin: 0;
+  font-size: var(--size-sm);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+/* --- usage tiles ------------------------------------------ */
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+
+/* Tabular figures so a column of counts stays aligned as it changes. */
+.home-tile__n {
+  font-size: var(--size-2xl);
+  font-weight: var(--weight-bold);
+  line-height: 1.1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-tile__label {
+  font-size: var(--size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.home-note {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* --- activity sparkline ----------------------------------- */
+
+.home-spark {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+
+.home-spark__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.home-spark__title {
+  margin: 0;
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-spark__legend {
+  display: flex;
+  gap: 14px;
+}
+
+/* Legend text wears text ink, never the series colour - only the swatch is
+   coloured, so the label stays readable at any contrast. */
+.home-spark__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+}
+
+.home-spark__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* The plot scrolls inside its own box rather than widening the page. */
+.home-spark__plot { overflow-x: auto; }
+
+.home-spark__svg {
+  display: block;
+  width: 100%;
+  min-width: 320px;
+  height: 120px;
+}
+
+.home-spark__latest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-spark__latest strong {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* Reserves its line so hovering the chart doesn't shift the layout below. */
+.home-spark__readout {
+  margin: 6px 0 0;
+  min-height: 1.2em;
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- capabilities ----------------------------------------- */
+
+.home-caps__title {
+  margin: 0 0 16px;
+  font-size: var(--size-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-caps__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.home-cap {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 18px;
+}
+
+.home-cap__title {
+  margin: 0 0 10px;
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-cap__list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.home-foot {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}

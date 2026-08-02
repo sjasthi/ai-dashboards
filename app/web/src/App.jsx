@@ -1,12 +1,50 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
 import SettingsDashboard from './components/Settingsdashboard';
 import { REPORT_TYPE_LETTERS, generateReport } from './api';
 
+/**
+ * The dev viewer, or null in a production build.
+ *
+ * The `import.meta.env.DEV` test has to wrap the `import()` expression itself, not
+ * just the branch that renders the component. Vite replaces the flag with a
+ * literal `false` before bundling, so this ternary collapses and the dynamic
+ * import disappears with it.
+ *
+ * Hoisting the lazy() call to module scope instead - even with a guard at the call
+ * site - leaves a live `import()` that Rollup code-splits regardless, emitting a
+ * DevReportBrowser chunk into `dist/`. Verified: that is exactly what the first
+ * version of this did. The point of the gate is that the code is *absent* from a
+ * production build, not merely unreachable within it.
+ */
+const DevReportBrowser = import.meta.env.DEV
+  ? lazy(() => import('./dev/DevReportBrowser'))
+  : null;
+
+function DevBrowserRoute() {
+  if (!DevReportBrowser) return null;
+  return (
+    <div className="app-main">
+      <Suspense fallback={<p style={{ padding: 24 }}>Loading developer tools…</p>}>
+        <DevReportBrowser />
+      </Suspense>
+    </div>
+  );
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState('upload');
+  // Home is the landing tab: it explains what the app does before asking for a
+  // file, which the upload screen alone never did.
+  const [activeTab, setActiveTab] = useState('home');
+
+  // Read once from the URL rather than watched: this is a developer entry point,
+  // and needing a reload to leave it is fine.
+  const [showDevBrowser] = useState(
+    () => new URLSearchParams(window.location.search).get('dev') === '1',
+  );
 
   // Raw File objects picked in the Upload tab
   const [files, setFiles] = useState([]);
@@ -186,6 +224,19 @@ export default function App() {
     transition: 'color 0.15s ease, border-color 0.15s ease'
   });
 
+  // Developer-only saved-report viewer, behind two independent gates.
+  //
+  // `import.meta.env.DEV` is a build-time constant, so in a production build this
+  // whole branch is dead code and Vite removes it along with the dynamic import
+  // below - the component does not merely become unreachable, it is absent from
+  // the shipped bundle. `?dev=1` then keeps it out of the way during development.
+  //
+  // Checked before the main layout renders because the viewer replaces the app
+  // rather than living inside a tab: it has no nav entry, by design.
+  if (import.meta.env.DEV && showDevBrowser) {
+    return <DevBrowserRoute />;
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* NAVBAR */}
@@ -221,7 +272,7 @@ export default function App() {
         </div>
 
         <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['upload', 'analysis', 'reports', 'settings'].map(tab => (
+          {['home', 'upload', 'analysis', 'reports', 'settings'].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </div>
@@ -231,6 +282,10 @@ export default function App() {
       </nav>
 
       <main className="app-main">
+        {activeTab === 'home' && (
+          <HomeDashboard onStart={() => setActiveTab('upload')} />
+        )}
+
         {activeTab === 'upload' && (
           <UploadDashboard
             files={files}

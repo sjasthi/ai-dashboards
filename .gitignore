@@ -25,3 +25,15 @@ build/
 
 # Session data
 session_data/
+
+# Usage tracking DB (created at runtime; see app/data/telemetry.py)
+usage.db
+usage.db-wal
+usage.db-shm
+
+# Generated test-plan output
+test_results/
+
+# The 50k-row scale fixture: several MB, and nothing about it is interesting
+# except its size. Build it with `python scripts/make_test_fixtures.py --scale`.
+tests/fixtures/excel/scale_50k.xlsx

@@ -29,6 +29,11 @@ export default function ReportsDashboard({
   generating,
   errors = {},
   sessionId,
+  // The dev report viewer renders a bundle that has no live server session, so
+  // there is nothing for export to resolve. ExportPanel has to be absent rather
+  // than disabled: it polls /api/export/<id>/status on mount, which would 404 for
+  // every restored report.
+  showExport = true,
 }) {
   const [showTable, setShowTable] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -151,12 +156,14 @@ export default function ReportsDashboard({
       {/* Outside the branch above: the export panel selects across reports, so it
           belongs in the compare view too - that is exactly when a reader wants the
           combined document. */}
-      <ExportPanel
-        sessionId={sessionId}
-        reports={reports}
-        recList={recList}
-        inFlight={inFlight}
-      />
+      {showExport && (
+        <ExportPanel
+          sessionId={sessionId}
+          reports={reports}
+          recList={recList}
+          inFlight={inFlight}
+        />
+      )}
     </div>
   );
 }

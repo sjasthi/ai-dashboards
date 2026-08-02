@@ -5,3 +5,9 @@
 
 pytest==9.1.1
 ruff==0.15.17
+
+# Writes the .xls test fixtures (scripts/make_test_fixtures.py). Dev-only: nothing
+# in app/ imports it, and .xls *reading* is xlrd's job. Unmaintained since 1.3.0
+# (2017) but verified working on Python 3.13, and the tests that need it are
+# guarded with pytest.importorskip so the suite still runs without it.
+xlwt==1.3.0

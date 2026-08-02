@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { API_BASE } from '../api';
+import { clientHeaders } from '../clientId';
 import { exactNumber, formatBytes, truncateMiddle } from '../format';
-
-const API_BASE = 'http://localhost:8000';
 
 const fileKey = (file) => `${file.name}|${file.size}|${file.lastModified}`;
 
@@ -31,7 +31,11 @@ export default function UploadDashboard({
     newFiles.forEach((file) => formData.append('files', file));
 
     try {
-      const response = await fetch(`${API_BASE}/api/inspect`, { method: 'POST', body: formData });
+      const response = await fetch(`${API_BASE}/api/inspect`, {
+        method: 'POST',
+        headers: clientHeaders(),
+        body: formData,
+      });
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
         throw new Error(errBody.detail || `Could not read the files (status ${response.status}).`);
@@ -222,6 +226,7 @@ export default function UploadDashboard({
     try {
       const response = await fetch(`${API_BASE}/api/analyze-full`, {
         method: 'POST',
+        headers: clientHeaders(),
         body: formData
       });
 
