@@ -18,7 +18,7 @@ function PatternBadge({ pattern }) {
   );
 }
 
-function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, isBuilt }) {
+function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, isBuilt, errorMsg }) {
   return (
     <div style={{
       background: 'white',
@@ -65,6 +65,25 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
         </div>
       )}
 
+      {/* Errors are per-report and shown here rather than in a page-level banner:
+          reports build in the background, so a failure on C would otherwise splash
+          a warning across a page where the user is reading A. */}
+      {errorMsg && (
+        <div style={{
+          marginBottom: '14px',
+          padding: '10px 12px',
+          background: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: '6px',
+          fontSize: '13px',
+          color: '#b91c1c'
+        }}>
+          {errorMsg}
+        </div>
+      )}
+
+      {/* Only this card's own state disables this card. Gating on "any report is
+          generating" would grey out every button while the background queue runs. */}
       <button
         onClick={() => onSelect(index)}
         disabled={isGenerating}
@@ -76,21 +95,21 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
           borderRadius: '6px',
           fontSize: '13px',
           fontWeight: 600,
-          cursor: isGenerating ? 'not-allowed' : 'pointer',
-          opacity: isGenerating && !isSelected ? 0.5 : 1
+          cursor: isGenerating ? 'not-allowed' : 'pointer'
         }}
       >
-        {isSelected && isGenerating
+        {isGenerating
           ? 'Generating…'
-          : isBuilt ? 'View this report' : 'Generate this report'}
+          : errorMsg ? 'Retry' : isBuilt ? 'View this report' : 'Generate this report'}
       </button>
     </div>
   );
 }
 
 export default function AnalysisDashboard({
-  sessionId, recommendations, reports = {}, generatingType, errorMsg, onGenerate,
+  sessionId, recommendations, reports = {}, generating, errors = {}, activeReportType, onGenerate,
 }) {
+  const inFlight = generating || new Set();
   const recList = recommendations?.recommendations || [];
 
   const handleSelect = (index) => {
@@ -119,14 +138,9 @@ export default function AnalysisDashboard({
       ) : (
         <>
           <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px' }}>
-            The AI reviewed your data and suggests these reports. Pick one to generate it.
+            The AI reviewed your data and suggests these reports. They build in the
+            background while you read — pick one to open it.
           </p>
-
-          {errorMsg && (
-            <div style={{ marginBottom: '16px', padding: '12px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', color: '#b91c1c' }}>
-              {errorMsg}
-            </div>
-          )}
 
           <div style={{ maxWidth: '760px' }}>
             {recList.map((rec, i) => {
@@ -137,9 +151,10 @@ export default function AnalysisDashboard({
                   rec={rec}
                   index={i}
                   onSelect={handleSelect}
-                  isGenerating={!!generatingType}
-                  isSelected={generatingType === letter}
+                  isGenerating={inFlight.has(letter)}
+                  isSelected={activeReportType === letter}
                   isBuilt={!!reports[letter]}
+                  errorMsg={errors[letter]}
                 />
               );
             })}

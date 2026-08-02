@@ -17,6 +17,7 @@ import sys
 import tempfile
 import shutil
 from datetime import datetime
+from uuid import uuid4
 
 # Ensure the project root is on sys.path so data modules can be imported
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -62,6 +63,11 @@ except ImportError as e:
     MAX_APPENDIX_ROWS = 200
     print(f"[API] Export modules not available: {e} — /api/export/* will return 503")
 
+# Ceiling on how many rows of a report are kept in SESSIONS, and the hard limit on
+# what an export may ask for. One constant for both so they cannot drift: anything
+# stored beyond what export can request is memory nothing will ever read.
+MAX_STORED_ROWS = 5000
+
 app = FastAPI(
     title="AI Dashboard API",
     description="Backend API for AI-powered dashboard",
@@ -103,7 +109,7 @@ class ExportRequest(BaseModel):
     format: Literal["pdf", "html"] = "pdf"
     chart_images: dict[str, str] = Field(default_factory=dict)
     include_appendix: bool = True
-    appendix_row_limit: int = Field(MAX_APPENDIX_ROWS, ge=0, le=5000)
+    appendix_row_limit: int = Field(MAX_APPENDIX_ROWS, ge=0, le=MAX_STORED_ROWS)
 
 
 class EmailExportRequest(ExportRequest):
@@ -119,8 +125,19 @@ SESSIONS = {}  # Store uploaded file metadata by session_id
 
 
 def generate_session_id():
-    """Generate a unique session ID."""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Generate a unique session ID.
+
+    The random suffix is not decoration. This used to be the timestamp alone, at
+    second resolution, and `SESSIONS[session_id] = ...` below overwrites without
+    checking - so two users starting an upload in the same second shared a key and
+    the second one silently replaced the first. The first user's browser kept the
+    id it was given and then built every report from the other user's data.
+
+    The timestamp prefix stays because the id doubles as the session_data/<id>/
+    directory name and as part of the export filename, and sorting by name is how
+    you find a run. Nothing parses it back into a datetime.
+    """
+    return f"{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:6]}"
 
 
 # ============================================================================
@@ -209,7 +226,7 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 # [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/analyze-full")
-async def analyze_files_full(
+def analyze_files_full(
     files: list[UploadFile] = File(...),
     selections: Optional[str] = Form(None),
 ):
@@ -229,6 +246,13 @@ async def analyze_files_full(
     `selections` is an optional JSON object, {"sales.xlsx": ["Orders", "Items"]},
     naming which worksheets of each workbook to analyse. Omitted or unparseable
     means "every sheet", so older clients keep working unchanged.
+
+    Deliberately a sync `def`, not `async def`. Every step below blocks: file
+    writes, pandas profiling, and a synchronous LLM SDK call. On the event loop
+    that froze the entire server for the full ~7s - no health checks, no report
+    generation for anyone else, and no way to answer a progress poll about this
+    very request. As a sync def, Starlette runs it in the threadpool instead,
+    which is what /api/generate-report already does.
 
     Returns:
         {
@@ -272,18 +296,21 @@ async def analyze_files_full(
         # Validate files
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
-        
+
         # Save uploaded files to temp directory
         temp_dir = tempfile.mkdtemp()
         file_paths = []
         file_metadata = []
-        
+
         for file in files:
             if not file.filename:
                 continue
-                
+
             filepath = os.path.join(temp_dir, file.filename)
-            content = await file.read()
+            # .file.read() rather than `await file.read()`: this handler is sync
+            # so it can run off the event loop, and the underlying spooled file
+            # reads the same bytes without one.
+            content = file.file.read()
             
             if len(content) == 0:
                 raise HTTPException(status_code=400, detail=f"File {file.filename} is empty")
@@ -433,8 +460,9 @@ async def analyze_files_full(
 # REPORT RESPONSE HELPERS
 # ============================================================================
 
-# How many report rows travel to the browser for the table view. The full set stays
-# in SESSIONS; a 50k-row report should not become a 50k-row JSON payload.
+# How many report rows travel to the browser for the table view. A larger slice (up
+# to MAX_STORED_ROWS) stays in SESSIONS for the export appendix; a 50k-row report
+# should not become a 50k-row JSON payload.
 MAX_ROWS_RETURNED = 500
 
 
@@ -542,7 +570,20 @@ def generate_report_endpoint(request: GenerateReportRequest):
     if not recommendations:
         print(f"[API] No recommendations in session {session_id}")
         raise HTTPException(status_code=400, detail="No recommendations found in session")
-    
+
+    # Already built for this session - hand back what was stored rather than
+    # replaying the whole pandas pipeline. The browser prefetches every report in
+    # the background, so a duplicate request is a normal event (a user clicking a
+    # report that is already queued) rather than an anomaly.
+    #
+    # `stored` is the response payload plus a "data" key, so dropping that key
+    # reproduces the original response exactly - including its generated_at, which
+    # should say when the report was built, not when it was last asked for.
+    cached = (session.get("reports") or {}).get(report_type)
+    if cached:
+        print(f"[API] Returning cached report {report_type} for session {session_id}")
+        return {k: v for k, v in cached.items() if k != "data"}
+
     try:
         print(f"\n[API] Generating report for session {session_id}, type {report_type}")
         
@@ -646,10 +687,16 @@ def generate_report_endpoint(request: GenerateReportRequest):
         # generated, not just the last one. A single slot here meant generating A
         # then B left only B on the server, while the browser still showed both -
         # so a combined export of A and B was impossible to fulfil.
+        #
+        # Capped at MAX_STORED_ROWS: the only reader is the export appendix, whose
+        # appendix_row_limit is validated against the same constant, so rows past
+        # it are unreachable. Without the cap a long report on a large upload sits
+        # in memory forever, and prefetching means three of them per session
+        # instead of one.
         stored = {
             **payload,
             "generated_at": generated_at,
-            "data": report_df.to_dict(orient="records"),
+            "data": report_df.head(MAX_STORED_ROWS).to_dict(orient="records"),
         }
         SESSIONS[session_id].setdefault("reports", {})[report_type] = stored
         # Legacy single slot, same object rather than a copy. Kept because

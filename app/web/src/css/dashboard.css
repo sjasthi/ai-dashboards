@@ -111,6 +111,32 @@
   color: var(--color-text-primary);
 }
 
+/* ---------- busy spinner ---------- */
+
+/* Sits inside the button that triggered the work, so a 7s analysis shows it is
+   alive without adding a panel that changes the card's height mid-click. */
+.btn-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Slowed rather than stopped: a frozen spinner reads as a hung app, which is the
+   opposite of what it is there to communicate. */
+@media (prefers-reduced-motion: reduce) {
+  .btn-spinner { animation-duration: 2.4s; }
+}
+
 .report-header { margin-bottom: 20px; }
 
 /* Stacked, not a space-between row: as a row the A/B/C group's position depended on

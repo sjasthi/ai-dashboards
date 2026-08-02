@@ -246,7 +246,8 @@ export default function UploadDashboard({
 
   // Remove All only needs a list to clear; analysis also needs the probe to have
   // finished and at least one sheet still checked.
-  const actionsDisabled = !files || files.length === 0 || status === 'uploading';
+  const analyzing = status === 'uploading';
+  const actionsDisabled = !files || files.length === 0 || analyzing;
   const analyzeDisabled = actionsDisabled || inspecting || included.length === 0;
 
   return (
@@ -354,12 +355,16 @@ export default function UploadDashboard({
             // the prompt, and drops the buttons out of the tab order meanwhile.
             visibility: confirmingRemoveAll ? 'hidden' : 'visible'
           }}>
+            {/* Busy is not the same as unavailable: while analysing, the button
+                keeps its blue so the spinner and label stay legible. Greying it
+                out left white text on #cbd5e1, which was barely readable. */}
             <button
               onClick={runAnalysis}
               disabled={analyzeDisabled}
+              aria-busy={analyzing}
               style={{
                 padding: '10px 24px',
-                background: analyzeDisabled ? '#cbd5e1' : '#2563eb',
+                background: analyzing ? '#2563eb' : analyzeDisabled ? '#cbd5e1' : '#2563eb',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
@@ -368,7 +373,8 @@ export default function UploadDashboard({
                 cursor: analyzeDisabled ? 'not-allowed' : 'pointer'
               }}
             >
-              {status === 'uploading' ? 'Analyzing…' : 'Upload & Analyze'}
+              {analyzing && <span className="btn-spinner" aria-hidden="true" />}
+              {analyzing ? 'Analyzing…' : 'Upload & Analyze'}
             </button>
 
             <button
