@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { analyzeFull, inspectFiles, sendEvents } from '../api';
+import { isNewlyActiveUser } from '../clientId';
 import { exactNumber, formatBytes, truncateMiddle } from '../format';
 
-const API_BASE = 'http://localhost:8000';
+// This file used to declare its own `const API_BASE` and build its own fetches, so
+// the backend URL was defined in two places and the two heaviest endpoints in the
+// app were the only ones not going through api.js. Adding the X-Client-Id header
+// would have meant remembering both. Now there is one definition and one place a
+// request header has to be added.
 
 const fileKey = (file) => `${file.name}|${file.size}|${file.lastModified}`;
 
@@ -27,16 +33,9 @@ export default function UploadDashboard({
    *  aren't already known, so re-picking an existing file costs nothing. */
   const probeFiles = async (newFiles) => {
     setInspecting(true);
-    const formData = new FormData();
-    newFiles.forEach((file) => formData.append('files', file));
 
     try {
-      const response = await fetch(`${API_BASE}/api/inspect`, { method: 'POST', body: formData });
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(errBody.detail || `Could not read the files (status ${response.status}).`);
-      }
-      const data = await response.json();
+      const data = await inspectFiles(newFiles);
       // The endpoint answers in request order, which is how each result finds its
       // way back to the File it describes.
       const byKey = {};
@@ -204,10 +203,8 @@ export default function UploadDashboard({
     // replaced - clear them before the new session_id lands.
     if (onStart) onStart();
 
-    const formData = new FormData();
     const sheetSelections = {};
     included.forEach((file) => {
-      formData.append('files', file);
       const info = inspections[fileKey(file)];
       // Only workbooks get an entry. A file the probe couldn't read is left out
       // so the server falls back to loading all of it rather than nothing.
@@ -215,27 +212,24 @@ export default function UploadDashboard({
         sheetSelections[file.name] = Array.from(selections[fileKey(file)] || []);
       }
     });
-    if (Object.keys(sheetSelections).length) {
-      formData.append('selections', JSON.stringify(sheetSelections));
-    }
 
     try {
-      const response = await fetch(`${API_BASE}/api/analyze-full`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(errBody.detail || `Request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await analyzeFull(
+        included,
+        Object.keys(sheetSelections).length ? sheetSelections : null,
+      );
 
       setSessionId(data.session_id);
       setRecommendations(data.recommendations);
       setFileProfiles(data.file_profiles);
       setStatus('done');
+
+      // Only now does this browser session count as a user rather than a visitor.
+      // Fired here, on the success path, so a failed analysis doesn't promote
+      // someone who never got a result. sendEvents swallows its own failures.
+      if (isNewlyActiveUser()) {
+        sendEvents([{ event: 'user_activated', session_id: data.session_id }]);
+      }
 
       if (onDone) onDone();
     } catch (err) {
@@ -261,7 +255,9 @@ export default function UploadDashboard({
         border: '1px solid #e2e8f0',
         borderRadius: '10px',
         padding: '32px',
-        maxWidth: '700px'
+        // No max-width: the page wrapper already constrains this to the shared
+        // centred column, and a second cap here left the card narrower than the
+        // column it sits in, so Upload looked misaligned next to every other tab.
       }}>
         <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', color: '#1e293b' }}>Upload Data</h2>
         <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#64748b' }}>

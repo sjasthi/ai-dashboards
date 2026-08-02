@@ -44,6 +44,11 @@ GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+# The local model, named once. It was a bare 'qwen2.5' literal in two places inside
+# _send_prompt_ollama; telemetry needs to report which model answered, and a third
+# copy of the string would be a third place to forget to change.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5")
+
 # Number of validation-failure retries (each retry is a full extra generation, so
 # each one spends more of the hosted daily/hourly quota). Default 0 = a single
 # generation attempt per analysis, no self-correction. Raise via the env var - e.g.
@@ -73,7 +78,7 @@ except Exception as _schema_err:  # pragma: no cover - defensive
 # ============================================================================
 
 
-def send_prompt(prompt, session_id=None, system_prompt=None):
+def send_prompt(prompt, session_id=None, system_prompt=None, meta=None):
     """
     Args:
         prompt: The user/data portion of the prompt to send to the AI
@@ -84,6 +89,23 @@ def send_prompt(prompt, session_id=None, system_prompt=None):
             prefix across requests - identical every call, it is what providers
             can prefix-cache, and it keeps the "how to think" text out of the
             per-dataset user message.
+        meta: Optional dict, filled in with which provider actually answered.
+
+            This function used to return only the text, so a caller wanting to
+            record the provider had nothing to read and could only log AI_BACKEND
+            - which is the provider that was *configured*, not the one that
+            answered, and is therefore silently wrong every time the ladder below
+            falls through. That made the most useful thing about the fallback
+            chain (how often the primary is failing) invisible in normal operation.
+
+            An out-param rather than a changed return value so every existing
+            caller is unaffected, and rather than a module-level global because
+            /api/analyze-full is a sync def that Starlette runs in its threadpool:
+            two concurrent analyses genuinely execute at once and would race a
+            global, attributing one request's provider to the other. A dict the
+            caller allocates per request cannot race.
+
+            Keys set: provider, model, provider_failures, used_fallback.
 
     Returns:
         Cleaned & parsed JSON object as dict
@@ -92,23 +114,37 @@ def send_prompt(prompt, session_id=None, system_prompt=None):
         ValueError: If response cannot be parsed as valid JSON
     """
     raw_response = None
+    provider = None
+    model = None
+    failures = 0
 
     if AI_BACKEND == "groq" and not GROQ_API_KEY:
         print("[AI_Engine] AI_BACKEND=groq but GROQ_API_KEY is not set, skipping Groq")
 
-    for label, send in _remote_providers():
+    for label, tier_provider, tier_model, send in _remote_providers():
         try:
             raw_response = send(system_prompt, prompt)
+            provider, model = tier_provider, tier_model
             break
         except Exception as e:
+            failures += 1
             print(f"[AI_Engine] {label} request failed ({e})")
 
     if raw_response is None:
         # Local Ollama is the last resort rather than one of the tiers above: it
         # has no quota to exhaust, so it can't fail the way the hosted ones do.
         raw_response = _send_prompt_ollama(system_prompt, prompt)
+        provider, model = "ollama", OLLAMA_MODEL
 
-    print(f"[AI_Engine] Received response from LLM")
+    if meta is not None:
+        meta["provider"] = provider
+        meta["model"] = model
+        meta["provider_failures"] = failures
+        # True whenever the first usable tier didn't answer - the number worth
+        # watching, because it means quota is running out somewhere.
+        meta["used_fallback"] = failures > 0
+
+    print(f"[AI_Engine] Received response from LLM ({provider})")
 
     # Extract and clean JSON
     cleaned_response = _extract_and_clean_json(raw_response)
@@ -131,6 +167,7 @@ def get_validated_recommendations(
     tables: dict = None,
     correction_prompt: str = None,
     system_prompt: str = None,
+    meta: dict = None,
 ) -> dict:
     """
     Like send_prompt, but validates the response against RecommendationsResponse
@@ -161,12 +198,22 @@ def get_validated_recommendations(
     for attempt in range(max_retries + 1):
         # system_prompt stays constant across attempts (it's the cacheable prefix);
         # only the user/data attempt_prompt grows with correction feedback below.
-        raw_response = send_prompt(attempt_prompt, session_id=session_id, system_prompt=system_prompt)
+        raw_response = send_prompt(
+            attempt_prompt, session_id=session_id, system_prompt=system_prompt, meta=meta
+        )
+        if meta is not None:
+            # Each pass is a full extra generation against the hosted quota, so the
+            # count matters on its own - and it is recorded before validation, so a
+            # run that exhausts its retries and raises still reports what it spent.
+            meta["llm_attempts"] = attempt + 1
+            meta.setdefault("validation_failures", 0)
         try:
             parsed = parse_and_validate(raw_response, valid_filenames, tables)
             return parsed.model_dump(exclude_none=True)
         except ValueError as e:
             last_error = e
+            if meta is not None:
+                meta["validation_failures"] = meta.get("validation_failures", 0) + 1
             print(f"[AI_Engine] Response failed validation (attempt {attempt + 1}/{max_retries + 1}): {e}")
             # Retries reuse the shorter correction prompt when the caller supplied one
             # (data + output contract, minus the analysis guidance) - resending the full
@@ -183,9 +230,12 @@ def get_validated_recommendations(
 def _remote_providers():
     """The hosted backends to try, in order, before falling back to local Ollama.
 
-    Each entry is (label, callable taking (system, user) and returning raw text). A
-    tier is only included when it's actually usable, so a missing key is a skipped
-    tier rather than a guaranteed exception on every request.
+    Each entry is (label, provider, model, callable taking (system, user) and
+    returning raw text). `label` is the human string for the console; `provider` and
+    `model` are the machine-readable pair telemetry records, kept separate so a
+    breakdown groups by "gemini" rather than by a sentence that changes whenever the
+    log wording is edited. A tier is only included when it's actually usable, so a
+    missing key is a skipped tier rather than a guaranteed exception on every request.
 
     Order: Gemini first, then Groq, then (in send_prompt) local Ollama. Gemini is a
     separate account, so spending it first preserves the Groq daily/hourly quota that
@@ -195,17 +245,19 @@ def _remote_providers():
     providers = []
 
     if GEMINI_API_KEY:
-        providers.append(
-            (f"Gemini model '{GEMINI_MODEL}'", lambda s, u: _send_prompt_gemini(s, u, GEMINI_MODEL))
-        )
+        providers.append((
+            f"Gemini model '{GEMINI_MODEL}'", "gemini", GEMINI_MODEL,
+            lambda s, u: _send_prompt_gemini(s, u, GEMINI_MODEL),
+        ))
 
     if AI_BACKEND == "groq" and GROQ_API_KEY:
-        providers.append(
-            (f"Groq model '{GROQ_MODEL}'", lambda s, u: _send_prompt_groq(s, u, GROQ_MODEL))
-        )
+        providers.append((
+            f"Groq model '{GROQ_MODEL}'", "groq", GROQ_MODEL,
+            lambda s, u: _send_prompt_groq(s, u, GROQ_MODEL),
+        ))
         if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
             providers.append((
-                f"Groq fallback model '{GROQ_FALLBACK_MODEL}'",
+                f"Groq fallback model '{GROQ_FALLBACK_MODEL}'", "groq", GROQ_FALLBACK_MODEL,
                 lambda s, u: _send_prompt_groq(s, u, GROQ_FALLBACK_MODEL),
             ))
 
@@ -233,7 +285,7 @@ def _send_prompt_ollama(system_prompt, user_prompt) -> str:
     if _RESPONSE_JSON_SCHEMA is not None:
         try:
             response: ChatResponse = chat(
-                model='qwen2.5',
+                model=OLLAMA_MODEL,
                 format=_RESPONSE_JSON_SCHEMA,
                 options={'temperature': 0},
                 messages=messages,
@@ -244,7 +296,7 @@ def _send_prompt_ollama(system_prompt, user_prompt) -> str:
                   f"retrying with plain JSON mode")
 
     response = chat(
-        model='qwen2.5',
+        model=OLLAMA_MODEL,
         format='json',
         options={'temperature': 0},
         messages=messages,

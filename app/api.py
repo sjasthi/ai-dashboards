@@ -7,7 +7,7 @@ placeholder data - fabricated results presented as a real analysis are worse
 than an outage, because nothing on screen tells the user they aren't real.
 """
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 import shutil
+import time
 from datetime import datetime
 from uuid import uuid4
 
@@ -62,6 +63,17 @@ except ImportError as e:
     EXPORT_AVAILABLE = False
     MAX_APPENDIX_ROWS = 200
     print(f"[API] Export modules not available: {e} — /api/export/* will return 503")
+
+# Usage tracking gets its own guarded import for the same reason export does: it is
+# unrelated to the analysis pipeline, and a broken telemetry module must not take
+# uploads down with it. Every call site is additionally wrapped by telemetry's own
+# swallowing try/except, so this flag is the outer of two independent guards.
+try:
+    from app.data import telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError as e:
+    TELEMETRY_AVAILABLE = False
+    print(f"[API] Telemetry not available: {e} — usage tracking is off")
 
 # Ceiling on how many rows of a report are kept in SESSIONS, and the hard limit on
 # what an export may ask for. One constant for both so they cannot drift: anything
@@ -117,6 +129,24 @@ class EmailExportRequest(ExportRequest):
     recipients: list[str] = Field(..., min_length=1, max_length=10)
     message: Optional[str] = None
 
+
+class BrowserEvent(BaseModel):
+    """One interaction the browser reports that the server cannot observe itself."""
+    event: str = Field(..., max_length=64)
+    session_id: Optional[str] = Field(None, max_length=64)
+    props: dict = Field(default_factory=dict)
+
+
+class BrowserEventBatch(BaseModel):
+    """A batch of browser events.
+
+    Capped at 50: this endpoint takes unauthenticated input from anyone who can
+    reach the server, so the batch size, each event name's length, and the set of
+    accepted names are all bounded. Without a cap, one request could append
+    unlimited rows to the usage database.
+    """
+    events: list[BrowserEvent] = Field(..., min_length=1, max_length=50)
+
 # ============================================================================
 # SESSIONS
 # ============================================================================
@@ -141,6 +171,131 @@ def generate_session_id():
 
 
 # ============================================================================
+# USAGE TRACKING
+# ============================================================================
+# Thin wrappers so no handler below has to think about whether telemetry is
+# importable, and so "telemetry must never fail a user request" is enforced in one
+# place rather than at every call site. telemetry.py already swallows its own
+# exceptions; these add the TELEMETRY_AVAILABLE guard on top.
+
+def client_id(x_client_id: Optional[str] = Header(None)):
+    """The browser's anonymous id, from the X-Client-Id header.
+
+    None whenever the frontend hasn't sent one - an older cached bundle, a curl
+    call, or a browser where localStorage is unavailable. That is a normal case,
+    not an error: the event is still logged, it just doesn't count toward the
+    distinct-user total.
+    """
+    return x_client_id
+
+
+def track_props(event, client, session, props):
+    """Log one event whose props are already a dict.
+
+    The dict-taking form exists for POST /api/events, whose props come from the
+    browser. Routing those through track()'s **kwargs would let a prop named
+    "client" or "session" collide with the parameter of the same name and raise
+    TypeError at the call site - before telemetry's own swallowing guard, so it
+    would 500 the request. Untrusted keys never become keyword arguments.
+
+    The try/except is deliberately a *second* guard: telemetry.log_event already
+    swallows everything internally. One guard is not enough for a rule as absolute
+    as "telemetry must never fail a user request" - it makes every upload in the
+    app depend on a try/except in another module staying correct forever. This one
+    holds even if that one is broken, and the argument-evaluation that happens at
+    the call sites below (dict comprehensions over probe results, sums over
+    profiles) is only covered here.
+    """
+    if not TELEMETRY_AVAILABLE:
+        return
+    try:
+        telemetry.log_event(event, client_id=client, session_id=session, props=props or {})
+    except Exception as e:
+        print(f"[API] Telemetry failed for {event!r}: {type(e).__name__}: {e}")
+
+
+def track(event, client=None, session=None, **props):
+    """Log one event. Never raises, never returns anything worth checking.
+
+    Keyword form for the handlers in this file, where the prop names are literals
+    written here and cannot collide.
+    """
+    track_props(event, client, session, props)
+
+
+def track_file(**kwargs):
+    if not TELEMETRY_AVAILABLE:
+        return
+    try:
+        telemetry.record_file(**kwargs)
+    except Exception as e:
+        print(f"[API] Telemetry file record failed: {type(e).__name__}: {e}")
+
+
+def track_report(**kwargs):
+    if not TELEMETRY_AVAILABLE:
+        return
+    try:
+        telemetry.record_report(**kwargs)
+    except Exception as e:
+        print(f"[API] Telemetry report record failed: {type(e).__name__}: {e}")
+
+
+def _ext_of(filename):
+    """Lowercase extension including the dot, or None. api.py never computed this
+    before - workbook_probe did it internally - but the extension mix is the single
+    most useful thing to know about what people upload."""
+    if not filename:
+        return None
+    return os.path.splitext(filename)[1].lower() or None
+
+
+def _tally(values):
+    """{'.csv': 2, '.xlsx': 1} — count occurrences, skipping None."""
+    counts = {}
+    for value in values:
+        if value is not None:
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _ext_mix(filenames):
+    return _tally(_ext_of(name) for name in filenames)
+
+
+def _elapsed_ms(started):
+    return int((time.perf_counter() - started) * 1000)
+
+
+# Event names POST /api/events will accept. A whitelist rather than free text
+# because the endpoint is unauthenticated: without one, anyone reaching the server
+# could write arbitrary event names into the usage database and make every
+# breakdown meaningless. Adding a browser event means adding it here.
+BROWSER_EVENTS = frozenset({
+    # One per browser session, sent by the home page. The server cannot see an
+    # arrival for itself - a visitor who only reads the landing page never touches
+    # another endpoint - so this is the only record that anyone showed up.
+    "visit_started",
+    # Fired once per browser session, the first time an analysis succeeds. This is
+    # what promotes a visitor to a user. The server cannot infer it: it sees the
+    # analysis, but not whether this browser had already run one earlier in the
+    # same sitting.
+    "user_activated",
+    "report_viewed",
+    "report_retry_clicked",
+    "compare_all_opened",
+    "data_table_toggled",
+    "tab_changed",
+    "export_panel_opened",
+})
+
+# Props are the browser's, so their size is bounded too - a report letter and a tab
+# name need very little room.
+MAX_EVENT_PROPS = 20
+MAX_PROP_CHARS = 200
+
+
+# ============================================================================
 # ENDPOINTS — ACTIVE (wired to current React frontend)
 # ============================================================================
 
@@ -154,10 +309,82 @@ def health_check():
 
 
 # ----------------------------------------------------------------------------
+# [REAL] Usage tracking
+# ----------------------------------------------------------------------------
+@app.get("/api/stats")
+def usage_stats():
+    """[REAL] Aggregate usage counters for the home page.
+
+    Public and unauthenticated because it is aggregate-only - counts and
+    breakdowns, no per-session or per-file detail, nothing traceable to a person.
+    The full event log is a separate, token-gated concern.
+
+    Returns zeros rather than an error when nothing has been recorded yet, which is
+    the state on a fresh clone and on first boot. A home page that fails because
+    nobody has used the app is worse than one showing four zeros.
+    """
+    if not TELEMETRY_AVAILABLE:
+        return telemetry_unavailable_stats()
+    try:
+        return telemetry.stats()
+    except Exception as e:
+        # Same second-guard reasoning as track_props: telemetry.stats() already
+        # falls back internally, and the home page still must not break if it stops.
+        print(f"[API] Stats unavailable: {type(e).__name__}: {e}")
+        return telemetry_unavailable_stats()
+
+
+def telemetry_unavailable_stats():
+    """Same shape as a real response, so the frontend has one contract to code
+    against whether or not telemetry imported."""
+    return {
+        "visits": 0, "users": 0, "clients": 0, "sessions": 0, "files_processed": 0,
+        "reports_built": 0, "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
+        "available": False,
+    }
+
+
+@app.post("/api/events")
+def record_browser_events(
+    batch: BrowserEventBatch,
+    client: Optional[str] = Depends(client_id),
+):
+    """[REAL] Record interactions the server cannot see for itself.
+
+    Which report a user actually looked at, which tab they switched to, whether
+    they opened the comparison view - all of it happens entirely in the browser.
+    Generated-but-never-viewed is only visible from here.
+
+    Unknown event names are dropped, not rejected: a stale bundle sending an event
+    name that has since been renamed should lose that one event, not have its whole
+    batch fail. The response reports both counts so the drop is visible rather than
+    silent.
+    """
+    accepted = 0
+    rejected = []
+
+    for item in batch.events:
+        if item.event not in BROWSER_EVENTS:
+            rejected.append(item.event)
+            continue
+        props = {
+            k: (v[:MAX_PROP_CHARS] if isinstance(v, str) else v)
+            for k, v in list((item.props or {}).items())[:MAX_EVENT_PROPS]
+        }
+        track_props(item.event, client, item.session_id, props)
+        accepted += 1
+
+    return {"accepted": accepted, "rejected": sorted(set(rejected))}
+
+
+# ----------------------------------------------------------------------------
 # [REAL] Used by Uploaddashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/inspect")
-async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
+async def inspect_uploaded_files(
+    files: list[UploadFile] = File(...),
+    client: Optional[str] = Depends(client_id),
+):
     """
     [REAL]
     Describe uploaded spreadsheets without analysing them, so the upload screen
@@ -182,6 +409,7 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="No files provided")
 
     temp_dir = None
+    started = time.perf_counter()
     try:
         temp_dir = tempfile.mkdtemp()
         results = []
@@ -208,6 +436,22 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 
             results.append(inspect_file(filepath, file.filename, len(content)))
 
+        # `submitted` and `inspected` differ whenever a file arrives with no
+        # filename: the loop above skips those, so len(files) != len(results) and
+        # reporting only one of the two would quietly lose them.
+        track(
+            "files_inspected", client=client,
+            submitted=len(files),
+            inspected=len(results),
+            ext_mix=_ext_mix(f.filename for f in files),
+            total_bytes=sum(r.get("size") or 0 for r in results),
+            kinds=_tally(r.get("kind") for r in results),
+            sheet_counts=[len(r.get("sheets") or []) for r in results],
+            multisheet_files=sum(1 for r in results if len(r.get("sheets") or []) > 1),
+            empty_sheets=sum(1 for r in results for s in (r.get("sheets") or []) if s.get("empty")),
+            failed=sum(1 for r in results if r.get("error")),
+            duration_ms=_elapsed_ms(started),
+        )
         return {"files": results}
 
     except HTTPException:
@@ -215,6 +459,8 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 
     except Exception as e:
         print(f"[API] Inspect failed: {type(e).__name__}: {e}")
+        track("inspect_failed", client=client, error_type=type(e).__name__,
+              submitted=len(files or []), duration_ms=_elapsed_ms(started))
         raise HTTPException(status_code=500, detail=f"Could not inspect the uploaded files: {e}")
 
     finally:
@@ -229,6 +475,7 @@ async def inspect_uploaded_files(files: list[UploadFile] = File(...)):
 def analyze_files_full(
     files: list[UploadFile] = File(...),
     selections: Optional[str] = Form(None),
+    client: Optional[str] = Depends(client_id),
 ):
     """
     [REAL]
@@ -274,6 +521,8 @@ def analyze_files_full(
 
     session_id = generate_session_id()
     temp_dir = None
+    started = time.perf_counter()
+    llm_meta = {}
 
     # Reject a malformed selection rather than falling back to "analyze
     # everything", which would hand the LLM sheets the user had unchecked. Only an
@@ -328,6 +577,18 @@ def analyze_files_full(
         if not file_paths:
             raise HTTPException(status_code=400, detail="No valid files provided")
 
+        track(
+            "analysis_started", client=client, session=session_id,
+            file_count=len(file_paths),
+            ext_mix=_ext_mix(m["name"] for m in file_metadata),
+            total_bytes=sum(m["size"] for m in file_metadata),
+            # None means the client sent no `selections` at all, i.e. "every sheet".
+            # Distinguishing that from an explicit selection is the whole point:
+            # it's what tells you whether the sheet-picker is actually being used.
+            has_selections=sheet_selections is not None,
+            sheets_selected=sum(len(v) for v in (sheet_selections or {}).values()) or None,
+        )
+
         # Loaded DataFrames kept in memory for /api/generate-report. The uploaded
         # files themselves are deleted below, and worksheets never existed as files,
         # so this is the only way the report step can reach the user's data.
@@ -373,11 +634,17 @@ def analyze_files_full(
             # Send to AI, validate against the recommendations schema, and
             # retry with correction feedback if it doesn't validate
             valid_filenames = {p.filename for p in file_profiles}
+            llm_started = time.perf_counter()
             recommendations = ai_engine.get_validated_recommendations(
                 prompt, valid_filenames, session_id=session_id, tables=session_tables,
                 correction_prompt=requester.build_correction_prompt(file_profiles, relationships),
                 system_prompt=system_prompt,
+                # Filled in by AI_Engine with which provider actually answered. Read
+                # with .get() below, never indexed: the test suite stubs this
+                # function with a fake that takes **kwargs and never populates it.
+                meta=llm_meta,
             )
+            llm_ms = _elapsed_ms(llm_started)
 
             # Backfill the real row/column counts now that profiling has produced
             # them. file_metadata is what the frontend actually renders, and it was
@@ -403,6 +670,44 @@ def analyze_files_full(
 
             print(f"[API] Analysis complete!")
 
+            recs = (recommendations or {}).get("recommendations", []) or []
+            track(
+                "analysis_completed", client=client, session=session_id,
+                file_count=len(file_paths),
+                ext_mix=_ext_mix(m["name"] for m in file_metadata),
+                table_count=len(session_tables),
+                total_rows=sum(p.row_count for p in file_profiles),
+                total_columns=sum(len(p.columns) for p in file_profiles),
+                relationships=len(relationships),
+                system_prompt_chars=len(system_prompt or ""),
+                prompt_chars=len(prompt or ""),
+                # .get() throughout: a stubbed engine leaves llm_meta empty, and a
+                # missing key here must not turn a successful analysis into a 500.
+                llm_provider=llm_meta.get("provider"),
+                llm_model=llm_meta.get("model"),
+                llm_attempts=llm_meta.get("llm_attempts"),
+                llm_provider_failures=llm_meta.get("provider_failures"),
+                llm_used_fallback=llm_meta.get("used_fallback"),
+                validation_failures=llm_meta.get("validation_failures"),
+                llm_ms=llm_ms,
+                recommendation_count=len(recs),
+                patterns=_tally(r.get("pattern_used") for r in recs),
+                chart_types=_tally((r.get("plotly_config") or {}).get("chart_type") for r in recs),
+                duration_ms=_elapsed_ms(started),
+            )
+
+            # One row per uploaded file, so "what data do people bring" is a query
+            # over shapes rather than a reconstruction from event props.
+            selected_for = {k: len(v) for k, v in (sheet_selections or {}).items()}
+            for meta in file_metadata:
+                track_file(
+                    session_id=session_id, client_id=client, name=meta["name"],
+                    ext=_ext_of(meta["name"]), size_bytes=meta["size"],
+                    rows=meta.get("rows"), columns=meta.get("columns"),
+                    sheets_selected=selected_for.get(meta["name"]),
+                    load_ok=meta.get("rows") is not None,
+                )
+
         except HTTPException:
             raise
 
@@ -413,6 +718,18 @@ def analyze_files_full(
             # developer the underlying cause; the 502 gives the UI a message to render
             # (Uploaddashboard already displays errBody.detail).
             print(f"[API] Analysis failed: {type(e).__name__}: {e}")
+            # The error *class* only - the message can carry a filename or a column
+            # name, and those are hashed everywhere else in this file.
+            track(
+                "analysis_failed", client=client, session=session_id,
+                error_type=type(e).__name__, stage="pipeline",
+                file_count=len(file_paths),
+                ext_mix=_ext_mix(m["name"] for m in file_metadata),
+                llm_provider=llm_meta.get("provider"),
+                llm_attempts=llm_meta.get("llm_attempts"),
+                validation_failures=llm_meta.get("validation_failures"),
+                duration_ms=_elapsed_ms(started),
+            )
             raise HTTPException(
                 status_code=502,
                 detail="AI analysis failed — check the server console and try again.",
@@ -532,7 +849,10 @@ def _describe_operations(operations):
 # [REAL] Used by Analysisdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/generate-report")
-def generate_report_endpoint(request: GenerateReportRequest):
+def generate_report_endpoint(
+    request: GenerateReportRequest,
+    client: Optional[str] = Depends(client_id),
+):
     """
     [REAL]
     Generate a structured report from AI recommendations.
@@ -582,8 +902,15 @@ def generate_report_endpoint(request: GenerateReportRequest):
     cached = (session.get("reports") or {}).get(report_type)
     if cached:
         print(f"[API] Returning cached report {report_type} for session {session_id}")
+        # An event, deliberately not a `reports` row. The browser prefetches every
+        # letter, so cache hits outnumber real builds - counting them as reports
+        # would inflate the "reports built" counter and drag every build_ms and
+        # pattern statistic toward whatever gets re-requested most.
+        track("report_generated", client=client, session=session_id,
+              letter=report_type, is_cache_hit=True)
         return {k: v for k, v in cached.items() if k != "data"}
 
+    started = time.perf_counter()
     try:
         print(f"\n[API] Generating report for session {session_id}, type {report_type}")
         
@@ -614,6 +941,12 @@ def generate_report_endpoint(request: GenerateReportRequest):
         # NameError on a report with no matching recommendation.
         chart = None
         axes_config = None
+        # Both failures below are swallowed so a user keeps their report. That makes
+        # them invisible in normal operation - nobody reads the console - so each
+        # one is counted instead. A rising chart-failure rate is exactly the kind of
+        # regression this whole phase exists to surface.
+        chart_failed = None
+        stats_failed = None
         if selected_rec:
             try:
                 axes_config = resolve_plotly_axes(
@@ -623,6 +956,7 @@ def generate_report_endpoint(request: GenerateReportRequest):
                 )
                 chart = build_chart_figure(report_df, axes_config)
             except Exception as e:
+                chart_failed = type(e).__name__
                 print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
 
         # Real statistics, computed from the report's own rows. These replace the
@@ -644,6 +978,7 @@ def generate_report_endpoint(request: GenerateReportRequest):
             )
         except Exception as e:
             # A stats failure must not cost the user their report or their chart.
+            stats_failed = type(e).__name__
             print(f"[API] Warning: Failed to compute report stats: {type(e).__name__}: {e}")
 
         # The user's own columns, without the two bookkeeping columns report_builder
@@ -703,14 +1038,46 @@ def generate_report_endpoint(request: GenerateReportRequest):
         # tests/test_generate_report_api.py still reads it.
         SESSIONS[session_id]["report"] = stored
 
+        build_ms = _elapsed_ms(started)
+        track(
+            "report_generated", client=client, session=session_id,
+            letter=report_type, is_cache_hit=False,
+            pattern=payload["pattern_used"], chart_type=payload["chart_type"],
+            report_rows=payload["report_rows"], rows_returned=len(rows),
+            rows_truncated=payload["rows_truncated"],
+            column_count=len(data_columns),
+            has_chart=chart is not None,
+            chart_error_type=chart_failed,
+            stats_error_type=stats_failed,
+            has_schema_warning=bool(schema_warning),
+            operation_count=len(payload["operations"] or []),
+            duration_ms=build_ms,
+        )
+        track_report(
+            session_id=session_id, client_id=client, letter=report_type,
+            pattern=payload["pattern_used"], chart_type=payload["chart_type"],
+            rows_returned=len(rows), is_truncated=payload["rows_truncated"],
+            build_ms=build_ms, ok=True, has_schema_warning=bool(schema_warning),
+        )
+
         return payload
-    
-    except HTTPException:
+
+    except HTTPException as e:
         # Already a deliberate HTTP error (e.g. the 422 above) - don't rewrap as a 500
+        track("report_failed", client=client, session=session_id, letter=report_type,
+              status_code=e.status_code, error_type="HTTPException",
+              duration_ms=_elapsed_ms(started))
+        track_report(session_id=session_id, client_id=client, letter=report_type,
+                     build_ms=_elapsed_ms(started), ok=False,
+                     error_type=f"HTTP{e.status_code}")
         raise
 
     except Exception as e:
         print(f"[API] Error generating report: {type(e).__name__}: {e}")
+        track("report_failed", client=client, session=session_id, letter=report_type,
+              error_type=type(e).__name__, duration_ms=_elapsed_ms(started))
+        track_report(session_id=session_id, client_id=client, letter=report_type,
+                     build_ms=_elapsed_ms(started), ok=False, error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
 
 # ============================================================================
@@ -818,7 +1185,11 @@ def export_status(session_id: str):
 # [REAL] Used by Reportsdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/export/{session_id}")
-def export_reports(session_id: str, request: ExportRequest):
+def export_reports(
+    session_id: str,
+    request: ExportRequest,
+    client: Optional[str] = Depends(client_id),
+):
     """[REAL] Download the selected reports as one PDF or HTML file.
 
     One report selected gives a single-report document; two or more give one
@@ -828,8 +1199,22 @@ def export_reports(session_id: str, request: ExportRequest):
     A POST rather than a GET because the browser-rendered chart PNGs travel in the
     body - too large for a query string.
     """
+    started = time.perf_counter()
     session, letters = _resolve_export(session_id, request.report_types)
     body, filename = _render_export(session, letters, request)
+
+    track(
+        "report_exported", client=client, session=session_id,
+        format=request.format, letters=letters, letter_count=len(letters),
+        include_appendix=request.include_appendix,
+        appendix_row_limit=request.appendix_row_limit,
+        # How many of the selected reports the browser actually supplied a chart
+        # image for. Short of letter_count means charts are silently missing from
+        # the document the user just downloaded.
+        chart_images=len({k.upper() for k in (request.chart_images or {})} & set(letters)),
+        bytes_out=len(body),
+        duration_ms=_elapsed_ms(started),
+    )
 
     return Response(
         content=body,
@@ -842,7 +1227,11 @@ def export_reports(session_id: str, request: ExportRequest):
 # [REAL] Used by Reportsdashboard.jsx
 # ----------------------------------------------------------------------------
 @app.post("/api/export/{session_id}/email")
-def email_reports(session_id: str, request: EmailExportRequest):
+def email_reports(
+    session_id: str,
+    request: EmailExportRequest,
+    client: Optional[str] = Depends(client_id),
+):
     """[REAL] Email the selected reports as a file attachment.
 
     Every failure below maps to its own status code and a message the user can act
@@ -896,8 +1285,23 @@ def email_reports(session_id: str, request: EmailExportRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except EmailSendFailed as e:
+        # e.kind is already a failure taxonomy the emailer maintains - reuse it
+        # rather than inventing a second one that can drift from it.
+        track("email_failed", client=client, session=session_id,
+              format=request.format, letter_count=len(letters),
+              recipient_count=len(recipients), error_type=f"EmailSendFailed.{e.kind}")
         status = {"auth": 502, "recipients": 400, "unreachable": 504}.get(e.kind, 502)
         raise HTTPException(status_code=status, detail=str(e))
+
+    track(
+        "report_emailed", client=client, session=session_id,
+        format=request.format, letters=letters, letter_count=len(letters),
+        # The count only. Addresses are personal data and answer no question the
+        # home page asks - "how many people get sent a report" does.
+        recipient_count=len(recipients),
+        has_message=bool(request.message),
+        bytes_out=len(body),
+    )
 
     return {
         "status": "sent",
