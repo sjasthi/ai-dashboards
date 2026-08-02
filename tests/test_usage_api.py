@@ -9,6 +9,7 @@ Every test runs against a tmp_path database via the autouse fixture in conftest.
 """
 
 import io
+import json
 import os
 
 import pytest
@@ -41,6 +42,21 @@ def _one_of(name):
 
 def _small_csv(name="orders.csv"):
     return [("files", (name, io.BytesIO(b"a,b\n1,2\n3,4\n"), "text/csv"))]
+
+
+def _two_sheet_workbook(name="sales.xlsx"):
+    """A real .xlsx with two populated sheets, built in memory. The sheet columns
+    can only be exercised by a genuine workbook - a CSV has no sheets to count."""
+    import pandas as pd
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame({"a": [1, 2], "b": [3, 4]}).to_excel(
+            writer, sheet_name="Orders", index=False)
+        pd.DataFrame({"c": [5, 6], "d": [7, 8]}).to_excel(
+            writer, sheet_name="Items", index=False)
+    buffer.seek(0)
+    return [("files", (name, buffer, "application/octet-stream"))]
 
 
 def _corpus_csv():
@@ -190,6 +206,51 @@ def test_analyze_records_whether_sheets_were_deselected(client, stub_llm):
     # be distinguishable rather than both looking like a default.
     assert client.post("/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER).status_code == 200
     assert _one_of("analysis_started")["props"]["has_selections"] is False
+
+
+def test_analyze_records_the_workbooks_own_sheet_count(client, stub_llm):
+    # The two columns answer different questions and must not collapse into one:
+    # sheet_count is how big the workbook is, sheets_selected is how much of it the
+    # picker asked for. Only one of two sheets is selected here, so a row reporting
+    # the same number twice means the count is being taken after the filter.
+    response = client.post(
+        "/api/analyze-full",
+        files=_two_sheet_workbook(),
+        data={"selections": json.dumps({"sales.xlsx": ["Orders"]})},
+        headers=CLIENT_HEADER,
+    )
+    assert response.status_code == 200, response.text
+
+    row = telemetry.recent_files()[0]
+    assert row["kind"] == "excel"
+    assert row["sheet_count"] == 2
+    assert row["sheets_selected"] == 1
+
+
+def test_analyze_records_a_sheet_count_when_no_selection_was_sent(client, stub_llm):
+    # No `selections` field at all - every sheet is analysed. The count is still
+    # recorded, but sheets_selected stays null rather than being backfilled from it:
+    # "the client never offered a choice" is not the same fact as "the user chose
+    # both", and only the null keeps them apart.
+    assert client.post(
+        "/api/analyze-full", files=_two_sheet_workbook(), headers=CLIENT_HEADER,
+    ).status_code == 200
+
+    row = telemetry.recent_files()[0]
+    assert row["sheet_count"] == 2
+    assert row["sheets_selected"] is None
+
+
+def test_analyze_records_a_csv_as_having_no_sheets(client, stub_llm):
+    # Null, not 1. A CSV has no worksheets at all, which is a different shape from
+    # a single-sheet workbook, and the ext column already says which is which.
+    assert client.post(
+        "/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER,
+    ).status_code == 200
+
+    row = telemetry.recent_files()[0]
+    assert row["kind"] == "csv"
+    assert row["sheet_count"] is None
 
 
 def test_analyze_failure_records_the_error_class_only(client, monkeypatch):

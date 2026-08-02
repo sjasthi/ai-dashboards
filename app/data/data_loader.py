@@ -11,6 +11,10 @@ class DataLoader:
         # be parsed back reliably, since sheet names and workbook stems may both
         # contain parentheses, so the mapping is recorded while it is still known.
         self.origins = {}
+        # Uploaded filename -> {"kind", "sheet_count"}: what the file turned out to
+        # be once opened. Keyed per upload rather than per table, so a workbook
+        # whose sheets were all deselected or empty still reports how many it holds.
+        self.sources = {}
 
     def add_files(self, file_paths, selections=None):
         """Add files, dispatching by extension. CSVs are read with encoding
@@ -28,11 +32,20 @@ class DataLoader:
                 self._add_excel(file_path, selections)
             else:
                 df = self._read_csv_with_encoding(file_path)
+                self._note(file_path, "csv")
                 self._record(file_path, df, os.path.basename(file_path))
 
     def _record(self, name, df, source):
         self.files.append((name, df))
         self.origins[os.path.basename(name)] = source
+
+    def _note(self, file_path, kind, sheet_count=None):
+        """What one uploaded file turned out to be. sheet_count stays None for a
+        CSV: it has no worksheets at all, which is a different fact from a
+        one-sheet workbook."""
+        self.sources[os.path.basename(file_path)] = {
+            "kind": kind, "sheet_count": sheet_count,
+        }
 
     def _add_excel(self, file_path, selections=None):
         try:
@@ -40,10 +53,15 @@ class DataLoader:
         except ValueError:
             # Handle CSV mislabeled as xlsx.
             df = self._read_csv_with_encoding(file_path)
+            self._note(file_path, "csv")
             self._record(file_path, df, os.path.basename(file_path))
             return
         base = os.path.basename(file_path)
         stem, ext = os.path.splitext(base)
+
+        # Before any filtering: this is the workbook's own size, not how much of
+        # it was asked for. read_excel(sheet_name=None) has already read them all.
+        self._note(file_path, "excel", len(sheets))
 
         chosen = (selections or {}).get(base)
 

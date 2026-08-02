@@ -66,13 +66,14 @@ ai-dashboards/
 │   ├── EXPORT_FEATURE.md           # Report export: architecture, renderer constraints,
 │   │                               # document design. READ BEFORE touching export code.
 │   ├── REACT_MIGRATION_SUMMARY.md  # Record of the vanilla-JS -> React migration
+│   ├── USAGE_DB_BROWSING.md        # Reading usage.db in a browser (Datasette) + useful SQL
 │   ├── course_requirements.md      # The original project brief
 │   ├── website mockup.png
 │   └── archive/                    # Superseded docs + retired code (see its README)
 ├── session_data/                   # Generated debug artifacts (gitignored)
 ├── .env.example                    # Config template — copy to .env
 ├── requirements.txt                # Python runtime dependencies (pip, exact pins)
-├── requirements-dev.txt            # The above plus pytest and ruff
+├── requirements-dev.txt            # The above plus pytest, ruff and datasette
 ├── README.MD
 ├── RUNNING_APP.md
 ├── project_file_structure.md       # This file

@@ -698,12 +698,21 @@ def analyze_files_full(
 
             # One row per uploaded file, so "what data do people bring" is a query
             # over shapes rather than a reconstruction from event props.
+            # sheet_count is the workbook's own size and sheets_selected is how
+            # much of it the picker asked for, so the pair reads as "3 of 5". They
+            # come from different places on purpose: the count is only knowable
+            # after the file is opened, and the selection only from the client.
+            # Absent selections leave it null - "the user chose nothing" and "the
+            # client never offered a choice" are not the same answer.
             selected_for = {k: len(v) for k, v in (sheet_selections or {}).items()}
             for meta in file_metadata:
+                source = loader.sources.get(meta["name"], {})
                 track_file(
                     session_id=session_id, client_id=client, name=meta["name"],
                     ext=_ext_of(meta["name"]), size_bytes=meta["size"],
                     rows=meta.get("rows"), columns=meta.get("columns"),
+                    kind=source.get("kind"),
+                    sheet_count=source.get("sheet_count"),
                     sheets_selected=selected_for.get(meta["name"]),
                     load_ok=meta.get("rows") is not None,
                 )
