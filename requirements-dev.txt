@@ -5,3 +5,9 @@
 
 pytest==9.1.1
 ruff==0.15.17
+
+# Browsing usage.db - see docs/USAGE_DB_BROWSING.md. Dev-only on purpose: the app
+# writes the database through the stdlib sqlite3 module and never reads it back
+# through Datasette, so nothing in requirements.txt depends on this.
+datasette==0.65.2
+datasette-pretty-json==0.3    # renders the events.props JSON column readably
