@@ -57,3 +57,53 @@ export function getClientId() {
 export function clientIdHeaders() {
   return { 'X-Client-Id': getClientId() };
 }
+
+const VISIT_KEY = 'aidash_visit';
+
+/**
+ * True once per browser session, false every time after.
+ *
+ * This is what makes the home page's visitor count behave the way it reads: a
+ * refresh or a tab switch is the same visit, while closing the browser and coming
+ * back is a new one. The mechanism is sessionStorage rather than a timer or an
+ * expiry timestamp, because sessionStorage is *already* scoped to exactly that
+ * lifetime - the browser clears it on exit, so there is no window to tune and
+ * nothing to get wrong at a boundary.
+ *
+ * Note this is per tab, not per browser: opening the app in a second tab counts as
+ * a second visit. That is sessionStorage's own definition of a session and is the
+ * behaviour a visitor count should have anyway.
+ *
+ * Falls back to counting the visit when storage is unavailable. Over-counting an
+ * arrival is a far better failure than a landing page that throws.
+ */
+export function isNewVisit() {
+  return firstThisSession(VISIT_KEY);
+}
+
+const ACTIVATED_KEY = 'aidash_activated';
+
+/**
+ * True the first time an analysis succeeds in this browser session.
+ *
+ * The difference between a visitor and a user. Landing on the page is a visit;
+ * actually putting data through the pipeline is what makes someone a user, and
+ * counting the two as the same thing would make the headline number mostly
+ * measure curiosity. Analysing several files in one sitting is still one user -
+ * the same "once per browser session" rule the visit count uses.
+ */
+export function isNewlyActiveUser() {
+  return firstThisSession(ACTIVATED_KEY);
+}
+
+/** True the first time this key is asked for in a browser session, false after.
+ *  Falls back to true when storage is blocked - over-counting beats throwing. */
+function firstThisSession(key) {
+  try {
+    if (window.sessionStorage.getItem(key)) return false;
+    window.sessionStorage.setItem(key, '1');
+    return true;
+  } catch {
+    return true;
+  }
+}

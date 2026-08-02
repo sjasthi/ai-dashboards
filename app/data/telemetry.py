@@ -282,7 +282,29 @@ def stats():
         with _connect() as conn:
             conn.executescript(_DDL)
             return {
+                # Three different questions, deliberately all answered rather than
+                # collapsed into one number that would have to mean whichever the
+                # caller assumed.
+                #
+                # `visits`  - arrivals. One row per browser session. Includes people
+                #             who read the landing page and left.
+                # `users`   - arrivals that actually put data through the pipeline.
+                #             One row per browser session, on its first successful
+                #             analysis. This is the headline figure: someone who
+                #             looked around without uploading is a visitor, not a
+                #             user, and counting them as one would make the number
+                #             mostly measure curiosity.
+                # `clients` - distinct browsers ever seen, across all time. Unlike
+                #             the two above it does not reset when a browser closes,
+                #             so it answers "how many different people" rather than
+                #             "how many times".
+                "visits": _scalar(
+                    conn, "SELECT COUNT(*) FROM events WHERE event = 'visit_started'"
+                ),
                 "users": _scalar(
+                    conn, "SELECT COUNT(*) FROM events WHERE event = 'user_activated'"
+                ),
+                "clients": _scalar(
                     conn,
                     "SELECT COUNT(DISTINCT client_id) FROM events WHERE client_id IS NOT NULL",
                 ),
@@ -321,8 +343,8 @@ def empty_stats():
     frontend contract is defined in one place rather than implied by a failure
     path."""
     return {
-        "users": 0, "sessions": 0, "files_processed": 0, "reports_built": 0,
-        "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
+        "visits": 0, "users": 0, "clients": 0, "sessions": 0, "files_processed": 0,
+        "reports_built": 0, "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
     }
 
 

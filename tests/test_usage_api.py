@@ -136,10 +136,10 @@ def test_inspect_counts_an_unreadable_file_without_failing_the_batch(client):
 
 def test_inspect_works_without_a_client_id_header(client):
     # curl, an older cached bundle, or a browser with localStorage blocked. The
-    # event is still recorded; it just doesn't count toward distinct users.
+    # event is still recorded; it just doesn't count toward distinct browsers.
     assert client.post("/api/inspect", files=_small_csv()).status_code == 200
     assert _one_of("files_inspected")["client_id"] is None
-    assert telemetry.stats()["users"] == 0
+    assert telemetry.stats()["clients"] == 0
 
 
 # ============================================================================
@@ -283,9 +283,71 @@ def test_a_prop_named_like_a_parameter_does_not_break_the_endpoint(client):
 # GET /api/stats
 # ============================================================================
 
+def test_visit_started_is_an_accepted_event(client):
+    response = client.post("/api/events", json={"events": [{"event": "visit_started"}]},
+                           headers=CLIENT_HEADER)
+    assert response.json() == {"accepted": 1, "rejected": []}
+
+
+def test_user_activated_is_an_accepted_event(client):
+    response = client.post("/api/events", json={"events": [{"event": "user_activated"}]},
+                           headers=CLIENT_HEADER)
+    assert response.json() == {"accepted": 1, "rejected": []}
+
+
+def test_a_second_visit_from_the_same_browser_counts_again(client):
+    for _ in range(2):
+        client.post("/api/events", json={"events": [{"event": "visit_started"}]},
+                    headers=CLIENT_HEADER)
+
+    body = client.get("/api/stats").json()
+    assert body["visits"] == 2   # two sittings
+    assert body["clients"] == 1  # one browser
+
+
+def test_browsing_without_analysing_is_a_visit_but_not_a_user(client):
+    # Someone opens the landing page, reads it, clicks around, and leaves. The
+    # headline number must not move.
+    client.post("/api/events", json={"events": [
+        {"event": "visit_started"}, {"event": "tab_changed", "props": {"tab": "reports"}},
+    ]}, headers=CLIENT_HEADER)
+
+    body = client.get("/api/stats").json()
+    assert body["visits"] == 1
+    assert body["users"] == 0
+
+
+def test_analysing_alone_does_not_count_a_user(client, stub_llm):
+    # The server sees the analysis, but it cannot know whether this browser had
+    # already run one earlier in the same sitting - so the count comes from the
+    # browser's user_activated event, never inferred from the upload itself.
+    client.post("/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER)
+
+    body = client.get("/api/stats").json()
+    assert body["files_processed"] == 1
+    assert body["users"] == 0
+
+
+def test_a_full_visit_then_analysis_counts_one_user(client, stub_llm):
+    client.post("/api/events", json={"events": [{"event": "visit_started"}]},
+                headers=CLIENT_HEADER)
+    client.post("/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER)
+    client.post("/api/events", json={"events": [{"event": "user_activated"}]},
+                headers=CLIENT_HEADER)
+    # A second analysis in the same sitting fires no further activation.
+    client.post("/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER)
+
+    body = client.get("/api/stats").json()
+    assert body["visits"] == 1
+    assert body["users"] == 1
+    assert body["files_processed"] == 2
+
+
 def test_stats_is_zeroed_before_anything_happens(client):
     body = client.get("/api/stats").json()
+    assert body["visits"] == 0
     assert body["users"] == 0
+    assert body["clients"] == 0
     assert body["files_processed"] == 0
     assert body["reports_built"] == 0
     assert body["ext_breakdown"] == {}
@@ -296,19 +358,18 @@ def test_stats_reflects_a_real_run(client, stub_llm):
     client.post("/api/analyze-full", files=_small_csv(), headers=CLIENT_HEADER)
 
     body = client.get("/api/stats").json()
-    assert body["users"] == 1
     assert body["sessions"] == 1
     assert body["files_processed"] == 1
     assert body["ext_breakdown"] == {".csv": 1}
 
 
-def test_stats_counts_two_browsers_as_two_users(client, stub_llm):
+def test_stats_counts_two_browsers_as_two_clients(client, stub_llm):
     client.post("/api/analyze-full", files=_small_csv(), headers={"X-Client-Id": "browser-a"})
     client.post("/api/analyze-full", files=_small_csv(), headers={"X-Client-Id": "browser-b"})
     client.post("/api/analyze-full", files=_small_csv(), headers={"X-Client-Id": "browser-a"})
 
     body = client.get("/api/stats").json()
-    assert body["users"] == 2      # the repeat visit is not a third user
+    assert body["clients"] == 2    # the repeat run is not a third browser
     assert body["sessions"] == 3   # but it is a third session
 
 

@@ -100,15 +100,112 @@
 
 /* ---------- page + header ---------- */
 
-/* Every step shares one centred column, so moving Upload -> Analysis -> Results
-   doesn't slide the content sideways under the nav. */
+/* All four pages are one centred column, so moving Home -> Upload -> Analysis ->
+   Results doesn't slide the content sideways under the nav. */
 .reports-page,
 .upload-page,
-.analysis-page {
-  max-width: 1280px;
+.analysis-page,
+.home-page {
+  max-width: var(--content-max);
   margin: 0 auto;
   font-family: var(--font-ui);
   color: var(--color-text-primary);
+}
+
+/* Results keeps the wider measure the others gave up. It is the only page whose
+   content is sized rather than read: the chart sits beside a 340px insight rail,
+   and the report table is as wide as the user's own columns make it. Narrowing it
+   to --content-max squeezed the chart to ~540px and pushed wide tables into
+   horizontal scrolling, which the other three pages have no equivalent of. */
+.reports-page { max-width: 1280px; }
+
+/* ---------- home ---------- */
+
+.home-hero {
+  margin: 12px 0 24px;
+  font-size: var(--size-lg);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.home-steps {
+  padding: 24px 28px;
+}
+
+.home-steps__title {
+  margin: 0 0 4px;
+  font-size: var(--size-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-steps__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.home-step {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.home-step:last-child { border-bottom: none; }
+
+/* Fixed size so the three numerals line up regardless of the text beside them. */
+.home-step__num {
+  flex: 0 0 24px;
+  height: 24px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: var(--color-accent-muted);
+  color: var(--color-accent);
+  font-size: var(--size-xs);
+  font-weight: var(--weight-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-step__title {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.home-step__body {
+  margin: 2px 0 0;
+  max-width: 62ch;
+  font-size: var(--size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.home-cta {
+  margin-top: 20px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--size-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.home-cta:hover { background: var(--color-accent-hover); }
+
+/* Scope for anyone who goes looking. Deliberately the quietest text on the page:
+   smallest size, muted ink, no border or background of its own, so it reads as a
+   footnote to the steps rather than a second thing competing with them. */
+.home-capabilities {
+  margin: 16px 0 0;
+  font-size: var(--size-xs);
+  line-height: 1.6;
+  color: var(--color-text-muted);
 }
 
 /* ---------- busy spinner ---------- */
@@ -250,6 +347,10 @@
   gap: 16px;
   margin-bottom: 20px;
 }
+
+/* The home page shows three counters, not four. Without this they would stretch
+   across three quarters of the row and leave a gap where a fourth tile isn't. */
+.kpi-row--three { grid-template-columns: repeat(3, 1fr); }
 
 .stat-tile {
   padding: 18px 20px;
@@ -900,6 +1001,10 @@
 @media (max-width: 1080px) {
   .results-grid { grid-template-columns: minmax(0, 1fr); }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  /* Four tiles fold to 2x2 cleanly; three fold to 2+1 and leave a visible hole
+     next to the last one. These hold a label and a number, so they stay abreast
+     until the 640px rule below drops every KPI row to a single column. */
+  .kpi-row--three { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 860px) {

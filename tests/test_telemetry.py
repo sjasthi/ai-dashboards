@@ -273,13 +273,70 @@ def test_stats_on_an_empty_database_returns_zeros(db):
     assert telemetry.stats() == telemetry.empty_stats()
 
 
-def test_stats_counts_distinct_users_and_sessions(db):
+def test_visits_counts_arrivals_not_browsers(db):
+    # One row per browser session, so the same client arriving twice is two visits
+    # even though it is one browser - that is the difference from `clients`.
+    telemetry.log_event("visit_started", client_id="c1")
+    telemetry.log_event("visit_started", client_id="c1")
+    telemetry.log_event("visit_started", client_id="c2")
+
+    result = telemetry.stats()
+    assert result["visits"] == 3
+    assert result["clients"] == 2
+
+
+def test_a_visitor_who_never_analyses_is_not_a_user(db):
+    # The distinction the home page's headline number rests on. Landing on the
+    # page, reading it, and leaving must not count as a user.
+    telemetry.log_event("visit_started", client_id="c1")
+    telemetry.log_event("tab_changed", client_id="c1")
+
+    result = telemetry.stats()
+    assert result["visits"] == 1
+    assert result["users"] == 0
+
+
+def test_a_visitor_becomes_a_user_on_activation(db):
+    telemetry.log_event("visit_started", client_id="c1")
+    telemetry.log_event("user_activated", client_id="c1")
+
+    result = telemetry.stats()
+    assert result["visits"] == 1
+    assert result["users"] == 1
+
+
+def test_users_never_exceeds_visits_for_one_session(db):
+    # The frontend fires user_activated at most once per browser session, so a
+    # sitting with several analyses is still one user.
+    telemetry.log_event("visit_started", client_id="c1")
+    telemetry.log_event("user_activated", client_id="c1")
+    telemetry.log_event("analysis_completed", client_id="c1")
+    telemetry.log_event("analysis_completed", client_id="c1")
+
+    assert telemetry.stats()["users"] == 1
+
+
+def test_visits_ignores_other_events(db):
+    telemetry.log_event("files_inspected", client_id="c1")
+    telemetry.log_event("report_generated", client_id="c1")
+    result = telemetry.stats()
+    assert result["visits"] == 0
+    assert result["users"] == 0
+
+
+def test_counters_are_zero_on_an_empty_database(db):
+    for field in ("visits", "users", "clients"):
+        assert telemetry.stats()[field] == 0
+        assert telemetry.empty_stats()[field] == 0
+
+
+def test_stats_counts_distinct_clients_and_sessions(db):
     telemetry.log_event("analysis_started", client_id="c1", session_id="s1")
     telemetry.log_event("analysis_completed", client_id="c1", session_id="s1")
     telemetry.log_event("analysis_started", client_id="c2", session_id="s2")
 
     result = telemetry.stats()
-    assert result["users"] == 2      # not 3 - the same client twice is one user
+    assert result["clients"] == 2    # not 3 - the same client twice is one browser
     assert result["sessions"] == 2
 
 

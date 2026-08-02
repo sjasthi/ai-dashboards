@@ -83,12 +83,18 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
       )}
 
       {/* Only this card's own state disables this card. Gating on "any report is
-          generating" would grey out every button while the background queue runs. */}
+          generating" would grey out every button while the background queue runs.
+
+          minWidth pins the button against its own label changing. Without it the
+          three labels measured 160px, 118px and 133px, so every card's button
+          physically resized twice as the background queue walked past it - three
+          buttons jumping within half a second, which read as a flicker. */}
       <button
         onClick={() => onSelect(index)}
         disabled={isGenerating}
         style={{
           padding: '8px 18px',
+          minWidth: '150px',
           background: isSelected ? '#1d4ed8' : '#2563eb',
           color: 'white',
           border: 'none',
@@ -98,9 +104,13 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
           cursor: isGenerating ? 'not-allowed' : 'pointer'
         }}
       >
-        {isGenerating
-          ? 'Generating…'
-          : errorMsg ? 'Retry' : isBuilt ? 'View this report' : 'Generate this report'}
+        {/* A card that isn't built yet isn't waiting to be asked - the background
+            queue in App.jsx builds every recommended report as soon as the
+            analysis lands. "Generate this report" therefore described a state the
+            user never acts on, showed for about a third of a second, and was then
+            replaced. Queued and building are the same thing to a reader, so they
+            share one label and the button changes text once instead of twice. */}
+        {errorMsg ? 'Retry' : isBuilt ? 'View this report' : 'Generating…'}
       </button>
     </div>
   );

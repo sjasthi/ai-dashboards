@@ -272,6 +272,15 @@ def _elapsed_ms(started):
 # could write arbitrary event names into the usage database and make every
 # breakdown meaningless. Adding a browser event means adding it here.
 BROWSER_EVENTS = frozenset({
+    # One per browser session, sent by the home page. The server cannot see an
+    # arrival for itself - a visitor who only reads the landing page never touches
+    # another endpoint - so this is the only record that anyone showed up.
+    "visit_started",
+    # Fired once per browser session, the first time an analysis succeeds. This is
+    # what promotes a visitor to a user. The server cannot infer it: it sees the
+    # analysis, but not whether this browser had already run one earlier in the
+    # same sitting.
+    "user_activated",
     "report_viewed",
     "report_retry_clicked",
     "compare_all_opened",
@@ -329,8 +338,8 @@ def telemetry_unavailable_stats():
     """Same shape as a real response, so the frontend has one contract to code
     against whether or not telemetry imported."""
     return {
-        "users": 0, "sessions": 0, "files_processed": 0, "reports_built": 0,
-        "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
+        "visits": 0, "users": 0, "clients": 0, "sessions": 0, "files_processed": 0,
+        "reports_built": 0, "ext_breakdown": {}, "pattern_breakdown": {}, "daily": [],
         "available": False,
     }
 

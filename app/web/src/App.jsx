@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
@@ -6,7 +7,9 @@ import SettingsDashboard from './components/Settingsdashboard';
 import { REPORT_TYPE_LETTERS, generateReport } from './api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('upload');
+  // Home is the landing tab: arriving on Upload gave no answer to "what is this",
+  // and the visit counter has nowhere to be recorded from otherwise.
+  const [activeTab, setActiveTab] = useState('home');
 
   // Raw File objects picked in the Upload tab
   const [files, setFiles] = useState([]);
@@ -221,7 +224,7 @@ export default function App() {
         </div>
 
         <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['upload', 'analysis', 'reports', 'settings'].map(tab => (
+          {['home', 'upload', 'analysis', 'reports', 'settings'].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </div>
@@ -231,6 +234,9 @@ export default function App() {
       </nav>
 
       <main className="app-main">
+        {activeTab === 'home' && (
+          <HomeDashboard onStart={() => setActiveTab('upload')} />
+        )}
         {activeTab === 'upload' && (
           <UploadDashboard
             files={files}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { analyzeFull, inspectFiles } from '../api';
+import { analyzeFull, inspectFiles, sendEvents } from '../api';
+import { isNewlyActiveUser } from '../clientId';
 import { exactNumber, formatBytes, truncateMiddle } from '../format';
 
 // This file used to declare its own `const API_BASE` and build its own fetches, so
@@ -223,6 +224,13 @@ export default function UploadDashboard({
       setFileProfiles(data.file_profiles);
       setStatus('done');
 
+      // Only now does this browser session count as a user rather than a visitor.
+      // Fired here, on the success path, so a failed analysis doesn't promote
+      // someone who never got a result. sendEvents swallows its own failures.
+      if (isNewlyActiveUser()) {
+        sendEvents([{ event: 'user_activated', session_id: data.session_id }]);
+      }
+
       if (onDone) onDone();
     } catch (err) {
       setStatus('error');
@@ -247,7 +255,9 @@ export default function UploadDashboard({
         border: '1px solid #e2e8f0',
         borderRadius: '10px',
         padding: '32px',
-        maxWidth: '700px'
+        // No max-width: the page wrapper already constrains this to the shared
+        // centred column, and a second cap here left the card narrower than the
+        // column it sits in, so Upload looked misaligned next to every other tab.
       }}>
         <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', color: '#1e293b' }}>Upload Data</h2>
         <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#64748b' }}>
