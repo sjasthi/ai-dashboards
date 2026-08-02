@@ -50,11 +50,6 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 # LLM_MAX_RETRIES=1 - to trade quota for one correction round when needed.
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "0"))
 
-# The local fallback model. Named rather than repeated as a literal at each chat()
-# call so telemetry reports the model that was actually used: an attribution that
-# can drift from the request it describes is worse than no attribution.
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5")
-
 # ============================================================================
 # CLIENTS
 # ============================================================================
@@ -78,7 +73,7 @@ except Exception as _schema_err:  # pragma: no cover - defensive
 # ============================================================================
 
 
-def send_prompt(prompt, session_id=None, system_prompt=None, attribution=None):
+def send_prompt(prompt, session_id=None, system_prompt=None):
     """
     Args:
         prompt: The user/data portion of the prompt to send to the AI
@@ -89,61 +84,29 @@ def send_prompt(prompt, session_id=None, system_prompt=None, attribution=None):
             prefix across requests - identical every call, it is what providers
             can prefix-cache, and it keeps the "how to think" text out of the
             per-dataset user message.
-        attribution: Optional dict, updated in place with which provider actually
-            answered - see below.
 
     Returns:
         Cleaned & parsed JSON object as dict
 
     Raises:
         ValueError: If response cannot be parsed as valid JSON
-
-    Note on `attribution`. This function silently falls back through the provider
-    chain, so the configured AI_BACKEND records *intent*, not what happened -- it
-    is wrong every time a fallback fires, and normal operation gives no signal
-    that the primary provider is failing. Passing a dict here has it filled with
-    `provider`, `model`, `failed_over`, `failed_providers` and `attempt_count`.
-
-    Deliberately an out-parameter rather than a changed return type: the return
-    value is consumed by get_validated_recommendations and returning a tuple would
-    break it. A module-level "last provider" variable would be simpler still and
-    also wrong -- these handlers run in Starlette's threadpool, so two concurrent
-    analyses would overwrite each other's attribution. A dict owned by the caller
-    cannot be shared by accident.
     """
     raw_response = None
 
     if AI_BACKEND == "groq" and not GROQ_API_KEY:
         print("[AI_Engine] AI_BACKEND=groq but GROQ_API_KEY is not set, skipping Groq")
 
-    chosen = (None, None)
-    failed = []
-
-    for label, provider, model, send in _remote_providers():
+    for label, send in _remote_providers():
         try:
             raw_response = send(system_prompt, prompt)
-            chosen = (provider, model)
             break
         except Exception as e:
-            failed.append(provider)
             print(f"[AI_Engine] {label} request failed ({e})")
 
     if raw_response is None:
         # Local Ollama is the last resort rather than one of the tiers above: it
         # has no quota to exhaust, so it can't fail the way the hosted ones do.
         raw_response = _send_prompt_ollama(system_prompt, prompt)
-        chosen = ("ollama", OLLAMA_MODEL)
-
-    if attribution is not None:
-        attribution.update({
-            "provider": chosen[0],
-            "model": chosen[1],
-            # True whenever the first available tier was not the one that answered,
-            # which is the number worth watching over time.
-            "failed_over": bool(failed),
-            "failed_providers": list(failed),
-            "attempt_count": attribution.get("attempt_count", 0) + 1,
-        })
 
     print(f"[AI_Engine] Received response from LLM")
 
@@ -168,7 +131,6 @@ def get_validated_recommendations(
     tables: dict = None,
     correction_prompt: str = None,
     system_prompt: str = None,
-    attribution: dict = None,
 ) -> dict:
     """
     Like send_prompt, but validates the response against RecommendationsResponse
@@ -199,16 +161,9 @@ def get_validated_recommendations(
     for attempt in range(max_retries + 1):
         # system_prompt stays constant across attempts (it's the cacheable prefix);
         # only the user/data attempt_prompt grows with correction feedback below.
-        # attribution is passed through on every attempt, so it ends up describing
-        # the response actually returned, and its attempt_count accumulates across
-        # retries rather than being reset by the last call.
-        raw_response = send_prompt(attempt_prompt, session_id=session_id,
-                                   system_prompt=system_prompt,
-                                   attribution=attribution)
+        raw_response = send_prompt(attempt_prompt, session_id=session_id, system_prompt=system_prompt)
         try:
             parsed = parse_and_validate(raw_response, valid_filenames, tables)
-            if attribution is not None:
-                attribution["validation_failures"] = attempt
             return parsed.model_dump(exclude_none=True)
         except ValueError as e:
             last_error = e
@@ -240,20 +195,17 @@ def _remote_providers():
     providers = []
 
     if GEMINI_API_KEY:
-        providers.append((
-            f"Gemini model '{GEMINI_MODEL}'", "gemini", GEMINI_MODEL,
-            lambda s, u: _send_prompt_gemini(s, u, GEMINI_MODEL),
-        ))
+        providers.append(
+            (f"Gemini model '{GEMINI_MODEL}'", lambda s, u: _send_prompt_gemini(s, u, GEMINI_MODEL))
+        )
 
     if AI_BACKEND == "groq" and GROQ_API_KEY:
-        providers.append((
-            f"Groq model '{GROQ_MODEL}'", "groq", GROQ_MODEL,
-            lambda s, u: _send_prompt_groq(s, u, GROQ_MODEL),
-        ))
+        providers.append(
+            (f"Groq model '{GROQ_MODEL}'", lambda s, u: _send_prompt_groq(s, u, GROQ_MODEL))
+        )
         if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
             providers.append((
-                f"Groq fallback model '{GROQ_FALLBACK_MODEL}'", "groq_fallback",
-                GROQ_FALLBACK_MODEL,
+                f"Groq fallback model '{GROQ_FALLBACK_MODEL}'",
                 lambda s, u: _send_prompt_groq(s, u, GROQ_FALLBACK_MODEL),
             ))
 
@@ -281,7 +233,7 @@ def _send_prompt_ollama(system_prompt, user_prompt) -> str:
     if _RESPONSE_JSON_SCHEMA is not None:
         try:
             response: ChatResponse = chat(
-                model=OLLAMA_MODEL,
+                model='qwen2.5',
                 format=_RESPONSE_JSON_SCHEMA,
                 options={'temperature': 0},
                 messages=messages,
@@ -292,7 +244,7 @@ def _send_prompt_ollama(system_prompt, user_prompt) -> str:
                   f"retrying with plain JSON mode")
 
     response = chat(
-        model=OLLAMA_MODEL,
+        model='qwen2.5',
         format='json',
         options={'temperature': 0},
         messages=messages,

@@ -109,9 +109,6 @@ pytest
 | [RUNNING_APP.md](RUNNING_APP.md) | Detailed run instructions, API endpoints, troubleshooting |
 | [project_file_structure.md](project_file_structure.md) | Current repository layout |
 | [app/web/README.md](app/web/README.md) | Frontend architecture and styling |
-| [docs/FEATURE_GUIDE.md](docs/FEATURE_GUIDE.md) | **How to use** the test plan, usage tracking and the saved report browser |
-| [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | File-loading test plan: scope, approach, pass/fail criteria, defects found |
-| [docs/USAGE_TRACKING.md](docs/USAGE_TRACKING.md) | Usage tracking and the developer report browser: schema, privacy rules, endpoints |
 | [docs/EXPORT_FEATURE.md](docs/EXPORT_FEATURE.md) | Report export (PDF / HTML / email): architecture, renderer constraints, document design |
 | [docs/REACT_MIGRATION_SUMMARY.md](docs/REACT_MIGRATION_SUMMARY.md) | Record of the vanilla-JS → React migration |
 | [docs/course_requirements.md](docs/course_requirements.md) | The original project brief |

@@ -1,7 +1,5 @@
 /** Shared backend calls, so report generation has one implementation. */
 
-import { clientHeaders } from './clientId';
-
 export const API_BASE = 'http://localhost:8000';
 
 export const REPORT_TYPE_LETTERS = ['A', 'B', 'C', 'D'];
@@ -9,7 +7,7 @@ export const REPORT_TYPE_LETTERS = ['A', 'B', 'C', 'D'];
 async function postJson(path, body) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...clientHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 
@@ -50,7 +48,7 @@ function filenameFromDisposition(header) {
 async function postForBinary(path, body) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...clientHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 
@@ -98,38 +96,7 @@ export function emailReports(sessionId, { recipients, message, ...options }) {
 
 /** Which reports can be exported, and whether email is set up server-side. */
 export async function fetchExportStatus(sessionId) {
-  const response = await fetch(`${API_BASE}/api/export/${sessionId}/status`, {
-    headers: clientHeaders(),
-  });
+  const response = await fetch(`${API_BASE}/api/export/${sessionId}/status`);
   if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
   return response.json();
-}
-
-/* ------------------------------------------------------------------ telemetry */
-
-/** Aggregate usage counters for the home page. */
-export async function fetchStats() {
-  const response = await fetch(`${API_BASE}/api/stats`, { headers: clientHeaders() });
-  if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
-  return response.json();
-}
-
-/**
- * Report interface events the backend cannot observe for itself.
- *
- * Fire-and-forget by design: a failed analytics call must never surface to the
- * user or block what they were doing, so the promise is swallowed rather than
- * propagated. Callers do not await it.
- */
-export function trackEvent(event, props = {}, sessionId = null) {
-  try {
-    fetch(`${API_BASE}/api/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...clientHeaders() },
-      body: JSON.stringify({ event, props, session_id: sessionId }),
-      keepalive: true,
-    }).catch(() => {});
-  } catch {
-    /* never let tracking break the caller */
-  }
 }
