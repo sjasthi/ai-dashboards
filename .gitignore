@@ -29,6 +29,12 @@ session_data/
 # Test output
 test_results/
 
+# Usage tracking database. The -wal and -shm siblings are created by
+# PRAGMA journal_mode=WAL and are just as machine-local as the .db itself.
+usage.db
+usage.db-wal
+usage.db-shm
+
 # Ad-hoc test corpus. Developers drop spreadsheets here to have them checked;
 # the files are theirs and may be large or private, so nothing but the README
 # is tracked. Recorded expectations for these live in inbox/baseline.json and
