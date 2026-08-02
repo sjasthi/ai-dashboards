@@ -25,3 +25,14 @@ build/
 
 # Session data
 session_data/
+
+# Test output
+test_results/
+
+# Ad-hoc test corpus. Developers drop spreadsheets here to have them checked;
+# the files are theirs and may be large or private, so nothing but the README
+# is tracked. Recorded expectations for these live in inbox/baseline.json and
+# are ignored by the same rule - the committed tests/data/baseline.json must
+# only describe files everyone actually has.
+tests/data/inbox/*
+!tests/data/inbox/README.md

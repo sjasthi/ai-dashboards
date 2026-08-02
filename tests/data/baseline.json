@@ -1,0 +1,1423 @@
+{
+  "extensions/csv/accounts.csv": {
+    "sha256": "e5242324768a563fc632cddfed49a29acbbf2892b8a3c6453cc9650de9ae0358",
+    "kind": "csv",
+    "rows": 85,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 85,
+        "columns": 7,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "accounts.csv": {
+        "rows": 85,
+        "columns": 7
+      }
+    }
+  },
+  "extensions/csv/behavior.csv": {
+    "sha256": "f39729ffd9cca6919d9ffd5fb8e78b0a604db44952d89ba89600b0341f71693a",
+    "kind": "csv",
+    "rows": 25000,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 25000,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "behavior.csv": {
+        "rows": 25000,
+        "columns": 8
+      }
+    }
+  },
+  "extensions/csv/colors.csv": {
+    "sha256": "1aa4c2a394c97bbd7d3aa1d0489f2908f66c522a15b4bf56c5c867ed7fd38f40",
+    "kind": "csv",
+    "rows": 135,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 135,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "colors.csv": {
+        "rows": 135,
+        "columns": 4
+      }
+    }
+  },
+  "extensions/csv/customers.csv": {
+    "sha256": "024566f26b0cac8896a096963d765fed055cae3485e319dfe714371464ca8663",
+    "kind": "csv",
+    "rows": 25000,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 25000,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "customers.csv": {
+        "rows": 25000,
+        "columns": 8
+      }
+    }
+  },
+  "extensions/csv/data_dictionary.csv": {
+    "sha256": "22b34e498d07e3d7f322afdbf81d70a5dc0a389792944e50ca2af86a3597f0af",
+    "kind": "csv",
+    "rows": 21,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 21,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "data_dictionary.csv": {
+        "rows": 21,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/csv/inventories.csv": {
+    "sha256": "c3bc331a60ea326f8bdd1a7bae7a3d2c1e3f2749c4e911d6bd830513227ea221",
+    "kind": "csv",
+    "rows": 11681,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 11681,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventories.csv": {
+        "rows": 11681,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/csv/inventory_sets.csv": {
+    "sha256": "041403317cfa5db619bbd6b85817c9369b996cdafa5c8b17c9e588368ead73d0",
+    "kind": "csv",
+    "rows": 2846,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 2846,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventory_sets.csv": {
+        "rows": 2846,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/csv/part_categories.csv": {
+    "sha256": "83fbfd83609b35326fb017a9f8c1e4f3009e4be3b906effd16a29676cedcaecf",
+    "kind": "csv",
+    "rows": 57,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 57,
+        "columns": 2,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "part_categories.csv": {
+        "rows": 57,
+        "columns": 2
+      }
+    }
+  },
+  "extensions/csv/products.csv": {
+    "sha256": "7c1c8cbbdb6d4c286902e1985eeb529a36366d6a43f43cd4a93c4b1da2a6eb84",
+    "kind": "csv",
+    "rows": 7,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "products.csv": {
+        "rows": 7,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/csv/sales_pipeline.csv": {
+    "sha256": "825ce8f6c32d4009548b468df3173d55a46fd73f2531f532c5459371dc52adf2",
+    "kind": "csv",
+    "rows": 8800,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 8800,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_pipeline.csv": {
+        "rows": 8800,
+        "columns": 8
+      }
+    }
+  },
+  "extensions/csv/sales_teams.csv": {
+    "sha256": "aeff1272ebe196f5a27e3fc0578aa27abf48ed9ae461aa344fb95990e5ad8bd1",
+    "kind": "csv",
+    "rows": 35,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 35,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_teams.csv": {
+        "rows": 35,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/csv/sets.csv": {
+    "sha256": "76c8ff6bed1a396b5ceb9956514f1199ed5b92c1d300f73fb3626f236b698b63",
+    "kind": "csv",
+    "rows": 11673,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 11673,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sets.csv": {
+        "rows": 11673,
+        "columns": 5
+      }
+    }
+  },
+  "extensions/csv/themes.csv": {
+    "sha256": "7b0c165b3a1c17e4eb83197e8b6793db8f1994fefc2a536d15617dd5c77cca77",
+    "kind": "csv",
+    "rows": 614,
+    "sheets": [
+      {
+        "name": null,
+        "rows": 614,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "themes.csv": {
+        "rows": 614,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/accounts.xls": {
+    "sha256": "ae9617653676ccee3719ad1e485d2e03499c694bb13e6b6d5aed0b58ea21bffc",
+    "kind": "excel",
+    "rows": 85,
+    "sheets": [
+      {
+        "name": "accounts",
+        "rows": 85,
+        "columns": 7,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "accounts.xls": {
+        "rows": 85,
+        "columns": 7
+      }
+    }
+  },
+  "extensions/xls/colors.xls": {
+    "sha256": "e4e8bad3bf0fe60d540d0cf91febdcf3b95619ff1307fcfb77f0a2b7c53a578a",
+    "kind": "excel",
+    "rows": 135,
+    "sheets": [
+      {
+        "name": "colors",
+        "rows": 135,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "colors.xls": {
+        "rows": 135,
+        "columns": 4
+      }
+    }
+  },
+  "extensions/xls/data_dictionary.xls": {
+    "sha256": "4696c7adb861d0874575f00cc9274fec5b20b46837fdf69dc99b58038293747a",
+    "kind": "excel",
+    "rows": 21,
+    "sheets": [
+      {
+        "name": "data_dictionary",
+        "rows": 21,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "data_dictionary.xls": {
+        "rows": 21,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/format_only_trailing.xls": {
+    "sha256": "82e22579349ebe07b25cfda0a8425c91c024f23e918a10db7a6cde89d28c0033",
+    "kind": "excel",
+    "rows": 4,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 4,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "format_only_trailing.xls": {
+        "rows": 4,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/inventories.xls": {
+    "sha256": "c826bc269302bb0a29d5d8d7684d88c0406adb14ec8e4bbf13d4d47aa3a3f3b3",
+    "kind": "excel",
+    "rows": 11681,
+    "sheets": [
+      {
+        "name": "inventories",
+        "rows": 11681,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventories.xls": {
+        "rows": 11681,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/inventory_sets.xls": {
+    "sha256": "a29145e1ec0750392c447f3afd556de528301b849241e7c27da8d394be730c1a",
+    "kind": "excel",
+    "rows": 2846,
+    "sheets": [
+      {
+        "name": "inventory_sets",
+        "rows": 2846,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventory_sets.xls": {
+        "rows": 2846,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/part_categories.xls": {
+    "sha256": "eecd8520a1c3c6f85fe7f35ed358f4eab76be7547ce93473b626b7883189be60",
+    "kind": "excel",
+    "rows": 57,
+    "sheets": [
+      {
+        "name": "part_categories",
+        "rows": 57,
+        "columns": 2,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "part_categories.xls": {
+        "rows": 57,
+        "columns": 2
+      }
+    }
+  },
+  "extensions/xls/products.xls": {
+    "sha256": "644e55a49162fa8befab129a3ed051b2047a3b9c8a6abd49119ba7b721c74a9e",
+    "kind": "excel",
+    "rows": 7,
+    "sheets": [
+      {
+        "name": "products",
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "products.xls": {
+        "rows": 7,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/sales_pipeline.xls": {
+    "sha256": "c39b3e4ce7364d6e1d50b886aba461fd7c010cc09d5cf144789ad174171c628a",
+    "kind": "excel",
+    "rows": 8800,
+    "sheets": [
+      {
+        "name": "sales_pipeline",
+        "rows": 8800,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_pipeline.xls": {
+        "rows": 8800,
+        "columns": 8
+      }
+    }
+  },
+  "extensions/xls/sales_teams.xls": {
+    "sha256": "816d32affb7964049d9eea0875f0c9393dff911c592cc159751d1e0a07885119",
+    "kind": "excel",
+    "rows": 35,
+    "sheets": [
+      {
+        "name": "sales_teams",
+        "rows": 35,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_teams.xls": {
+        "rows": 35,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xls/sets.xls": {
+    "sha256": "52cb42f69c490a7757b1c21be97eef29124059ded9cebdfeecdbb362fb14c849",
+    "kind": "excel",
+    "rows": 11673,
+    "sheets": [
+      {
+        "name": "sets",
+        "rows": 11673,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sets.xls": {
+        "rows": 11673,
+        "columns": 5
+      }
+    }
+  },
+  "extensions/xls/themes.xls": {
+    "sha256": "afbe504d6ad1915144dcf2d7b518221006cf523c25d89aa06a86f4d5de0b2895",
+    "kind": "excel",
+    "rows": 614,
+    "sheets": [
+      {
+        "name": "themes",
+        "rows": 614,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "themes.xls": {
+        "rows": 614,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/accounts.xlsx": {
+    "sha256": "12aa19c2ddc842128b4e4e55a65fe2a7d10c8c512f53921d5b32dcfff0cefaf3",
+    "kind": "excel",
+    "rows": 85,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 85,
+        "columns": 7,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "accounts.xlsx": {
+        "rows": 85,
+        "columns": 7
+      }
+    }
+  },
+  "extensions/xlsx/colors.xlsx": {
+    "sha256": "1ee1df0e1877b61ae34ae400364eda3b95344fb26dd3e408e98a4afd58eaa1cd",
+    "kind": "excel",
+    "rows": 135,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 135,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "colors.xlsx": {
+        "rows": 135,
+        "columns": 4
+      }
+    }
+  },
+  "extensions/xlsx/data_dictionary.xlsx": {
+    "sha256": "c9a6d427a103bcff5934a8685ddbf5c917abd49196a1369410e1f2b913dd7b2f",
+    "kind": "excel",
+    "rows": 21,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 21,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "data_dictionary.xlsx": {
+        "rows": 21,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/format_only_trailing.xlsx": {
+    "sha256": "051afad52bdf1844b0c901fb0eaa5ca965e1baf958fbd4643e77357a4d68bc22",
+    "kind": "excel",
+    "rows": 4,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 4,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "format_only_trailing.xlsx": {
+        "rows": 4,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/inventories.xlsx": {
+    "sha256": "bfb24d3bd9b5fbbbf044b3c5c56984f04ca5bc1da023abaae414965bbec0fcd9",
+    "kind": "excel",
+    "rows": 11681,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 11681,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventories.xlsx": {
+        "rows": 11681,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/inventory_sets.xlsx": {
+    "sha256": "c7e1af1bd89a281f5b9436bd8c80e8f3a1dd85da169cc11084eda69703b66463",
+    "kind": "excel",
+    "rows": 2846,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 2846,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "inventory_sets.xlsx": {
+        "rows": 2846,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/part_categories.xlsx": {
+    "sha256": "3d8c16e69f59605f5fc9bf43d362520a7f0892c5198a4f52901f9d9bd2758ca8",
+    "kind": "excel",
+    "rows": 57,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 57,
+        "columns": 2,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "part_categories.xlsx": {
+        "rows": 57,
+        "columns": 2
+      }
+    }
+  },
+  "extensions/xlsx/products.xlsx": {
+    "sha256": "2ac3004d09a661a29857349c8fb28ac66af660e557bd7ea1726746d4c0dd4abe",
+    "kind": "excel",
+    "rows": 7,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "products.xlsx": {
+        "rows": 7,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/sales_pipeline.xlsx": {
+    "sha256": "afebdada75ccddafb4e1cead05600336d1e32fc8b240a58aa7eca44de0f7c4e6",
+    "kind": "excel",
+    "rows": 8800,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 8800,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_pipeline.xlsx": {
+        "rows": 8800,
+        "columns": 8
+      }
+    }
+  },
+  "extensions/xlsx/sales_teams.xlsx": {
+    "sha256": "dc442fab44705caaff86adf3ac4898716bedb7d2cfe63c5b1b22c6df979ca918",
+    "kind": "excel",
+    "rows": 35,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 35,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_teams.xlsx": {
+        "rows": 35,
+        "columns": 3
+      }
+    }
+  },
+  "extensions/xlsx/sets.xlsx": {
+    "sha256": "69dd9acbbc3bff1cb6119123c0741c7b070d300d71a3df6f70d2d20e489fc667",
+    "kind": "excel",
+    "rows": 11673,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 11673,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sets.xlsx": {
+        "rows": 11673,
+        "columns": 5
+      }
+    }
+  },
+  "extensions/xlsx/themes.xlsx": {
+    "sha256": "4a7c9e914e8209e93f7217361b64f15a7dc2419bddf62edc17ecba921a1f5f69",
+    "kind": "excel",
+    "rows": 614,
+    "sheets": [
+      {
+        "name": "Sheet1",
+        "rows": 614,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "themes.xlsx": {
+        "rows": 614,
+        "columns": 3
+      }
+    }
+  },
+  "workbooks/xls/1wb-1sheet/example_1_employees/employees.xls": {
+    "sha256": "0e5be976aa3e7a8afe546c2dc8a930f30e049337273f1555fa52900c6fbbad2f",
+    "kind": "excel",
+    "rows": 25,
+    "sheets": [
+      {
+        "name": "Employees",
+        "rows": 25,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "employees.xls": {
+        "rows": 25,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xls/1wb-1sheet/example_2_products/products.xls": {
+    "sha256": "0621b35ec001a6be064cebed0fa2dabbbf8babc4018c7be32f82f041ea6fa647",
+    "kind": "excel",
+    "rows": 20,
+    "sheets": [
+      {
+        "name": "Products",
+        "rows": 20,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "products.xls": {
+        "rows": 20,
+        "columns": 5
+      }
+    }
+  },
+  "workbooks/xls/1wb-1sheet/example_3_sales_transactions/sales_transactions.xls": {
+    "sha256": "5d4bacfab3f52a0e651d53642ffe1601d027eb49eb99c477de8cdc59d0ea5477",
+    "kind": "excel",
+    "rows": 40,
+    "sheets": [
+      {
+        "name": "Transactions",
+        "rows": 40,
+        "columns": 7,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_transactions.xls": {
+        "rows": 40,
+        "columns": 7
+      }
+    }
+  },
+  "workbooks/xls/1wb-1sheet/example_4_weather_observations/weather_observations.xls": {
+    "sha256": "8f6ace09c3f69a0214513fdd152f2eeae839041c83f4c213bedd58fb1e4e843a",
+    "kind": "excel",
+    "rows": 30,
+    "sheets": [
+      {
+        "name": "Weather",
+        "rows": 30,
+        "columns": 6,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "weather_observations.xls": {
+        "rows": 30,
+        "columns": 6
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/crm/CRM_sales_opportunities.xls": {
+    "sha256": "79a8bf023a2e9e18e14db2cc7e69bfe5061a25bbb0510681839e79835333a6a4",
+    "kind": "excel",
+    "rows": 8948,
+    "sheets": [
+      {
+        "name": "data_dictionary",
+        "rows": 21,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "accounts",
+        "rows": 85,
+        "columns": 7,
+        "empty": false
+      },
+      {
+        "name": "sales teams",
+        "rows": 35,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "products",
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "sales pipeline",
+        "rows": 8800,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "data_dictionary (CRM_sales_opportunities).xls": {
+        "rows": 21,
+        "columns": 3
+      },
+      "accounts (CRM_sales_opportunities).xls": {
+        "rows": 85,
+        "columns": 7
+      },
+      "sales teams (CRM_sales_opportunities).xls": {
+        "rows": 35,
+        "columns": 3
+      },
+      "products (CRM_sales_opportunities).xls": {
+        "rows": 7,
+        "columns": 3
+      },
+      "sales pipeline (CRM_sales_opportunities).xls": {
+        "rows": 8800,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/example_1_company_report/company_report.xls": {
+    "sha256": "810f2907e6e3ce030f2e1506fecc542803a48e8fac0ccd501746ec8ffcd731d6",
+    "kind": "excel",
+    "rows": 99,
+    "sheets": [
+      {
+        "name": "Revenue",
+        "rows": 12,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "Expenses",
+        "rows": 72,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "Employees",
+        "rows": 15,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Revenue (company_report).xls": {
+        "rows": 12,
+        "columns": 4
+      },
+      "Expenses (company_report).xls": {
+        "rows": 72,
+        "columns": 3
+      },
+      "Employees (company_report).xls": {
+        "rows": 15,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/example_2_sales_dashboard/sales_dashboard.xls": {
+    "sha256": "03929ff082d811abaffdae92b828503ec3bb80ff4a9777c331dfdd0b904cbd65",
+    "kind": "excel",
+    "rows": 65,
+    "sheets": [
+      {
+        "name": "Sales",
+        "rows": 40,
+        "columns": 7,
+        "empty": false
+      },
+      {
+        "name": "Products",
+        "rows": 20,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Regions",
+        "rows": 5,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Sales (sales_dashboard).xls": {
+        "rows": 40,
+        "columns": 7
+      },
+      "Products (sales_dashboard).xls": {
+        "rows": 20,
+        "columns": 5
+      },
+      "Regions (sales_dashboard).xls": {
+        "rows": 5,
+        "columns": 4
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/example_3_school_records/school_records.xls": {
+    "sha256": "cb26795fb530626aca656f3acd15999aa1049352c4b96b530c31d79872035f98",
+    "kind": "excel",
+    "rows": 110,
+    "sheets": [
+      {
+        "name": "Students",
+        "rows": 25,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Grades",
+        "rows": 75,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "Teachers",
+        "rows": 10,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Students (school_records).xls": {
+        "rows": 25,
+        "columns": 5
+      },
+      "Grades (school_records).xls": {
+        "rows": 75,
+        "columns": 4
+      },
+      "Teachers (school_records).xls": {
+        "rows": 10,
+        "columns": 4
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/example_4_inventory_system/inventory_system.xls": {
+    "sha256": "9590fb8ca31e87d742fac18e45091fd2afeaf0d7dea6c6984b41c47d9614189d",
+    "kind": "excel",
+    "rows": 46,
+    "sheets": [
+      {
+        "name": "Products",
+        "rows": 18,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Suppliers",
+        "rows": 10,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Stock",
+        "rows": 18,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Products (inventory_system).xls": {
+        "rows": 18,
+        "columns": 5
+      },
+      "Suppliers (inventory_system).xls": {
+        "rows": 10,
+        "columns": 5
+      },
+      "Stock (inventory_system).xls": {
+        "rows": 18,
+        "columns": 3
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/fastfood/fastfood.xls": {
+    "sha256": "2bec72878c710bb9ad1040a4fd98a29cb41f01c2fb6342d140f32c044096ce00",
+    "kind": "excel",
+    "rows": 264,
+    "sheets": [
+      {
+        "name": "bk",
+        "rows": 57,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "mcd",
+        "rows": 207,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "bk (fastfood).xls": {
+        "rows": 57,
+        "columns": 4
+      },
+      "mcd (fastfood).xls": {
+        "rows": 207,
+        "columns": 5
+      }
+    }
+  },
+  "workbooks/xls/1wb-multisheet/stores/Dataset-Bhagwati Store.xls": {
+    "sha256": "e796be67a1e531b92b0cc9379f740c0b38da81196eb236622fed4d60efc6f20b",
+    "kind": "excel",
+    "rows": 2232,
+    "sheets": [
+      {
+        "name": "Master Data",
+        "rows": 24,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Opening Stock",
+        "rows": 24,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "Sales Data",
+        "rows": 2184,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Master Data (Dataset-Bhagwati Store).xls": {
+        "rows": 24,
+        "columns": 5
+      },
+      "Opening Stock (Dataset-Bhagwati Store).xls": {
+        "rows": 24,
+        "columns": 3
+      },
+      "Sales Data (Dataset-Bhagwati Store).xls": {
+        "rows": 2184,
+        "columns": 3
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-1sheet/example_1_employees/employees.xlsx": {
+    "sha256": "17b06280cb8d9ef14be380efe730acca38e64c1b7ab3424832ab906bf6f64ad4",
+    "kind": "excel",
+    "rows": 25,
+    "sheets": [
+      {
+        "name": "Employees",
+        "rows": 25,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "employees.xlsx": {
+        "rows": 25,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-1sheet/example_2_products/products.xlsx": {
+    "sha256": "e7f334a812cbcde86bcf360a0b3be4f1b1e1ca474f868ada6ff43d82b4dac5f1",
+    "kind": "excel",
+    "rows": 20,
+    "sheets": [
+      {
+        "name": "Products",
+        "rows": 20,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "products.xlsx": {
+        "rows": 20,
+        "columns": 5
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-1sheet/example_3_sales_transactions/sales_transactions.xlsx": {
+    "sha256": "3aa6a3f31807b61a754e6aa9ae131250259559520862369767c356b1dd4d4290",
+    "kind": "excel",
+    "rows": 40,
+    "sheets": [
+      {
+        "name": "Transactions",
+        "rows": 40,
+        "columns": 7,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "sales_transactions.xlsx": {
+        "rows": 40,
+        "columns": 7
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-1sheet/example_4_weather_observations/weather_observations.xlsx": {
+    "sha256": "4cab432e03c91a96ca8a9d89aaf2637cde8f5a702c9491d37715fd43766f9f0d",
+    "kind": "excel",
+    "rows": 30,
+    "sheets": [
+      {
+        "name": "Weather",
+        "rows": 30,
+        "columns": 6,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "weather_observations.xlsx": {
+        "rows": 30,
+        "columns": 6
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/crm/CRM_sales_opportunities.xlsx": {
+    "sha256": "535f97fec83c9725afa2a4855295f95e4eabee7db7534380868057cad5ba9f35",
+    "kind": "excel",
+    "rows": 8948,
+    "sheets": [
+      {
+        "name": "data_dictionary",
+        "rows": 21,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "accounts",
+        "rows": 85,
+        "columns": 7,
+        "empty": false
+      },
+      {
+        "name": "sales teams",
+        "rows": 35,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "products",
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "sales pipeline",
+        "rows": 8800,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "data_dictionary (CRM_sales_opportunities).xlsx": {
+        "rows": 21,
+        "columns": 3
+      },
+      "accounts (CRM_sales_opportunities).xlsx": {
+        "rows": 85,
+        "columns": 7
+      },
+      "sales teams (CRM_sales_opportunities).xlsx": {
+        "rows": 35,
+        "columns": 3
+      },
+      "products (CRM_sales_opportunities).xlsx": {
+        "rows": 7,
+        "columns": 3
+      },
+      "sales pipeline (CRM_sales_opportunities).xlsx": {
+        "rows": 8800,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/example_1_company_report/company_report.xlsx": {
+    "sha256": "1b195588675ad7aafc1f7b72b8b19ad4d2034b4a8819bb1070c17d3fb459154a",
+    "kind": "excel",
+    "rows": 99,
+    "sheets": [
+      {
+        "name": "Revenue",
+        "rows": 12,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "Expenses",
+        "rows": 72,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "Employees",
+        "rows": 15,
+        "columns": 8,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Revenue (company_report).xlsx": {
+        "rows": 12,
+        "columns": 4
+      },
+      "Expenses (company_report).xlsx": {
+        "rows": 72,
+        "columns": 3
+      },
+      "Employees (company_report).xlsx": {
+        "rows": 15,
+        "columns": 8
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/example_2_sales_dashboard/sales_dashboard.xlsx": {
+    "sha256": "bb602b53fd409793e709071c50cf4fea3a3abc8c1d255da3a3d2c62777504516",
+    "kind": "excel",
+    "rows": 65,
+    "sheets": [
+      {
+        "name": "Sales",
+        "rows": 40,
+        "columns": 7,
+        "empty": false
+      },
+      {
+        "name": "Products",
+        "rows": 20,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Regions",
+        "rows": 5,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Sales (sales_dashboard).xlsx": {
+        "rows": 40,
+        "columns": 7
+      },
+      "Products (sales_dashboard).xlsx": {
+        "rows": 20,
+        "columns": 5
+      },
+      "Regions (sales_dashboard).xlsx": {
+        "rows": 5,
+        "columns": 4
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/example_3_school_records/school_records.xlsx": {
+    "sha256": "e2d51fbdb1bf5b3d59a26f476545870073190bcc6dca160678cf397ea812254a",
+    "kind": "excel",
+    "rows": 110,
+    "sheets": [
+      {
+        "name": "Students",
+        "rows": 25,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Grades",
+        "rows": 75,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "Teachers",
+        "rows": 10,
+        "columns": 4,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Students (school_records).xlsx": {
+        "rows": 25,
+        "columns": 5
+      },
+      "Grades (school_records).xlsx": {
+        "rows": 75,
+        "columns": 4
+      },
+      "Teachers (school_records).xlsx": {
+        "rows": 10,
+        "columns": 4
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/example_4_inventory_system/inventory_system.xlsx": {
+    "sha256": "c3b7977db382459e1e43e1304e715caad4e00b3952c33f7dec1a046481b92687",
+    "kind": "excel",
+    "rows": 46,
+    "sheets": [
+      {
+        "name": "Products",
+        "rows": 18,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Suppliers",
+        "rows": 10,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Stock",
+        "rows": 18,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Products (inventory_system).xlsx": {
+        "rows": 18,
+        "columns": 5
+      },
+      "Suppliers (inventory_system).xlsx": {
+        "rows": 10,
+        "columns": 5
+      },
+      "Stock (inventory_system).xlsx": {
+        "rows": 18,
+        "columns": 3
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/fastfood/fastfood.xlsx": {
+    "sha256": "c60e77998c94fb3c69b3dc1bfeb2508252ca89346e77e8d21f51059d3877d71f",
+    "kind": "excel",
+    "rows": 264,
+    "sheets": [
+      {
+        "name": "bk",
+        "rows": 57,
+        "columns": 4,
+        "empty": false
+      },
+      {
+        "name": "mcd",
+        "rows": 207,
+        "columns": 5,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "bk (fastfood).xlsx": {
+        "rows": 57,
+        "columns": 4
+      },
+      "mcd (fastfood).xlsx": {
+        "rows": 207,
+        "columns": 5
+      }
+    }
+  },
+  "workbooks/xlsx/1wb-multisheet/stores/Dataset-Bhagwati Store.xlsx": {
+    "sha256": "6514a734b824014edea0fa35da83297cb695f4f8b705127050056dd726ef0556",
+    "kind": "excel",
+    "rows": 2232,
+    "sheets": [
+      {
+        "name": "Master Data",
+        "rows": 24,
+        "columns": 5,
+        "empty": false
+      },
+      {
+        "name": "Opening Stock",
+        "rows": 24,
+        "columns": 3,
+        "empty": false
+      },
+      {
+        "name": "Sales Data",
+        "rows": 2184,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "Master Data (Dataset-Bhagwati Store).xlsx": {
+        "rows": 24,
+        "columns": 5
+      },
+      "Opening Stock (Dataset-Bhagwati Store).xlsx": {
+        "rows": 24,
+        "columns": 3
+      },
+      "Sales Data (Dataset-Bhagwati Store).xlsx": {
+        "rows": 2184,
+        "columns": 3
+      }
+    }
+  }
+}
