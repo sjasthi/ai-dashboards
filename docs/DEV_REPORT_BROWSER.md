@@ -1,7 +1,7 @@
 # The developer report browser
 
-Re-open a past analysis — chart, KPIs, insights and data table — without
-re-uploading the spreadsheet and **without spending an LLM call**.
+Re-open a past analysis on the real Reports page — chart, KPIs, insights and data
+table — without re-uploading the spreadsheet and **without spending an LLM call**.
 
 This is a developer tool. There is no nav entry for it in the normal app, no
 user-facing endpoint, and the whole thing is stripped from production builds. It
@@ -65,29 +65,83 @@ you have:
 
 ## 4. Browse and replay
 
-Each saved session is one row: its id, the files it was built from, when it was
-saved, and a button per recommendation (A, B, C…). Click a letter to rebuild that
-report and render it below.
+Each saved session is one row: its id, the files it was built from, its size, and
+when it was saved.
+
+Click **Generate report** and the session opens **on the Reports tab** — the real
+one, the same page users read their own reports on. From there the A/B/C switcher,
+*Compare all*, the data table and the export panel all work as usual; the other
+letters are rebuilt on click. (Hovering *Generate report* lists what each letter
+is named, if you want to know before you open it.)
 
 - Rebuilding takes as long as the pandas pipeline takes — usually well under a
   second. **It never calls the model**, so browsing costs nothing.
-- **Download JSON** saves the rendered payload to a file.
+- **JSON** rebuilds report A and saves the payload to a file without opening it.
 - **Open a .json report** loads one of those files back, so a report can be handed
-  to someone who has no access to your server. It renders through the same path.
+  to someone who has no access to your server. It also opens on the Reports tab.
+  Only the letter in the file is available; asking for another says so.
 - **Delete** removes the session's directory: the manifest *and* the retained
   workbooks. This is how you forget one run.
 
-A row whose source files have been deleted is shown greyed out with *"Source
-files deleted"*, and its letter buttons are disabled. The manifest is still
-listed, so you can see the session existed.
+A row shows its size on disk and its age, and the bar above shows the total
+footprint — the numbers you need to decide what to clear out.
 
-## 5. What it looks like
+A row whose source files have been deleted is greyed out with *"Source files
+deleted"* and its buttons are disabled. The manifest is still listed, so you can
+see the session existed.
 
-The rebuilt report shows a KPI row, the chart, the four insight cards, and the
-full data table — plus a provenance strip naming the source files, the pipeline
-operations that produced the numbers, and when the rebuild happened.
+**Your own session is not lost.** A replay sits *over* the Reports tab rather than
+replacing what you were doing: an amber bar names the session you are looking at,
+and **Back to my session** returns you to your own analysis with its reports
+exactly as you left them. Starting a new upload also drops the replay.
 
-## 6. Where the data lives
+Failures stay on the Dev tab rather than travelling to the Reports page. A 410
+(source files gone) or a 422 (the saved recommendation no longer runs against its
+own data) is a finding about this pipeline, and it is reported where you clicked.
+
+## 5. Pruning
+
+Retention is manual: **nothing here deletes anything on a timer.** The prune bar
+is where you clear space by hand, and it offers three ways to choose what goes.
+
+| Control | What it selects |
+|---|---|
+| **Delete selected (N)** | exactly the rows you ticked |
+| **older than [N] days** | everything saved at least N days ago |
+| **keep newest [N]** | everything except the N most recent |
+
+Ticking **"Only sessions whose source files are already gone"** narrows any of the
+three to dead manifests — sessions that can no longer be replayed anyway, so
+clearing them frees space without losing anything that still worked.
+
+**Every path previews first.** Clicking any of them asks the server what *would*
+be deleted and shows you the exact list, each session's size and age, and the
+total that would be freed. Nothing is touched until you click **Delete N** on that
+panel; **Cancel** backs out. This is deliberately not a yes/no dialog — deleting
+the only copy of files someone handed you deserves a list of what is going.
+
+### Rehearsing a retention policy
+
+This is the other reason the age criterion exists. Preview `older than 30 days`
+and you are reading **exactly** what a 30-day retention rule would have removed —
+which sessions, how many megabytes, and whether anything you still care about
+would have been caught. Try a few windows before deciding whether automatic
+deletion is worth wiring up, and what the window should be.
+
+The preview's byte count is the same number the real run reports freeing, so the
+projection can be trusted as a basis for that decision.
+
+## 6. What it looks like
+
+Exactly like a live report, because it *is* the live report page: the KPI row, the
+chart, the computed insight cards, the distribution strip, the full data table, the
+provenance strip naming source files and pipeline operations, and the export panel.
+The only difference is the amber bar at the top naming the saved session.
+
+That is the point. If the Reports page grows a panel, a replay shows it the same
+day — there is no second renderer to keep in step.
+
+## 7. Where the data lives
 
 ```
 session_data/<session_id>/
@@ -99,20 +153,26 @@ session_data/<session_id>/
 the whole folder to forget everything.
 
 > **This retains real spreadsheets.** Every sheet, every row, every column of what
-> was uploaded, indefinitely, with no pruning. That is fine on your own machine and
-> is the reason the feature is off by default. See
-> [Retention](#retention-is-not-solved) before pointing it at anything shared.
+> was uploaded, until someone deletes it. Nothing expires on its own. That is fine
+> on your own machine and is the reason the feature is off by default. See
+> [Retention](#retention-is-manual-on-purpose--for-now) before pointing it at
+> anything shared.
 
-## 7. Calling the API directly
+## 8. Calling the API directly
 
-Everything the UI does is three GETs and a DELETE. All require
+Everything the UI does is four GETs, a DELETE and a POST. All require
 `X-Admin-Token`.
 
 ```bash
 TOK=your-admin-token
 
-# every saved session, newest first
+# every saved session, newest first — with bytes, age_days and total_bytes
 curl -H "X-Admin-Token: $TOK" localhost:8000/api/admin/sessions
+
+# one session's full recommendations, straight from its manifest — no workbook
+# is opened, so this is cheap. The listing carries only letters and names.
+curl -H "X-Admin-Token: $TOK" \
+  localhost:8000/api/admin/sessions/20260803_113839_c38cd9
 
 # rebuild one report
 curl -H "X-Admin-Token: $TOK" \
@@ -121,10 +181,33 @@ curl -H "X-Admin-Token: $TOK" \
 # the raw event log, not just the aggregates /api/stats returns
 curl -H "X-Admin-Token: $TOK" "localhost:8000/api/admin/stats?limit=50"
 
-# forget a session
+# forget one session
 curl -X DELETE -H "X-Admin-Token: $TOK" \
   localhost:8000/api/admin/sessions/20260803_113839_c38cd9
 ```
+
+Pruning is a POST, and previews unless told otherwise:
+
+```bash
+# what a 30-day retention policy WOULD delete (deletes nothing)
+curl -X POST -H "X-Admin-Token: $TOK" -H "Content-Type: application/json" \
+  -d '{"older_than_days": 30}' \
+  localhost:8000/api/admin/sessions/prune
+
+# actually do it
+curl -X POST -H "X-Admin-Token: $TOK" -H "Content-Type: application/json" \
+  -d '{"older_than_days": 30, "dry_run": false}' \
+  localhost:8000/api/admin/sessions/prune
+
+# other criteria — exactly one per call
+-d '{"keep_newest": 20}'
+-d '{"session_ids": ["20260803_113839_c38cd9"]}'
+-d '{"older_than_days": 30, "unreplayable_only": true}'
+```
+
+Passing **no** criterion is a 400, not "everything" — an empty body can never be
+a request to empty the store. Passing two is also a 400, because the intersection
+would be ambiguous to whoever reads the call later.
 
 Response codes worth knowing:
 
@@ -136,7 +219,7 @@ Response codes worth knowing:
 | 410 on one session | The manifest is there but `source/` has been deleted. |
 | 422 on one report | The saved recommendation no longer executes against its own data. **This is a finding, not a viewer bug** — see [D6](#d6-reproduction-not-archival). |
 
-## 8. Turning it off
+## 9. Turning it off
 
 Remove or set `SAVE_REPORT_HISTORY=false` and restart: nothing further is saved,
 and everything already in `session_data/` stays until you delete it. Remove
@@ -309,10 +392,46 @@ The admin fetch helper lives in `src/dev/adminApi.js` rather than in `src/api.js
 for the same reason: none of the shared helpers attach `X-Admin-Token`, and
 adding them there would ship the admin surface to everyone.
 
-The viewer holds entirely local state and never sets App's `sessionId` or
-`recommendations`. That is deliberate — assigning them would trip the background
-prefetch effect, which would then build reports B and C over HTTP for a session
-someone only wanted to look at.
+### Where a replayed report is drawn
+
+On the production Reports page, not here. The dev module fetches, App holds, and
+`Reportsdashboard` renders:
+
+```
+DevReportBrowser ──fetchSessionDetail──► recommendations ─┐
+                 ──fetchReport(id,'A')─► payload ─────────┴─► onLoadSession(...)
+                                                                    │
+App: setReplay({sessionId, recommendations, reports, fetchReport})   │
+                                                                    ▼
+                    <ReportsDashboard {...(replay ? replay : live)} />
+```
+
+Two things make this safe.
+
+**`replay` is its own state slot.** It is *not* written into `sessionId` /
+`recommendations` / `reports`. Those are the dependencies of the background
+prefetch effect, and assigning a saved session into them would start building
+every remaining letter over HTTP for a session someone only wanted to look at.
+Keeping the replay beside them means the effect's dependencies never change, so it
+cannot fire — the hazard is removed structurally rather than guarded by a flag.
+It also means the live session is untouched, so leaving a replay is `setReplay(null)`
+and nothing needs repairing.
+
+**`fetchReport` is handed over, not imported.** App never imports anything from
+`src/dev/`; it holds a function reference the dev module passed in. That is what
+keeps the build-time guarantee above intact while letting the Reports page's own
+letter switcher fetch B and C through the admin route.
+
+The Reports page gained two props for this — `replaySessionId` and `onExitReplay`
+— and renders the amber bar only when the second is set. Both are `null` in the
+app users run, so the branch is inert there. The bar is not decoration: a replayed
+report is otherwise indistinguishable from live data, on a page whose whole premise
+is that every claim is labelled with where it came from.
+
+A second renderer used to live in `DevReportBrowser.jsx`. It was always a plainer
+view of the same payload, and keeping it meant every panel added to the Reports
+page quietly stopped being visible to the one tool built for inspecting reports.
+It is gone.
 
 ## Design decisions worth knowing
 
@@ -340,41 +459,71 @@ stating plainly:
 
 - **It cannot serve as an archive** of what a user was shown.
 - **A replay can fail where the original succeeded** — hence the visible error
-  banner with the failing report's letter and the server's message. A blank panel
-  would hide exactly the information the tool exists to surface.
+  banner on the Dev tab carrying the status code and the server's message. A blank
+  panel would hide exactly the information the tool exists to surface.
+- **A replayed report must say it is one**, which is what the amber bar is for.
 
-### Retention is not solved
+One consequence worth knowing: replay reuses a session already in `SESSIONS`
+before rehydrating, so replaying a session that is *currently live* returns the
+cached live report rather than rebuilding it. Only sessions the server has
+forgotten are genuinely rebuilt.
 
-`session_data/` accumulates real user workbooks with no pruning, no expiry and no
-size cap. The **Delete** button and `rm -rf session_data/<id>` are the entire
-deletion story.
+### Retention is manual, on purpose — for now
 
-That is acceptable for a capstone running on a developer's machine, and it is why
-the flag is off by default. Before this is pointed at anything else it needs a
-retention policy and a documented deletion path for the person whose data it is.
+`session_data/` accumulates real user workbooks. **Nothing expires them
+automatically**, and there is no size cap: the prune controls are the entire
+deletion story, and they only run when a person clicks them.
+
+That is a deliberate staging rather than an oversight. Automatic deletion is
+irreversible and its right window is a judgement call, so the tooling that makes
+the judgement possible comes first:
+
+- the listing reports **size and age per session** plus a total footprint, so the
+  cost of keeping things is visible rather than inferred;
+- `older_than_days` **dry-runs a policy** — preview at 30 and you are reading
+  precisely what a 30-day rule would have taken, before committing to one;
+- `unreplayable_only` clears dead manifests, which is the one case where deletion
+  is obviously safe.
+
+What is still missing, and what to build if this ever leaves a dev machine:
+
+1. **Something that runs without a person.** The honest options are a sweep on
+   startup, a sweep at the end of `save_session_snapshot`, or a scheduled script.
+   The middle one is probably right — it runs exactly when growth happens and
+   needs no new machinery.
+2. **A stated policy** in the README, so "we keep your file for N days" is a claim
+   the code backs rather than an assumption.
+3. **A deletion path for the person whose data it is.** Everything here is a
+   developer deleting on someone's behalf, and only if they can work out which
+   session id was theirs.
 
 ## Verifying it yourself
 
 | # | Check | How |
 |---|---|---|
-| 1 | Test suite | `python -m pytest -q` — 58 tests cover the store and the admin routes |
+| 1 | Test suite | `python -m pytest -q` — 97 tests cover the store, pruning and the admin routes |
 | 2 | Flag off saves nothing | run an analysis with `SAVE_REPORT_HISTORY` unset → no `session_data/<id>/source/` |
 | 3 | Replay equivalence | generate A live, restart the server, replay A → `rows`, `stats` and `chart` identical; only `generated_at` differs |
 | 4 | The gate | wrong token → 401; `ADMIN_TOKEN` unset → 404 |
 | 5 | Multi-sheet workbook | a session whose keys are `"<sheet> (<stem>).xlsx"` replays correctly |
-| 6 | No LLM call | replay with the Network tab open → one GET, no `/api/analyze-full`, no prefetch of B and C |
-| 7 | Graceful expiry | `rm -rf session_data/<id>/source` → lists as unreplayable, opening it gives 410 with a visible message |
-| 8 | Not in production | `npm run build`, then grep `dist/` for `DevReportBrowser` → nothing |
+| 6 | No LLM call, no prefetch | replay with the Network tab open → `GET /api/admin/sessions/<id>` then `…/reports/A`, and **no `POST /api/generate-report`** even after clicking B |
+| 7 | Graceful expiry | `rm -rf session_data/<id>/source` → lists as unreplayable, opening it gives 410 on the Dev tab |
+| 8 | Not in production | `npm run build`, then grep `dist/` for `DevReportBrowser`, `adminApi`, `X-Admin-Token`, `admin/sessions` → nothing. (`replay-banner` *does* appear — it lives in the Reports page and is inert without `onExitReplay`.) |
 | 9 | No new database | `usage.db` is still the only one, and still holds no cell values |
+| 10 | Prune previews honestly | dry-run a criterion, note `freed_bytes`, commit it → the same number comes back |
+| 11 | Prune can't run away | `POST /api/admin/sessions/prune -d '{}'` → 400, and nothing is deleted |
+| 12 | Live session survives a replay | run an analysis, replay a **different** session, then *Back to my session* → title, provenance, KPIs and letters all identical to before |
 
 ## Files
 
 | Path | Role |
 |---|---|
 | [app/data/session_store.py](../app/data/session_store.py) | writes and reads the snapshot; no HTTP, no report logic |
-| [app/api.py](../app/api.py) | `save_snapshot`, `_build_report`, `rehydrate_session`, `admin_token`, the four `/api/admin/*` routes |
-| [app/web/src/dev/DevReportBrowser.jsx](../app/web/src/dev/DevReportBrowser.jsx) | the viewer |
+| [app/api.py](../app/api.py) | `save_snapshot`, `_build_report`, `rehydrate_session`, `admin_token`, the five `/api/admin/*` routes |
+| [app/web/src/dev/DevReportBrowser.jsx](../app/web/src/dev/DevReportBrowser.jsx) | the session list, pruning, and the hand-off to App — draws no report itself |
 | [app/web/src/dev/adminApi.js](../app/web/src/dev/adminApi.js) | the admin fetch helper and token storage |
+| [app/web/src/App.jsx](../app/web/src/App.jsx) | the `replay` state slot and `requestReplayReport`, which keep a replay clear of the prefetch effect |
+| [app/web/src/components/Reportsdashboard.jsx](../app/web/src/components/Reportsdashboard.jsx) | draws every report, live or replayed; owns the amber `ReplayBanner` |
 | [tests/test_session_store.py](../tests/test_session_store.py) | the store and the `/api/analyze-full` hook |
 | [tests/test_admin_api.py](../tests/test_admin_api.py) | the gate, replay equivalence, degradation |
 | [docs/docs-test-usage-prevload-plan-md-phase-parsed-seal.md](docs-test-usage-prevload-plan-md-phase-parsed-seal.md) | the design document this was built from |

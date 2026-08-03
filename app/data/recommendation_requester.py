@@ -27,10 +27,13 @@ class RecommendationRequester:
         "RANKING": "order entities by a measure, show top/bottom N. Requires an "
                    "identifier-like column (unique_values / row_count > 0.8) and a numeric measure.",
         "DISTRIBUTION": "histogram/bin a single numeric column. Requires a continuous "
-                        "numeric column with low null_percent and a reasonable value range.",
+                        "numeric column with low null_percent, a reasonable value range, and at "
+                        "least ~100 non-null values on an event/transaction file - never a "
+                        "reference list's attribute column.",
         "COMPOSITION": "breakdown of a measure across a low-cardinality categorical column "
                        "(unique_values / row_count < 0.3), either existing or derived.",
-        "TREND": "change of a measure over time. Requires a date/datetime/temporal column.",
+        "TREND": "change of a measure over time. Requires a date/datetime/temporal column, "
+                 "aggregated to a period that yields roughly 8-40 points (see STEP 2c).",
         "COMPARISON": "relationship or correlation between two numeric measures.",
         "OUTLIER": "flag rows far from the norm on a numeric measure (e.g. via IQR or z-score)."
     }
@@ -176,6 +179,61 @@ STEP 2 - Only recommend a pattern whose data requirements this profile actually 
 Choose from this fixed set (do not invent others):
 {patterns_block}
 
+STEP 2a - CHOOSE THE MEASURE BEFORE YOU CHOOSE THE CUT. A report is only useful if
+someone can act on it, and what people act on is money and volume, not row counts.
+- Prefer, in order: a money measure (revenue, cost, freight, total) > a physical
+  quantity (units, hours) > a rate or average > a plain count of records.
+- If the rows you are aggregating carry a unit price AND a quantity (often only after
+  a join brings the price onto the transaction rows), you MUST "compute" a line total
+  (price * quantity) and SUM that. Charting count(*) while an unused price column sits
+  on the same joined rows is the single most common way to waste a report.
+- COUNTING RULE: "count" counts ROWS. If the column you count has
+  unique_values < row_count, those rows are LINE ITEMS, not entities - count(order_id)
+  on an order-lines file returns lines shipped, not orders placed. Use "nunique" when
+  you mean distinct entities, and make the axis label say which one you counted
+  ("Order Lines" vs "Orders"). Never label a count(...) output "Revenue" or "Sales".
+
+STEP 2b - PREDICT THE CHART BEFORE YOU PROPOSE IT. A bar chart whose bars are all
+roughly the same height, or a line that just wobbles around its own mean, has told the
+reader nothing and is a failed report even though it ran without error.
+- The profile gives you "top_values" as [value, count] pairs. Read them. If the largest
+  and smallest counts in a candidate categorical are within roughly 20% of each other,
+  a count-based breakdown of it will be flat - either switch the measure to money (which
+  usually separates the groups because prices differ) or pick a different cut entirely.
+- Say what you expect to see. The FIRST rationale_bullet must name the concrete pattern
+  you predict from the profile (e.g. "Expect a few categories to carry most of the
+  revenue while the rest cluster together"). If you cannot predict anything more specific
+  than "the values will differ", the report is not worth one of your three slots.
+
+STEP 2c - PICK THE RIGHT TIME GRANULARITY. Grouping a two-year transaction log by raw
+date produces hundreds of points of 1-6 records each - an unreadable comb, not a trend.
+Before proposing a TREND, use the temporal column's "range_start"/"range_end" to work
+out how many points a raw group-by would produce. Aim for roughly 8-40 points:
+- more than ~60 points -> derive a period label FIRST and group by that, never by the
+  raw date. There is no date-truncation method, so use "regex_extract" over the date's
+  string form: pattern "^(\\\\d{{4}}-\\\\d{{2}})" gives a "2013-07"-style month,
+  "^(\\\\d{{4}})" gives a year.
+- Check the rollup BEFORE you commit to it: months = about (range_end - range_start) in
+  months. Rolling a 90-day span up to months yields 3 bars, which is not a trend at all -
+  a rollup that lands under ~5 points is a WORSE answer than the raw daily series, not a
+  safer one. Only roll up when the result stays in the 8-40 range: month for a 1-3 year
+  span, year for longer.
+- Under roughly 4 months of data there is no long-run trend to find and no rollup that
+  helps: month gives too few points, and the only period labels you can derive from a
+  date string are month and year. Keep the raw daily series, but make it earn its place
+  by charting the MONEY per day rather than a record count, and say plainly in the
+  bullets that the day-to-day movement is normal variation rather than a trend. If you
+  cannot do even that, spend the slot on a different pattern instead.
+A title that says "Monthly" while the operations group by a raw date column is a
+contradiction; the operations, not the title, decide what is charted.
+
+STEP 2d - PREFER THE FACT TABLE. Reports whose rows come from the transaction/event file
+(orders, order lines, sessions) describe the business. Reports sourced only from a small
+reference list (a menu, a product catalogue, a category list - one row per entity, few
+rows) only describe the catalogue, and are rarely worth one of your three slots when a
+transaction file is present. Treat a file that documents OTHER files - a data dictionary,
+schema or column-description sheet - as documentation to read, never as an analysis source.
+
 STEP 3 - If a categorical breakdown would help but no low-cardinality column exists,
 "derive" one (regex_extract a family/prefix from high-cardinality text, or bin a numeric
 column) rather than grouping on a near-unique column. To combine two numeric columns
@@ -191,12 +249,19 @@ fields like "groupby_columns": []. Special case: a DISTRIBUTION report with char
 only a "filter" (e.g. not_null), never "groupby" or "sort_limit", and its plotly_config
 must OMIT "y_axis" entirely - not null, not a column name.
 
-STEP 5 - Always return EXACTLY 3 recommendations, ranked 1-3 by insight value. If the
+STEP 5 - Always return EXACTLY 3 recommendations, ranked 1-3 by insight value, and make
+them answer three DIFFERENT questions - not the same measure sliced three ways. If the
 data is too sparse, dirty or uniform to make the 3rd report as strong as the first two,
-still return it as the lowest-ranked recommendation and attach a data_quality_warning
-explaining the caveat - do NOT drop it or return fewer than 3. Write that warning in
-plain English for a non-technical business user (see the data_quality_warning rule
-below): describe the real-world impact, never the raw profile stat.
+still return it as the lowest-ranked recommendation - do NOT drop it or return fewer
+than 3.
+
+A "data_quality_warning" belongs to the recommendation it actually describes, and only
+to that one. Do not attach a caveat about report 1's data to report 3 because report 3
+is last; a warning that does not describe its own report's rows and columns is worse
+than no warning, because the reader is shown it next to the wrong chart. Omit the key
+entirely when that report has no caveat. When one is warranted, write it in plain
+English for a non-technical business user (see the data_quality_warning rule below):
+describe the real-world impact, never the raw profile stat.
 """
 
     def _output_contract(self) -> str:
@@ -310,9 +375,9 @@ below): describe the real-world impact, never the raw profile stat.
         "y_axis_label": "Average Measure Column"
       }},
       "rationale_bullets": [
-        "First short bullet explaining what this report shows",
-        "Second bullet highlighting a key insight or use case",
-        "Third bullet describing the ideal audience or scenario"
+        "The concrete pattern you predict this chart will show (see STEP 2b)",
+        "The decision or action it supports - what someone would do differently after reading it",
+        "What this report does NOT tell you, so the reader doesn't over-read it"
       ],
       "data_quality_warning": "optional - omit this key entirely if there is no caveat"
     }}
@@ -336,8 +401,15 @@ Rules:
 3. Bar/pie charts must resolve to at most ~15-20 categories after sort_limit; use limit to enforce this.
 3b. "chart_type" is one of: "bar", "line", "scatter", "pie", "histogram", "box". Guidance: RANKING/COMPARISON of a measure across categories -> "bar"; TREND over a temporal axis -> "line"; two numeric measures -> "scatter"; a single numeric column's distribution -> "histogram" (raw values, omit y_axis) or, to expose spread/outliers per group, "box" (x_axis = the grouping category, y_axis = the raw measure); OUTLIER on one measure across groups -> "box". Prefer "bar" over "pie", and use "pie" only for a genuine part-of-a-whole with <=5 slices.
 4. Cite real profile values (unique_values, null_percent, dtype) in "justification" - never fabricate stats.
+4b. "question_answered" must be a question a person could act on ("Which categories should
+   we stock more of?"), not a restatement of the operations ("What is the distribution of
+   price?"). If the honest answer to "and then what?" is "nothing", pick another report.
+4c. Aggregate the business measure, not the row count, whenever the joined rows carry one
+   (STEP 2a). Use "nunique" - never "count" - when the axis label says orders, customers
+   or any other entity that occupies more than one row.
 5. Rank recommendations by relevance/insight value.
-6. Exactly 3 rationale_bullets per recommendation - short, plain English, no jargon.
+6. Exactly 3 rationale_bullets per recommendation - short, plain English, no jargon. They
+   are prediction / decision / limitation, in that order (see the structure above).
 7. Return EXACTLY 3 recommendations, ranked 1-3 by relevance/insight value - never fewer. If the data only strongly supports fewer, still produce a 3rd and mark it with a data_quality_warning (see Step 5).
 8. If DETECTED CROSS-FILE RELATIONSHIPS were provided, at least one recommendation must use them via a "join" - do not confine every recommendation to a single file when the data supports connecting them.
 9. Join columns MUST go in a "join_keys" array - never "join_column" or any other field name. "join_type" is optional (defaults to "inner"). EVERY entry is a {{"left":...,"right":...}} object where "left" is the column in the FIRST file of "files_involved" and "right" the column in the second:

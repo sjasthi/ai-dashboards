@@ -18,6 +18,7 @@ no model call — a hand-built SESSIONS entry would skip the part that matters.
 
 import json
 import os
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -135,6 +136,7 @@ def _saved_session(client, paths, selections=None):
 
 ADMIN_ROUTES = [
     "/api/admin/sessions",
+    "/api/admin/sessions/anything",
     "/api/admin/sessions/anything/reports/A",
     "/api/admin/stats",
 ]
@@ -193,6 +195,71 @@ def test_listing_shows_a_saved_session(
     assert entry["replayable"] is True
     assert entry["files"] == ["orders.csv"]
     assert [r["letter"] for r in entry["reports"]] == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Detail
+# ---------------------------------------------------------------------------
+
+def test_detail_returns_the_full_recommendations(
+    client, admin_on, history_on, grouping_llm, csv_file
+):
+    """The listing carries a letter and a name; the Reports page needs the objects."""
+    session_id = _saved_session(client, [csv_file])
+
+    body = client.get(f"/api/admin/sessions/{session_id}", headers=AUTH).json()
+
+    assert body["session_id"] == session_id
+    assert body["replayable"] is True
+    assert body["files"] == ["orders.csv"]
+
+    recs = body["recommendations"]["recommendations"]
+    assert len(recs) == 2
+    # Verbatim, not a summary: the page reads these keys directly, and a listing
+    # entry has none of them.
+    assert recs[0]["report_name"]
+    assert recs[0]["pattern_used"]
+
+
+def test_detail_costs_no_workbook_read(
+    client, admin_on, history_on, grouping_llm, csv_file, monkeypatch
+):
+    """Drawing a report switcher must not re-read and re-profile every saved file."""
+    session_id = _saved_session(client, [csv_file])
+
+    def explode(*args, **kwargs):
+        raise AssertionError("detail rehydrated the session")
+
+    monkeypatch.setattr(api, "rehydrate_session", explode)
+    assert client.get(f"/api/admin/sessions/{session_id}", headers=AUTH).status_code == 200
+
+
+def test_detail_of_a_never_saved_session_is_404(client, admin_on):
+    response = client.get("/api/admin/sessions/nope_20200101", headers=AUTH)
+    assert response.status_code == 404
+    assert "never saved" in response.json()["detail"]
+
+
+def test_detail_of_an_expired_session_is_still_served(
+    client, admin_on, history_on, grouping_llm, csv_file
+):
+    """A session whose workbooks are gone can't be replayed, but it can be described.
+
+    404-ing here would make an unreplayable row unclickable *and* unexplainable;
+    `replayable: False` is the honest answer, and the report route still 410s.
+    """
+    session_id = _saved_session(client, [csv_file])
+    for f in (session_store.session_dir(session_id) / "source").iterdir():
+        f.unlink()
+
+    body = client.get(f"/api/admin/sessions/{session_id}", headers=AUTH).json()
+    assert body["replayable"] is False
+    assert body["recommendations"]["recommendations"]
+
+
+def test_detail_is_503_without_the_session_store(client, admin_on, monkeypatch):
+    monkeypatch.setattr(api, "SESSION_STORE_AVAILABLE", False)
+    assert client.get("/api/admin/sessions/anything", headers=AUTH).status_code == 503
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +483,137 @@ def test_delete_of_an_unknown_session_is_404(client, admin_on):
 def test_delete_is_gated_too(client, monkeypatch):
     monkeypatch.delenv("ADMIN_TOKEN", raising=False)
     assert client.delete("/api/admin/sessions/x", headers=AUTH).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Pruning
+# ---------------------------------------------------------------------------
+
+def _prune(client, **body):
+    return client.post("/api/admin/sessions/prune", json=body, headers=AUTH)
+
+
+def _save_snapshots(*session_ids, ages=None):
+    """Write bare snapshots directly, without paying for an analysis each time."""
+    from datetime import timedelta
+    for i, sid in enumerate(session_ids):
+        session_store.save_session_snapshot(
+            session_id=sid, client_id="c", file_paths=[], sheet_selections=None,
+            recommendations={"recommendations": [{"report_name": "R"}]},
+            file_profiles=[], file_metadata=[{"name": "f.csv", "size": 1}],
+        )
+        if ages:
+            path = session_store.session_dir(sid) / "manifest.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest["saved_at"] = (datetime.now() - timedelta(days=ages[i])).isoformat()
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_prune_is_gated(client, monkeypatch):
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+    assert client.post("/api/admin/sessions/prune", json={"keep_newest": 0}).status_code == 404
+
+
+def test_prune_with_no_criterion_is_400_not_a_massacre(client, admin_on):
+    """An empty body must never mean "delete everything"."""
+    _save_snapshots("20260101_000000_aaaaaa")
+
+    response = _prune(client)
+    assert response.status_code == 400
+    assert "exactly one" in response.json()["detail"]
+    assert len(client.get("/api/admin/sessions", headers=AUTH).json()["sessions"]) == 1
+
+
+def test_prune_with_two_criteria_is_400(client, admin_on):
+    response = _prune(client, older_than_days=30, keep_newest=1)
+    assert response.status_code == 400
+
+
+def test_prune_rejects_negative_values_at_the_schema(client, admin_on):
+    """Caught by pydantic's ge=0 before it reaches the store — a 422, not a 400."""
+    assert _prune(client, older_than_days=-5).status_code == 422
+    assert _prune(client, keep_newest=-1).status_code == 422
+
+
+def test_prune_defaults_to_a_dry_run(client, admin_on):
+    """Omitting dry_run must preview, not delete. The dangerous direction has to be
+    the one you type out."""
+    _save_snapshots("20260101_000000_aaaaaa", "20260803_000000_bbbbbb")
+
+    body = _prune(client, keep_newest=1).json()
+
+    assert body["dry_run"] is True
+    assert [m["session_id"] for m in body["matched"]] == ["20260101_000000_aaaaaa"]
+    assert body["deleted"] == []
+    assert len(client.get("/api/admin/sessions", headers=AUTH).json()["sessions"]) == 2
+
+
+def test_prune_commits_when_told_to(client, admin_on):
+    _save_snapshots("20260101_000000_aaaaaa", "20260803_000000_bbbbbb")
+
+    body = _prune(client, keep_newest=1, dry_run=False).json()
+
+    assert body["deleted"] == ["20260101_000000_aaaaaa"]
+    assert body["remaining"] == 1
+    listed = client.get("/api/admin/sessions", headers=AUTH).json()["sessions"]
+    assert [s["session_id"] for s in listed] == ["20260803_000000_bbbbbb"]
+
+
+def test_prune_by_age(client, admin_on):
+    _save_snapshots(
+        "20260101_000000_aaaaaa", "20260803_000000_bbbbbb", ages=[40, 1]
+    )
+
+    body = _prune(client, older_than_days=30, dry_run=False).json()
+    assert body["deleted"] == ["20260101_000000_aaaaaa"]
+
+
+def test_prune_by_explicit_ids(client, admin_on):
+    _save_snapshots("20260101_000000_aaaaaa", "20260803_000000_bbbbbb")
+
+    body = _prune(
+        client, session_ids=["20260803_000000_bbbbbb"], dry_run=False
+    ).json()
+    assert body["deleted"] == ["20260803_000000_bbbbbb"]
+
+
+def test_prune_drops_the_session_from_memory_too(
+    client, admin_on, history_on, grouping_llm, csv_file
+):
+    """A pruned session left in SESSIONS would keep answering replays from a
+    snapshot that no longer exists, then 404 confusingly after the next restart."""
+    session_id = _saved_session(client, [csv_file])
+    assert session_id in api.SESSIONS
+
+    _prune(client, session_ids=[session_id], dry_run=False)
+
+    assert session_id not in api.SESSIONS
+    assert client.get(
+        f"/api/admin/sessions/{session_id}/reports/A", headers=AUTH
+    ).status_code == 404
+
+
+def test_prune_unreplayable_only(client, admin_on, history_on, grouping_llm, csv_file):
+    keep = _saved_session(client, [csv_file])
+    _save_snapshots("20260101_000000_dead00")  # written with no source files at all
+
+    body = _prune(client, keep_newest=0, unreplayable_only=True, dry_run=False).json()
+
+    assert body["deleted"] == ["20260101_000000_dead00"]
+    listed = client.get("/api/admin/sessions", headers=AUTH).json()["sessions"]
+    assert [s["session_id"] for s in listed] == [keep]
+
+
+def test_listing_reports_size_and_age(
+    client, admin_on, history_on, grouping_llm, csv_file
+):
+    _saved_session(client, [csv_file])
+
+    body = client.get("/api/admin/sessions", headers=AUTH).json()
+    entry = body["sessions"][0]
+    assert entry["bytes"] >= csv_file.stat().st_size
+    assert entry["age_days"] is not None and entry["age_days"] < 1
+    assert body["total_bytes"] == entry["bytes"]
 
 
 # ---------------------------------------------------------------------------

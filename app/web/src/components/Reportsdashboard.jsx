@@ -29,6 +29,8 @@ export default function ReportsDashboard({
   generating,
   errors = {},
   sessionId,
+  replaySessionId = null,
+  onExitReplay = null,
 }) {
   const [showTable, setShowTable] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -40,10 +42,18 @@ export default function ReportsDashboard({
   const stats = report?.stats;
   const hasStats = !!stats?.available;
 
+  const replayBanner = (
+    <ReplayBanner sessionId={replaySessionId} onExit={onExitReplay} />
+  );
+
   if (!report && !recList.length) {
     return (
       <div className="reports-page">
         <div className="eyebrow eyebrow--accent" style={{ marginBottom: 20 }}>STEP 3 — RESULTS</div>
+        {/* Rendered here too, not only below: a replay that came back empty would
+            otherwise strand the reader on this page with no way back to their own
+            session. */}
+        {replayBanner}
         <Card>
           <div className="empty-state">
             <div className="empty-state__title">No report yet</div>
@@ -59,6 +69,8 @@ export default function ReportsDashboard({
     <div className="reports-page">
       <div className="eyebrow eyebrow--accent" style={{ marginBottom: 20 }}>STEP 3 — RESULTS</div>
 
+      {replayBanner}
+
       {/* Only the report being looked at. A background build that failed for another
           letter is reported on that letter's own card, not here. */}
       {activeError && report && <div className="error-banner">{activeError}</div>}
@@ -71,7 +83,6 @@ export default function ReportsDashboard({
         inFlight={inFlight}
         comparing={comparing}
         onToggleCompare={() => setComparing((c) => !c)}
-        fileProfiles={fileProfiles}
       />
 
       {comparing ? (
@@ -121,6 +132,7 @@ export default function ReportsDashboard({
 
           <Section
             title="Report data"
+            subtitle={<Provenance report={report} fileProfiles={fileProfiles} />}
             actions={
               <button className="table-toggle" onClick={() => setShowTable((s) => !s)}>
                 {showTable ? 'Hide table' : 'Show table'}
@@ -161,11 +173,39 @@ export default function ReportsDashboard({
   );
 }
 
+/**
+ * "You are not looking at your own data."
+ *
+ * A replayed report is rendered by this same page, from a payload the live endpoint
+ * would have produced, so nothing on screen distinguishes it from a live one - on a
+ * page whose whole premise is that every claim is labelled with where it came from.
+ * Hence the label, and hence naming the session id rather than just saying "saved":
+ * the id is what a developer matches against the row they clicked.
+ *
+ * Both props are null in the app users run, so this renders nothing there.
+ */
+function ReplayBanner({ sessionId, onExit }) {
+  if (!onExit) return null;
+
+  return (
+    <div className="replay-banner" role="status">
+      <span>
+        <strong>Viewing a saved session</strong>{' '}
+        <span className="replay-banner__id">{sessionId}</span>. Rebuilt from the stored
+        workbook by today’s pipeline — not necessarily the report the user saw.
+      </span>
+      <button type="button" className="table-toggle" onClick={onExit}>
+        Back to my session
+      </button>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ header */
 
 function ReportHeader({
   report, recList, activeType, onSelectType, inFlight,
-  comparing, onToggleCompare, fileProfiles,
+  comparing, onToggleCompare,
 }) {
   const letters = recList.map((_, i) => String.fromCharCode(65 + i));
   const rec = recList[activeType.charCodeAt(0) - 65];
@@ -187,7 +227,6 @@ function ReportHeader({
               <em>“{question}”</em>
             </p>
           )}
-          <Provenance report={report} fileProfiles={fileProfiles} />
         </div>
 
         <div className="report-header__controls">

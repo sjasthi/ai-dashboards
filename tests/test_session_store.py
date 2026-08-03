@@ -15,6 +15,7 @@ else in the suite would notice.
 
 import json
 import os
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -235,6 +236,226 @@ def test_delete_session_removes_the_directory(workbook):
     assert session_store.list_sessions() == []
     # Deleting something already gone is not an error.
     assert session_store.delete_session("20260803_120000_abcdef") is False
+
+
+# ---------------------------------------------------------------------------
+# Size and age — what makes a prune an informed decision
+# ---------------------------------------------------------------------------
+
+def test_listing_reports_size_on_disk(workbook):
+    save(file_paths=[str(workbook)])
+    entry = session_store.list_sessions()[0]
+
+    # Essentially all of it is the retained workbook; the manifest is noise.
+    assert entry["bytes"] >= workbook.stat().st_size
+    assert session_store.total_bytes() == entry["bytes"]
+
+
+def test_size_of_an_unknown_session_is_zero():
+    assert session_store.session_bytes("nosuch") == 0
+
+
+def test_listing_reports_age_from_the_manifest(workbook, monkeypatch):
+    save(file_paths=[str(workbook)])
+    _backdate("20260803_120000_abcdef", days=10)
+
+    entry = session_store.list_sessions()[0]
+    assert 9.5 < entry["age_days"] < 10.5
+
+
+def test_age_falls_back_to_mtime_when_saved_at_is_unusable(workbook):
+    """A hand-edited manifest must not become un-prunable — those are exactly the
+    directories worth clearing out."""
+    save(file_paths=[str(workbook)])
+    path = session_store.session_dir("20260803_120000_abcdef") / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["saved_at"] = "not a timestamp"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert session_store.age_days_of("20260803_120000_abcdef") is not None
+
+
+def _backdate(session_id, days):
+    """Rewrite a manifest's saved_at to `days` ago."""
+    from datetime import timedelta
+    path = session_store.session_dir(session_id) / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["saved_at"] = (datetime.now() - timedelta(days=days)).isoformat()
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _save_aged(session_id, days, workbook):
+    save(session_id=session_id, file_paths=[str(workbook)])
+    _backdate(session_id, days)
+
+
+# ---------------------------------------------------------------------------
+# Pruning
+# ---------------------------------------------------------------------------
+
+def test_no_criterion_is_refused(workbook):
+    """The natural reading of "no criterion" is "everything", and that must never
+    be reachable by an empty request or a typo'd field name."""
+    save(file_paths=[str(workbook)])
+    with pytest.raises(session_store.PruneCriterionError):
+        session_store.prune_sessions()
+    assert session_store.list_sessions(), "nothing may be deleted by a refused call"
+
+
+def test_two_criteria_are_refused(workbook):
+    save(file_paths=[str(workbook)])
+    with pytest.raises(session_store.PruneCriterionError):
+        session_store.prune_sessions(older_than_days=1, keep_newest=1)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"older_than_days": -1},
+    {"keep_newest": -1},
+])
+def test_negative_criteria_are_refused(kwargs):
+    with pytest.raises(session_store.PruneCriterionError):
+        session_store.prune_sessions(**kwargs)
+
+
+def test_dry_run_deletes_nothing_but_reports_everything(workbook):
+    _save_aged("20260101_000000_old000", days=40, workbook=workbook)
+    _save_aged("20260803_120000_new000", days=1, workbook=workbook)
+
+    result = session_store.prune_sessions(older_than_days=30)
+
+    assert result["dry_run"] is True
+    assert [m["session_id"] for m in result["matched"]] == ["20260101_000000_old000"]
+    assert result["deleted"] == []
+    assert result["freed_bytes"] > 0
+    # The disk is untouched: a preview is a question, not an action.
+    assert len(session_store.list_sessions()) == 2
+
+
+def test_the_dry_run_projection_matches_what_the_real_run_frees(workbook):
+    _save_aged("20260101_000000_old000", days=40, workbook=workbook)
+    _save_aged("20260803_120000_new000", days=1, workbook=workbook)
+
+    preview = session_store.prune_sessions(older_than_days=30)
+    live = session_store.prune_sessions(older_than_days=30, dry_run=False)
+
+    # If these disagreed, the preview would be lying about the thing it exists to
+    # promise, and no developer would trust the confirm step again.
+    assert preview["freed_bytes"] == live["freed_bytes"]
+    assert [m["session_id"] for m in preview["matched"]] == live["deleted"]
+
+
+def test_older_than_days_keeps_the_young_ones(workbook):
+    _save_aged("20260101_000000_old000", days=40, workbook=workbook)
+    _save_aged("20260601_000000_mid000", days=31, workbook=workbook)
+    _save_aged("20260803_120000_new000", days=2, workbook=workbook)
+
+    result = session_store.prune_sessions(older_than_days=30, dry_run=False)
+
+    assert sorted(result["deleted"]) == ["20260101_000000_old000", "20260601_000000_mid000"]
+    assert [s["session_id"] for s in session_store.list_sessions()] == [
+        "20260803_120000_new000"
+    ]
+    assert result["remaining"] == 1
+
+
+def test_older_than_zero_matches_everything(workbook):
+    """Not a special case, but worth pinning: 0 days means "all of it"."""
+    _save_aged("20260101_000000_old000", days=40, workbook=workbook)
+    _save_aged("20260803_120000_new000", days=0, workbook=workbook)
+
+    result = session_store.prune_sessions(older_than_days=0)
+    assert len(result["matched"]) == 2
+
+
+def test_keep_newest_keeps_the_newest(workbook):
+    for sid in ("20260101_000000_aaaaaa", "20260501_000000_bbbbbb",
+                "20260701_000000_cccccc", "20260803_000000_dddddd"):
+        save(session_id=sid, file_paths=[str(workbook)])
+
+    result = session_store.prune_sessions(keep_newest=2, dry_run=False)
+
+    assert sorted(result["deleted"]) == ["20260101_000000_aaaaaa", "20260501_000000_bbbbbb"]
+    assert [s["session_id"] for s in session_store.list_sessions()] == [
+        "20260803_000000_dddddd", "20260701_000000_cccccc",
+    ]
+
+
+def test_keep_newest_larger_than_the_collection_deletes_nothing(workbook):
+    save(file_paths=[str(workbook)])
+    result = session_store.prune_sessions(keep_newest=10, dry_run=False)
+    assert result["deleted"] == []
+    assert len(session_store.list_sessions()) == 1
+
+
+def test_keep_newest_zero_takes_everything(workbook):
+    save(file_paths=[str(workbook)])
+    result = session_store.prune_sessions(keep_newest=0, dry_run=False)
+    assert len(result["deleted"]) == 1
+
+
+def test_explicit_ids_delete_exactly_those(workbook):
+    for sid in ("20260101_000000_aaaaaa", "20260501_000000_bbbbbb",
+                "20260701_000000_cccccc"):
+        save(session_id=sid, file_paths=[str(workbook)])
+
+    result = session_store.prune_sessions(
+        session_ids=["20260101_000000_aaaaaa", "20260701_000000_cccccc"], dry_run=False
+    )
+
+    assert sorted(result["deleted"]) == ["20260101_000000_aaaaaa", "20260701_000000_cccccc"]
+    assert [s["session_id"] for s in session_store.list_sessions()] == [
+        "20260501_000000_bbbbbb"
+    ]
+
+
+def test_unknown_ids_are_ignored_rather_than_fatal(workbook):
+    """Two people pruning at once is the usual cause, and half a delete is worse
+    than a tolerated no-op."""
+    save(session_id="20260501_000000_bbbbbb", file_paths=[str(workbook)])
+
+    result = session_store.prune_sessions(
+        session_ids=["nosuch", "20260501_000000_bbbbbb"], dry_run=False
+    )
+    assert result["deleted"] == ["20260501_000000_bbbbbb"]
+    assert session_store.list_sessions() == []
+
+
+def test_empty_id_list_is_a_valid_no_op(workbook):
+    """Distinct from passing no criterion at all: an explicitly empty selection
+    means "delete nothing", and must not be read as "delete everything"."""
+    save(file_paths=[str(workbook)])
+    result = session_store.prune_sessions(session_ids=[], dry_run=False)
+    assert result["deleted"] == []
+    assert len(session_store.list_sessions()) == 1
+
+
+def test_unreplayable_only_narrows_the_match(workbook):
+    _save_aged("20260101_000000_dead00", days=40, workbook=workbook)
+    _save_aged("20260102_000000_alive0", days=40, workbook=workbook)
+    for f in (session_store.session_dir("20260101_000000_dead00") / "source").iterdir():
+        f.unlink()
+
+    result = session_store.prune_sessions(
+        older_than_days=30, unreplayable_only=True, dry_run=False
+    )
+
+    # Both were old enough; only the one that could no longer be replayed went.
+    assert result["deleted"] == ["20260101_000000_dead00"]
+    assert [s["session_id"] for s in session_store.list_sessions()] == [
+        "20260102_000000_alive0"
+    ]
+
+
+def test_matched_entries_carry_what_a_reviewer_needs(workbook):
+    _save_aged("20260101_000000_old000", days=40, workbook=workbook)
+    match = session_store.prune_sessions(older_than_days=30)["matched"][0]
+
+    # The preview is a confirmation screen, so it has to say what is being lost.
+    assert match["session_id"] == "20260101_000000_old000"
+    assert match["files"] == ["sales.xlsx"]
+    assert match["bytes"] > 0
+    assert match["age_days"] > 30
+    assert match["replayable"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -149,6 +149,23 @@ class BrowserEvent(BaseModel):
     props: dict = Field(default_factory=dict)
 
 
+class PruneRequest(BaseModel):
+    """Which saved sessions to delete, and whether to actually do it.
+
+    Exactly one of the three criteria must be set - validated in session_store, not
+    here, so the rule lives beside the code that acts on it. Zero criteria is
+    rejected rather than treated as "all": an empty body must never be a request to
+    delete everything.
+
+    dry_run defaults to True so that the dangerous direction requires saying so.
+    """
+    session_ids: Optional[list[str]] = Field(None, max_length=1000)
+    older_than_days: Optional[float] = Field(None, ge=0)
+    keep_newest: Optional[int] = Field(None, ge=0)
+    unreplayable_only: bool = False
+    dry_run: bool = True
+
+
 class BrowserEventBatch(BaseModel):
     """A batch of browser events.
 
@@ -1308,10 +1325,54 @@ def admin_list_sessions(limit: int = 200, _token: str = Depends(admin_token)):
     disabled row instead of failing the whole listing.
     """
     _require_session_store()
+    sessions = session_store.list_sessions(limit=limit)
     return {
-        "sessions": session_store.list_sessions(limit=limit),
+        "sessions": sessions,
         "history_enabled": session_store.history_enabled(),
         "live_sessions": sorted(SESSIONS.keys()),
+        # The footprint of everything listed. Retention is a conversation about this
+        # number, so the page that shows what is being kept also shows what it costs.
+        "total_bytes": sum(s["bytes"] for s in sessions),
+    }
+
+
+@app.get("/api/admin/sessions/{session_id}")
+def admin_session_detail(session_id: str, _token: str = Depends(admin_token)):
+    """One saved session's recommendations, verbatim from its manifest.
+
+    A separate route rather than a field on the listing: the listing returns up to
+    200 sessions, and the recommendations are the full LLM output - carrying them
+    per row would inflate every response to draw the switcher for one session.
+
+    Deliberately does *not* call rehydrate_session(). Drawing a report switcher
+    needs the recommendation list and nothing else, and rehydrating would re-read
+    and re-profile every saved workbook to answer a question the manifest already
+    answers. Only /reports/{letter} pays that cost, and only when a report is asked
+    for.
+    """
+    _require_session_store()
+    manifest = session_store.load_manifest(session_id)
+    if manifest is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved session {session_id} — it was never saved "
+                   f"(SAVE_REPORT_HISTORY off) or has been deleted.",
+        )
+
+    return {
+        "session_id": session_id,
+        "saved_at": manifest.get("saved_at"),
+        "client_id": manifest.get("client_id"),
+        "app_version": manifest.get("app_version"),
+        # Same fallback as list_sessions: upload metadata first, then the names
+        # actually copied, so a snapshot saved without file metadata still names
+        # its own inputs.
+        "files": (
+            [f.get("name") for f in (manifest.get("files") or [])]
+            or list(manifest.get("source_files") or [])
+        ),
+        "replayable": session_store.is_replayable(session_id),
+        "recommendations": manifest.get("recommendations"),
     }
 
 
@@ -1362,6 +1423,49 @@ def admin_delete_session(session_id: str, _token: str = Depends(admin_token)):
         raise HTTPException(status_code=404, detail=f"No saved session {session_id}")
     SESSIONS.pop(session_id, None)
     return {"session_id": session_id, "deleted": True}
+
+
+@app.post("/api/admin/sessions/prune")
+def admin_prune_sessions(request: PruneRequest, _token: str = Depends(admin_token)):
+    """Delete a set of saved sessions chosen by one criterion. Previews by default.
+
+    POST rather than DELETE because this carries a body and a dry-run flag, and a
+    DELETE with a body is handled inconsistently by proxies and clients.
+
+    The two-step shape is the safety mechanism: `dry_run: true` (the default)
+    returns exactly what *would* go and how many bytes it *would* free, without
+    touching the disk. The caller repeats the call with `dry_run: false` to commit.
+    There is deliberately no single-call "delete everything matching" convenience -
+    this removes the only copy of files a user handed us.
+
+    Retention is otherwise manual and unautomated. `older_than_days` exists so that
+    a policy can be tried on for size before anything is wired to a timer: dry-run
+    it at 30 and you are reading the exact list a 30-day rule would have taken.
+    """
+    _require_session_store()
+    try:
+        result = session_store.prune_sessions(
+            session_ids=request.session_ids,
+            older_than_days=request.older_than_days,
+            keep_newest=request.keep_newest,
+            unreplayable_only=request.unreplayable_only,
+            dry_run=request.dry_run,
+        )
+    except session_store.PruneCriterionError as e:
+        # 400, not 500: the caller asked for something incoherent, and the message
+        # says which of the three criteria to pick.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # A pruned session that is still in memory would keep answering replays from a
+    # snapshot that no longer exists on disk, and would 404 confusingly on the next
+    # restart. Dropping it keeps the two views of "what exists" in agreement.
+    for session_id in result["deleted"]:
+        SESSIONS.pop(session_id, None)
+
+    if result["deleted"]:
+        print(f"[API] Pruned {len(result['deleted'])} session(s), "
+              f"freed {result['freed_bytes']} bytes")
+    return result
 
 
 @app.get("/api/admin/stats")

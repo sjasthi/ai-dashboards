@@ -189,6 +189,63 @@ def is_replayable(session_id) -> bool:
     ).is_file()
 
 
+def session_bytes(session_id) -> int:
+    """Total bytes one snapshot occupies on disk, source files included.
+
+    Reported by the listing because pruning without it is guesswork: the manifest
+    and profiles are a few kilobytes, and essentially the whole footprint is the
+    retained workbook. A developer deciding what to delete needs to see which rows
+    are the 30 MB ones.
+
+    Walked per call rather than cached. At capstone scale this is a few hundred
+    stat calls on a listing that a person triggers by hand; a cache would need
+    invalidating on every save and delete for no measurable gain.
+    """
+    total = 0
+    root = session_dir(session_id)
+    if not root.is_dir():
+        return 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            # A file that vanished mid-walk contributes nothing rather than
+            # exploding a listing that is only reporting a number.
+            continue
+    return total
+
+
+def saved_at_of(session_id, manifest=None):
+    """When a snapshot was taken, as a datetime, or None if it can't be told.
+
+    Prefers the manifest's own `saved_at`. Falls back to the directory's mtime,
+    because an age-based prune must not silently skip a session whose manifest was
+    hand-edited into an unparseable state - those are exactly the ones worth
+    clearing out.
+    """
+    if manifest is None:
+        manifest = load_manifest(session_id)
+    raw = (manifest or {}).get("saved_at")
+    if raw:
+        try:
+            return datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return datetime.fromtimestamp(session_dir(session_id).stat().st_mtime)
+    except OSError:
+        return None
+
+
+def age_days_of(session_id, manifest=None):
+    """How many days ago this snapshot was saved, or None if unknown."""
+    saved = saved_at_of(session_id, manifest)
+    if saved is None:
+        return None
+    return max(0.0, (datetime.now() - saved).total_seconds() / 86400)
+
+
 def list_sessions(limit=200):
     """Every saved session, newest first, as summary dicts.
 
@@ -218,8 +275,15 @@ def list_sessions(limit=200):
             "client_id": manifest.get("client_id"),
             "app_version": manifest.get("app_version"),
             "pandas_version": manifest.get("pandas_version"),
-            "files": [f.get("name") for f in (manifest.get("files") or [])],
-            "file_count": len(manifest.get("files") or []),
+            # Upload metadata first, since it is what the user's own screen showed.
+            # Falling back to the names actually copied matters for the prune
+            # preview: a confirmation screen that lists no files for a session
+            # holding a 30 MB workbook is telling the reader the wrong thing.
+            "files": (
+                [f.get("name") for f in (manifest.get("files") or [])]
+                or list(manifest.get("source_files") or [])
+            ),
+            "file_count": len(manifest.get("files") or manifest.get("source_files") or []),
             # Letter + name per recommendation, so the listing can offer the
             # replay links without a second request per session.
             "reports": [
@@ -227,6 +291,10 @@ def list_sessions(limit=200):
                 for i, r in enumerate(recs)
             ],
             "replayable": is_replayable(entry.name),
+            # What this session costs to keep, and how long it has been kept.
+            # Both exist so pruning is a decision made from evidence.
+            "bytes": session_bytes(entry.name),
+            "age_days": age_days_of(entry.name, manifest),
         })
         if len(out) >= limit:
             break
@@ -240,3 +308,128 @@ def delete_session(session_id) -> bool:
         return False
     shutil.rmtree(target)
     return True
+
+
+class PruneCriterionError(ValueError):
+    """No criterion, or more than one, was given to prune_sessions()."""
+
+
+def prune_sessions(
+    session_ids=None,
+    older_than_days=None,
+    keep_newest=None,
+    unreplayable_only=False,
+    dry_run=True,
+):
+    """Delete a set of snapshots chosen by exactly one criterion.
+
+    This is the manual half of retention. Nothing in this module deletes anything on
+    a timer: a developer decides what goes, and the age-based criterion doubles as a
+    rehearsal for whatever automatic policy gets adopted later - run
+    `older_than_days=30` as a dry run and you are reading precisely what a 30-day
+    retention rule would have removed.
+
+    Exactly one of `session_ids`, `older_than_days` or `keep_newest` must be given.
+    Zero is an error rather than a default, because the natural meaning of "no
+    criterion" is "everything", and that must never be reachable by an empty request
+    or a typo'd field name. Two at once is an error because their intersection is
+    ambiguous to a reader of the call site.
+
+    `unreplayable_only` narrows whichever criterion was chosen to sessions whose
+    source files are already gone. Those are dead weight - a manifest describing a
+    replay that can no longer happen - so clearing them frees space without losing
+    anything that still worked.
+
+    dry_run defaults to True. The preview is the confirmation step for a bulk
+    delete: the caller sees the exact list and the exact byte count, then repeats the
+    call with dry_run=False.
+
+    Returns:
+        {"dry_run", "criterion", "matched": [{session_id, bytes, age_days,
+         saved_at, replayable}], "deleted": [ids], "failed": [{id, error}],
+         "freed_bytes", "remaining"}
+
+    Raises:
+        PruneCriterionError: on zero or multiple criteria.
+    """
+    given = [
+        ("session_ids", session_ids is not None),
+        ("older_than_days", older_than_days is not None),
+        ("keep_newest", keep_newest is not None),
+    ]
+    chosen = [name for name, present in given if present]
+    if len(chosen) != 1:
+        raise PruneCriterionError(
+            "Pass exactly one of session_ids, older_than_days or keep_newest — "
+            f"got {chosen or 'none'}."
+        )
+    criterion = chosen[0]
+
+    # list_sessions is already newest-first and already skips directories with no
+    # manifest, so keep_newest counts snapshots rather than stray folders.
+    everything = list_sessions(limit=10_000)
+    by_id = {s["session_id"]: s for s in everything}
+
+    if criterion == "session_ids":
+        # Preserve the caller's order, drop ids that aren't snapshots. An unknown id
+        # is silently ignored rather than fatal: the usual cause is two people
+        # pruning at once, and half a delete is worse than a tolerated no-op.
+        matched = [by_id[sid] for sid in session_ids if sid in by_id]
+    elif criterion == "older_than_days":
+        cutoff = float(older_than_days)
+        if cutoff < 0:
+            raise PruneCriterionError("older_than_days cannot be negative.")
+        matched = [
+            s for s in everything
+            if s["age_days"] is not None and s["age_days"] >= cutoff
+        ]
+    else:
+        keep = int(keep_newest)
+        if keep < 0:
+            raise PruneCriterionError("keep_newest cannot be negative.")
+        matched = everything[keep:]
+
+    if unreplayable_only:
+        matched = [s for s in matched if not s["replayable"]]
+
+    result = {
+        "dry_run": bool(dry_run),
+        "criterion": criterion,
+        "matched": [
+            {
+                "session_id": s["session_id"], "bytes": s["bytes"],
+                "age_days": s["age_days"], "saved_at": s["saved_at"],
+                "replayable": s["replayable"], "files": s["files"],
+            }
+            for s in matched
+        ],
+        "deleted": [],
+        "failed": [],
+        # What the preview promises, and what the real run actually reclaimed. On a
+        # dry run this is the projection; on a live one it counts only what went.
+        "freed_bytes": sum(s["bytes"] for s in matched),
+    }
+
+    if not dry_run:
+        freed = 0
+        for s in matched:
+            try:
+                if delete_session(s["session_id"]):
+                    result["deleted"].append(s["session_id"])
+                    freed += s["bytes"]
+            except OSError as e:
+                # One locked directory - Windows holds handles longer than you would
+                # like - must not abandon the rest of the sweep.
+                print(f"[session_store] Could not delete {s['session_id']}: {e}")
+                result["failed"].append({
+                    "session_id": s["session_id"], "error": f"{type(e).__name__}: {e}",
+                })
+        result["freed_bytes"] = freed
+
+    result["remaining"] = len(everything) - len(result["deleted"])
+    return result
+
+
+def total_bytes():
+    """What every snapshot costs together — the number retention is about."""
+    return sum(s["bytes"] for s in list_sessions(limit=10_000))

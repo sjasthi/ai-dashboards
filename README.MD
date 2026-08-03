@@ -91,7 +91,7 @@ uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
 # Terminal 2 — frontend on http://localhost:5173
 npm --prefix app/web run dev
 ```
-
+<!-- Dev view: http://localhost:5173/?dev=1 -->
 Then open http://localhost:5173. See [RUNNING_APP.md](RUNNING_APP.md) for
 troubleshooting and the API reference.
 

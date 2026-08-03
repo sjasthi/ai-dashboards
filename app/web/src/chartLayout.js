@@ -68,8 +68,20 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
   };
 
   if (!NON_CARTESIAN.has(traceType)) {
-    layout.xaxis = { ...(base.xaxis || {}), ...axis };
-    layout.yaxis = { ...(base.yaxis || {}), ...axis };
+    // `axis` only carries title *font* styling, while base.xaxis/yaxis (built server-side
+    // in chart_builder.py) carries the title *text*. A shallow spread of `axis` after
+    // `base.xaxis` would replace the whole `title` object and silently drop that text,
+    // so the two title objects are merged explicitly instead.
+    layout.xaxis = {
+      ...(base.xaxis || {}),
+      ...axis,
+      title: { ...(base.xaxis?.title || {}), ...axis.title },
+    };
+    layout.yaxis = {
+      ...(base.yaxis || {}),
+      ...axis,
+      title: { ...(base.yaxis?.title || {}), ...axis.title },
+    };
     if (compact) {
       layout.xaxis.title = undefined;
       layout.yaxis.title = undefined;
