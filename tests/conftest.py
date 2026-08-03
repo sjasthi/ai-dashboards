@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.api as api
+from app.data import session_store
 from tests import loading_checks
 
 
@@ -39,6 +40,31 @@ def isolated_telemetry_db(tmp_path, monkeypatch):
     # would then pass or fail depending on whose machine the suite is on. Deleting
     # it here sticks, because nothing calls load_dotenv() again after import.
     monkeypatch.delenv("TELEMETRY_STORE_NAMES", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def isolated_session_store(tmp_path, monkeypatch):
+    """Point the session snapshot store at a throwaway directory, and turn it off.
+
+    Same "whose machine is the suite on" reasoning as isolated_telemetry_db. A
+    developer with SAVE_REPORT_HISTORY=true in their .env has it in os.environ for
+    the whole run (AI_Engine calls load_dotenv() at import), so without deleting it
+    here every upload test would write real session_data/<id>/ directories onto
+    their disk - holding copies of the corpus workbooks - and the "history is off by
+    default" assertions would pass or fail depending on the machine.
+
+    SESSION_ROOT is patched as well as the flag, so a test that opts back in with
+    monkeypatch.setenv still writes into tmp_path rather than the working tree.
+    """
+    monkeypatch.delenv("SAVE_REPORT_HISTORY", raising=False)
+    monkeypatch.setattr(session_store, "SESSION_ROOT", tmp_path / "session_data")
+    # report_builder writes its per-report trace into a session_data/ path of its
+    # own, which SESSION_ROOT above does not govern - so on a machine with
+    # SAVE_DEBUG_FILES=true in .env the suite was dropping report_debug_*.txt into
+    # the working tree. It reads the flag per call, so deleting it here takes
+    # effect. (AI_Engine captures the same variable at import and is unaffected;
+    # nothing in the suite reaches its write path.)
+    monkeypatch.delenv("SAVE_DEBUG_FILES", raising=False)
 
 
 @pytest.fixture(scope="session")

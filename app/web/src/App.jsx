@@ -1,10 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
 import SettingsDashboard from './components/Settingsdashboard';
 import { REPORT_TYPE_LETTERS, generateReport } from './api';
+
+/**
+ * The developer session browser, behind two independent gates.
+ *
+ * `import.meta.env.DEV` is substituted with the literal `false` at build time, so
+ * the ternary collapses to `null` and the dynamic import inside it is eliminated -
+ * the module and everything it pulls in (the admin API client included) never
+ * reaches a production bundle. That makes "developer only" a build-time fact rather
+ * than a convention someone could quietly break.
+ *
+ * `?dev=1` is the second gate: it keeps the tab out of the way during ordinary
+ * local work, where an extra nav entry would just be noise. A query parameter
+ * rather than a route because this app has no router.
+ */
+const DevReportBrowser = import.meta.env.DEV
+  ? lazy(() => import('./dev/DevReportBrowser'))
+  : null;
+
+const DEV_TAB_ENABLED = !!DevReportBrowser
+  && new URLSearchParams(window.location.search).has('dev');
 
 export default function App() {
   // Home is the landing tab: arriving on Upload gave no answer to "what is this",
@@ -224,7 +244,8 @@ export default function App() {
         </div>
 
         <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['home', 'upload', 'analysis', 'reports', 'settings'].map(tab => (
+          {['home', 'upload', 'analysis', 'reports', 'settings',
+            ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </div>
@@ -284,6 +305,14 @@ export default function App() {
           />
         )}
         {activeTab === 'settings' && <SettingsDashboard />}
+        {/* Reads its own state from the admin API and sets none of App's: assigning
+            sessionId/recommendations here would trigger the prefetch effect above
+            and build reports B and C for a session someone only wanted to look at. */}
+        {DEV_TAB_ENABLED && activeTab === 'dev' && (
+          <Suspense fallback={<div style={{ padding: 24 }}>Loading developer tools…</div>}>
+            <DevReportBrowser />
+          </Suspense>
+        )}
       </main>
     </div>
   );
