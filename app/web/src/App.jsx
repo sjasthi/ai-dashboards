@@ -1,10 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
 import SettingsDashboard from './components/Settingsdashboard';
 import { REPORT_TYPE_LETTERS, generateReport } from './api';
+
+/**
+ * The developer session browser, behind two independent gates.
+ *
+ * `import.meta.env.DEV` is substituted with the literal `false` at build time, so
+ * the ternary collapses to `null` and the dynamic import inside it is eliminated -
+ * the module and everything it pulls in (the admin API client included) never
+ * reaches a production bundle. That makes "developer only" a build-time fact rather
+ * than a convention someone could quietly break.
+ *
+ * `?dev=1` is the second gate: it keeps the tab out of the way during ordinary
+ * local work, where an extra nav entry would just be noise. A query parameter
+ * rather than a route because this app has no router.
+ */
+const DevReportBrowser = import.meta.env.DEV
+  ? lazy(() => import('./dev/DevReportBrowser'))
+  : null;
+
+const DEV_TAB_ENABLED = !!DevReportBrowser
+  && new URLSearchParams(window.location.search).has('dev');
 
 export default function App() {
   // Home is the landing tab: arriving on Upload gave no answer to "what is this",
@@ -41,6 +61,25 @@ export default function App() {
   // show a failure for report C to someone who is still reading report A.
   const [generating, setGenerating] = useState(() => new Set());
   const [reportErrors, setReportErrors] = useState({});
+
+  /**
+   * A saved session being viewed on the Reports page instead of the live one.
+   *
+   * `null` normally. Held in its own slot rather than by assigning sessionId /
+   * recommendations / reports, for two reasons. The prefetch effect below watches
+   * those two, so writing a saved session into them would start building every
+   * remaining letter over HTTP for a session someone only wanted to look at. And
+   * the user's own session survives untouched, so leaving a replay restores it
+   * with its report cache intact rather than making them upload again.
+   *
+   * Shape: { sessionId, recommendations, reports, generating, errors, fetchReport }.
+   * `fetchReport` is injected by the developer module rather than imported here:
+   * everything under src/dev/ is dropped from a production build, and importing
+   * the admin client from App would pull it back in.
+   */
+  const [replay, setReplay] = useState(null);
+  const replayRef = useRef(null);
+  replayRef.current = replay;
 
   // Mirrors of state that the prefetch queue reads. The queue is one long-lived
   // async loop, so it can't depend on `reports`/`sessionId` as state without
@@ -129,6 +168,80 @@ export default function App() {
     return ensureReport(letter);
   }, [ensureReport]);
 
+  /**
+   * Show a saved session on the Reports page.
+   *
+   * Called by the developer browser once it has both the session's recommendations
+   * and its first rebuilt report, so the page renders filled in rather than
+   * flashing an empty state. Switching the tab here rather than there keeps the
+   * developer module unaware of how this app does navigation.
+   */
+  const loadReplay = useCallback(({ sessionId: sid, recommendations: recs, report, fetchReport }) => {
+    const letter = report?.report_type || 'A';
+    setReplay({
+      sessionId: sid,
+      recommendations: recs,
+      reports: report ? { [letter]: report } : {},
+      generating: new Set(),
+      errors: {},
+      fetchReport,
+    });
+    setActiveReportType(letter);
+    setActiveTab('reports');
+  }, []);
+
+  /**
+   * The Reports page's letter switcher while a replay is open.
+   *
+   * Deliberately without ensureReport's generation counter and in-flight map: those
+   * exist because a background queue and a user click race for the same letter, and
+   * because a new upload can invalidate a request already in the air. Neither
+   * happens here - every request starts from a click, and a replay is never
+   * replaced underneath itself. The one guard that is still needed is against a
+   * response arriving after the developer left the replay or opened a different
+   * session, which is what the session id check does.
+   */
+  const requestReplayReport = useCallback((letter) => {
+    setActiveReportType(letter);
+
+    const active = replayRef.current;
+    if (!active || active.reports[letter] || active.generating.has(letter)) return;
+
+    const sid = active.sessionId;
+    const stillOpen = () => replayRef.current?.sessionId === sid;
+    const patch = (fn) => setReplay((prev) => (prev?.sessionId === sid ? fn(prev) : prev));
+
+    patch((prev) => ({ ...prev, generating: new Set(prev.generating).add(letter) }));
+
+    active.fetchReport(sid, letter)
+      .then((data) => {
+        if (!stillOpen()) return;
+        patch((prev) => {
+          const errors = { ...prev.errors };
+          delete errors[letter];
+          return { ...prev, reports: { ...prev.reports, [letter]: data }, errors };
+        });
+      })
+      .catch((err) => {
+        if (!stillOpen()) return;
+        patch((prev) => ({
+          ...prev,
+          errors: {
+            ...prev.errors,
+            [letter]: err.message || `Report ${letter} could not be rebuilt.`,
+          },
+        }));
+      })
+      .finally(() => {
+        patch((prev) => {
+          if (!prev.generating.has(letter)) return prev;
+          const next = new Set(prev.generating);
+          next.delete(letter);
+          return { ...prev, generating: next };
+        });
+      });
+  }, []);
+
   const startNewSession = useCallback(() => {
     // A new upload invalidates every report built from the previous one. Requests
     // already in the air aren't cancellable, but bumping the generation makes
@@ -137,6 +250,10 @@ export default function App() {
     generation.current += 1;
     reportsRef.current = {};
     inFlight.current.clear();
+    // Someone uploading data wants to see *their* data. Leaving a replay in place
+    // would show the Reports page a saved session while Analysis described the new
+    // upload - two tabs disagreeing about which session is current.
+    setReplay(null);
     setReports({});
     setActiveReportType('A');
     setGenerating(new Set());
@@ -224,7 +341,8 @@ export default function App() {
         </div>
 
         <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['home', 'upload', 'analysis', 'reports', 'settings'].map(tab => (
+          {['home', 'upload', 'analysis', 'reports', 'settings',
+            ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </div>
@@ -272,18 +390,36 @@ export default function App() {
           />
         )}
         {activeTab === 'reports' && (
+          /* One page, two possible sources. A replay substitutes its own props
+             wholesale rather than being merged into the live ones, so the page
+             renders a saved session through exactly the code path it renders a
+             live one - and leaving the replay needs no repair, only setReplay(null). */
           <ReportsDashboard
-            sessionId={sessionId}
-            reports={reports}
+            sessionId={replay ? replay.sessionId : sessionId}
+            reports={replay ? replay.reports : reports}
             activeType={activeReportType}
-            onSelectType={requestReport}
-            recommendations={recommendations}
-            fileProfiles={fileProfiles}
-            generating={generating}
-            errors={reportErrors}
+            onSelectType={replay ? requestReplayReport : requestReport}
+            recommendations={replay ? replay.recommendations : recommendations}
+            /* Only a fallback for a report that names no source files, and a
+               replayed report always names its own - the live profiles would be
+               the wrong files entirely. */
+            fileProfiles={replay ? null : fileProfiles}
+            generating={replay ? replay.generating : generating}
+            errors={replay ? replay.errors : reportErrors}
+            replaySessionId={replay ? replay.sessionId : null}
+            onExitReplay={replay ? () => setReplay(null) : null}
           />
         )}
         {activeTab === 'settings' && <SettingsDashboard />}
+        {/* Hands back a saved session for `replay` above - a slot the prefetch
+            effect doesn't watch. Writing one into sessionId/recommendations instead
+            would build every remaining letter for a session someone only wanted to
+            look at, and would discard the live session to do it. */}
+        {DEV_TAB_ENABLED && activeTab === 'dev' && (
+          <Suspense fallback={<div style={{ padding: 24 }}>Loading developer tools…</div>}>
+            <DevReportBrowser onLoadSession={loadReplay} />
+          </Suspense>
+        )}
       </main>
     </div>
   );

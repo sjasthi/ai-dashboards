@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional
 import json
 import os
+import secrets
 import sys
 import tempfile
 import shutil
@@ -75,6 +76,17 @@ except ImportError as e:
     TELEMETRY_AVAILABLE = False
     print(f"[API] Telemetry not available: {e} — usage tracking is off")
 
+# Session snapshots (the developer report browser) get their own guarded import for
+# the third time for the third reason: saving a session's source workbook is a
+# developer convenience, and a failure to import it must never stop an analysis the
+# user actually asked for. Like telemetry, the call site adds a second try/except.
+try:
+    from app.data import session_store
+    SESSION_STORE_AVAILABLE = True
+except ImportError as e:
+    SESSION_STORE_AVAILABLE = False
+    print(f"[API] Session store not available: {e} — report history is off")
+
 # Ceiling on how many rows of a report are kept in SESSIONS, and the hard limit on
 # what an export may ask for. One constant for both so they cannot drift: anything
 # stored beyond what export can request is memory nothing will ever read.
@@ -135,6 +147,23 @@ class BrowserEvent(BaseModel):
     event: str = Field(..., max_length=64)
     session_id: Optional[str] = Field(None, max_length=64)
     props: dict = Field(default_factory=dict)
+
+
+class PruneRequest(BaseModel):
+    """Which saved sessions to delete, and whether to actually do it.
+
+    Exactly one of the three criteria must be set - validated in session_store, not
+    here, so the rule lives beside the code that acts on it. Zero criteria is
+    rejected rather than treated as "all": an empty body must never be a request to
+    delete everything.
+
+    dry_run defaults to True so that the dangerous direction requires saying so.
+    """
+    session_ids: Optional[list[str]] = Field(None, max_length=1000)
+    older_than_days: Optional[float] = Field(None, ge=0)
+    keep_newest: Optional[int] = Field(None, ge=0)
+    unreplayable_only: bool = False
+    dry_run: bool = True
 
 
 class BrowserEventBatch(BaseModel):
@@ -239,6 +268,26 @@ def track_report(**kwargs):
         telemetry.record_report(**kwargs)
     except Exception as e:
         print(f"[API] Telemetry report record failed: {type(e).__name__}: {e}")
+
+
+def save_snapshot(**kwargs):
+    """Persist one session's source files and manifest. Never raises.
+
+    Shaped like track_file/track_report above and for the same reason: report
+    history is a developer convenience layered onto a user request, so the two
+    independent guards (the import flag, then this try/except) mean neither a
+    missing module nor a full disk can turn a completed analysis into a 500.
+
+    The flag is checked here rather than at the call site so the handler reads as
+    one unconditional line and the "read the env per call" rule lives in one place.
+    """
+    if not SESSION_STORE_AVAILABLE or not session_store.history_enabled():
+        return
+    try:
+        session_store.save_session_snapshot(**kwargs)
+        print(f"[API] Saved session snapshot for {kwargs.get('session_id')}")
+    except Exception as e:
+        print(f"[API] Session snapshot failed: {type(e).__name__}: {e}")
 
 
 def _ext_of(filename):
@@ -755,7 +804,21 @@ def analyze_files_full(
             "analysis": recommendations,
             "tables": session_tables
         }
-        
+
+        # Persist the snapshot HERE, not later: the `finally` below deletes temp_dir,
+        # and once shutil.rmtree has run the uploaded files are gone for good. This
+        # is also the one point where every value the manifest needs is in scope.
+        # No-op unless SAVE_REPORT_HISTORY is on.
+        save_snapshot(
+            session_id=session_id,
+            client_id=client,
+            file_paths=file_paths,
+            sheet_selections=sheet_selections,
+            recommendations=recommendations,
+            file_profiles=file_profiles,
+            file_metadata=file_metadata,
+        )
+
         # NOTE: this "file_profiles" response field is actually `file_metadata`
         # (name/size/rows/columns). The full per-column `file_profiles` computed above
         # stays in SESSIONS; the report endpoint reads temporal granularity out of it.
@@ -854,6 +917,158 @@ def _describe_operations(operations):
     return described
 
 
+def _build_report(session, session_id, report_type):
+    """Everything after the cache check: generate_report → chart → stats → payload.
+
+    Lifted verbatim out of /api/generate-report so that a replay of a saved session
+    goes down the *same* code path a live request does. A second render path would
+    drift from this one within a release, and then the developer report browser
+    would be showing something the app never produces.
+
+    `session` is the SESSIONS entry (or one rehydrated from disk by
+    `rehydrate_session`) - this function only reads "recommendations", "tables" and
+    "file_profiles" from it, which is exactly what makes replay possible.
+
+    Returns (stored, diagnostics):
+        stored       the response payload plus a "data" key holding up to
+                     MAX_STORED_ROWS raw rows for the export appendix. The
+                     response is `stored` minus that key.
+        diagnostics  chart/stats failure class names, for telemetry only. They are
+                     returned alongside rather than folded into the payload because
+                     they are observations about the build, not part of the
+                     response contract the frontend renders.
+
+    Raises HTTPException(422) when the report itself could not be built.
+    """
+    recommendations = session.get("recommendations")
+
+    # Generate report using report_builder (executes operations on actual data).
+    # Uploaded data comes from the session's in-memory tables; file_paths stays
+    # empty so non-upload flows can still fall back to the datasets/ directory.
+    report_df = generate_report(
+        recommendations,
+        report_type,
+        file_paths={},
+        session_id=session_id,
+        tables=session.get("tables"),
+    )
+
+    # The report couldn't be built (bad recommendation, missing table, failed
+    # operation). Surface why instead of returning a blank report as a success.
+    report_error = report_df.attrs.get("error")
+    if report_error:
+        raise HTTPException(status_code=422, detail=f"Could not generate report: {report_error}")
+
+    # Build the chart the AI recommended for this same report (its plotly_config)
+    recs_list = recommendations.get("recommendations", [])
+    rec_idx = report_type_to_index(report_type)
+    selected_rec = recs_list[rec_idx] if rec_idx is not None and rec_idx < len(recs_list) else None
+
+    # Both initialised up front: axes_config used to be bound only inside the
+    # `if selected_rec:` branch, so anything reading it afterwards raised
+    # NameError on a report with no matching recommendation.
+    chart = None
+    axes_config = None
+    # Both failures below are swallowed so a user keeps their report. That makes
+    # them invisible in normal operation - nobody reads the console - so each
+    # one is counted instead. A rising chart-failure rate is exactly the kind of
+    # regression this whole phase exists to surface.
+    chart_failed = None
+    stats_failed = None
+    if selected_rec:
+        try:
+            axes_config = resolve_plotly_axes(
+                report_df,
+                selected_rec.get("plotly_config") or {},
+                selected_rec.get("required_operations", [])
+            )
+            chart = build_chart_figure(report_df, axes_config)
+        except Exception as e:
+            chart_failed = type(e).__name__
+            print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
+
+    # Real statistics, computed from the report's own rows. These replace the
+    # model's pre-execution guesses (question_answered / data_quality_warning /
+    # rationale_bullets), which were written before any data was aggregated and
+    # were being displayed as though they were findings.
+    schema_warning = report_df.attrs.get("schema_warning")
+    stats = {"available": False}
+    try:
+        stats = build_report_stats(
+            report_df,
+            axes_config,
+            pattern=(selected_rec or {}).get("pattern_used"),
+            granularity=_axis_granularity(
+                session.get("file_profiles"), (axes_config or {}).get("x_axis")
+            ),
+            llm_caveat=(selected_rec or {}).get("data_quality_warning"),
+            schema_warning=schema_warning,
+        )
+    except Exception as e:
+        # A stats failure must not cost the user their report or their chart.
+        stats_failed = type(e).__name__
+        print(f"[API] Warning: Failed to compute report stats: {type(e).__name__}: {e}")
+
+    # The user's own columns, without the two bookkeeping columns report_builder
+    # prepends. Counting those made every report claim two extra columns.
+    data_columns = [c for c in report_df.columns if c not in METADATA_COLUMNS]
+    rows = _json_safe_records(report_df, MAX_ROWS_RETURNED)
+    generated_at = datetime.now().isoformat()
+
+    payload = {
+        "session_id": session_id,
+        "report_type": report_type,
+        "status": "generated",
+        "report_name": selected_rec.get("report_name") if selected_rec else None,
+        "report_rows": len(report_df),
+        "columns": list(report_df.columns),
+        "data_columns": data_columns,
+        "chart": chart,
+        # The chart type the recommendation asked for. Reading it off the built
+        # figure instead reports Plotly's trace name, which labels every "line"
+        # recommendation as a "scatter".
+        "chart_type": ((selected_rec or {}).get("plotly_config") or {}).get("chart_type"),
+        "pattern_used": (selected_rec or {}).get("pattern_used"),
+        "question_answered": (selected_rec or {}).get("question_answered"),
+        "rationale_bullets": (selected_rec or {}).get("rationale_bullets", []),
+        "stats": stats,
+        "rows": rows,
+        "rows_truncated": len(report_df) > len(rows),
+        "schema_warning": schema_warning,
+        "generated_at": generated_at,
+        "source_files": sorted({
+            f for op in (selected_rec or {}).get("required_operations", []) or []
+            for f in op.get("files_involved", []) or []
+        }),
+        "operations": _describe_operations((selected_rec or {}).get("required_operations")),
+        "message": f"Report generated successfully with {len(report_df)} rows"
+    }
+
+    # Store the full report server-side; the response carries a capped slice.
+    #
+    # Capped at MAX_STORED_ROWS: the only reader is the export appendix, whose
+    # appendix_row_limit is validated against the same constant, so rows past
+    # it are unreachable. Without the cap a long report on a large upload sits
+    # in memory forever, and prefetching means three of them per session
+    # instead of one.
+    #
+    # "data" holds RAW records - NaN and NaT included, unlike "rows", which went
+    # through pandas' JSON writer. It is safe only because its readers are all
+    # server-side; returning it over HTTP raises ValueError in Starlette's
+    # allow_nan=False encoder on any report with one missing cell.
+    stored = {
+        **payload,
+        "generated_at": generated_at,
+        "data": report_df.head(MAX_STORED_ROWS).to_dict(orient="records"),
+    }
+    return stored, {"chart_error_type": chart_failed, "stats_error_type": stats_failed}
+
+
+def _response_of(stored):
+    """The HTTP response for a built report: everything but the server-side rows."""
+    return {k: v for k, v in stored.items() if k != "data"}
+
+
 # ----------------------------------------------------------------------------
 # [REAL] Used by Analysisdashboard.jsx
 # ----------------------------------------------------------------------------
@@ -917,131 +1132,23 @@ def generate_report_endpoint(
         # pattern statistic toward whatever gets re-requested most.
         track("report_generated", client=client, session=session_id,
               letter=report_type, is_cache_hit=True)
-        return {k: v for k, v in cached.items() if k != "data"}
+        return _response_of(cached)
 
     started = time.perf_counter()
     try:
         print(f"\n[API] Generating report for session {session_id}, type {report_type}")
-        
-        # Generate report using report_builder (executes operations on actual data).
-        # Uploaded data comes from the session's in-memory tables; file_paths stays
-        # empty so non-upload flows can still fall back to the datasets/ directory.
-        report_df = generate_report(
-            recommendations,
-            report_type,
-            file_paths={},
-            session_id=session_id,
-            tables=SESSIONS[session_id].get("tables")
-        )
 
-        # The report couldn't be built (bad recommendation, missing table, failed
-        # operation). Surface why instead of returning a blank report as a success.
-        report_error = report_df.attrs.get("error")
-        if report_error:
-            raise HTTPException(status_code=422, detail=f"Could not generate report: {report_error}")
+        stored, diagnostics = _build_report(session, session_id, report_type)
+        payload = _response_of(stored)
+        rows = payload["rows"]
+        data_columns = payload["data_columns"]
+        chart = payload["chart"]
+        schema_warning = payload["schema_warning"]
 
-        # Build the chart the AI recommended for this same report (its plotly_config)
-        recs_list = recommendations.get("recommendations", [])
-        rec_idx = report_type_to_index(report_type)
-        selected_rec = recs_list[rec_idx] if rec_idx is not None and rec_idx < len(recs_list) else None
-
-        # Both initialised up front: axes_config used to be bound only inside the
-        # `if selected_rec:` branch, so anything reading it afterwards raised
-        # NameError on a report with no matching recommendation.
-        chart = None
-        axes_config = None
-        # Both failures below are swallowed so a user keeps their report. That makes
-        # them invisible in normal operation - nobody reads the console - so each
-        # one is counted instead. A rising chart-failure rate is exactly the kind of
-        # regression this whole phase exists to surface.
-        chart_failed = None
-        stats_failed = None
-        if selected_rec:
-            try:
-                axes_config = resolve_plotly_axes(
-                    report_df,
-                    selected_rec.get("plotly_config") or {},
-                    selected_rec.get("required_operations", [])
-                )
-                chart = build_chart_figure(report_df, axes_config)
-            except Exception as e:
-                chart_failed = type(e).__name__
-                print(f"[API] Warning: Failed to build chart: {type(e).__name__}: {e}")
-
-        # Real statistics, computed from the report's own rows. These replace the
-        # model's pre-execution guesses (question_answered / data_quality_warning /
-        # rationale_bullets), which were written before any data was aggregated and
-        # were being displayed as though they were findings.
-        schema_warning = report_df.attrs.get("schema_warning")
-        stats = {"available": False}
-        try:
-            stats = build_report_stats(
-                report_df,
-                axes_config,
-                pattern=(selected_rec or {}).get("pattern_used"),
-                granularity=_axis_granularity(
-                    session.get("file_profiles"), (axes_config or {}).get("x_axis")
-                ),
-                llm_caveat=(selected_rec or {}).get("data_quality_warning"),
-                schema_warning=schema_warning,
-            )
-        except Exception as e:
-            # A stats failure must not cost the user their report or their chart.
-            stats_failed = type(e).__name__
-            print(f"[API] Warning: Failed to compute report stats: {type(e).__name__}: {e}")
-
-        # The user's own columns, without the two bookkeeping columns report_builder
-        # prepends. Counting those made every report claim two extra columns.
-        data_columns = [c for c in report_df.columns if c not in METADATA_COLUMNS]
-        rows = _json_safe_records(report_df, MAX_ROWS_RETURNED)
-        generated_at = datetime.now().isoformat()
-
-        payload = {
-            "session_id": session_id,
-            "report_type": report_type,
-            "status": "generated",
-            "report_name": selected_rec.get("report_name") if selected_rec else None,
-            "report_rows": len(report_df),
-            "columns": list(report_df.columns),
-            "data_columns": data_columns,
-            "chart": chart,
-            # The chart type the recommendation asked for. Reading it off the built
-            # figure instead reports Plotly's trace name, which labels every "line"
-            # recommendation as a "scatter".
-            "chart_type": ((selected_rec or {}).get("plotly_config") or {}).get("chart_type"),
-            "pattern_used": (selected_rec or {}).get("pattern_used"),
-            "question_answered": (selected_rec or {}).get("question_answered"),
-            "rationale_bullets": (selected_rec or {}).get("rationale_bullets", []),
-            "stats": stats,
-            "rows": rows,
-            "rows_truncated": len(report_df) > len(rows),
-            "schema_warning": schema_warning,
-            "generated_at": generated_at,
-            "source_files": sorted({
-                f for op in (selected_rec or {}).get("required_operations", []) or []
-                for f in op.get("files_involved", []) or []
-            }),
-            "operations": _describe_operations((selected_rec or {}).get("required_operations")),
-            "message": f"Report generated successfully with {len(report_df)} rows"
-        }
-
-        # Store the full report server-side; the response carries a capped slice.
-        #
         # Keyed by report type, because export needs every report the user has
         # generated, not just the last one. A single slot here meant generating A
         # then B left only B on the server, while the browser still showed both -
         # so a combined export of A and B was impossible to fulfil.
-        #
-        # Capped at MAX_STORED_ROWS: the only reader is the export appendix, whose
-        # appendix_row_limit is validated against the same constant, so rows past
-        # it are unreachable. Without the cap a long report on a large upload sits
-        # in memory forever, and prefetching means three of them per session
-        # instead of one.
-        stored = {
-            **payload,
-            "generated_at": generated_at,
-            "data": report_df.head(MAX_STORED_ROWS).to_dict(orient="records"),
-        }
         SESSIONS[session_id].setdefault("reports", {})[report_type] = stored
         # Legacy single slot, same object rather than a copy. Kept because
         # tests/test_generate_report_api.py still reads it.
@@ -1056,8 +1163,7 @@ def generate_report_endpoint(
             rows_truncated=payload["rows_truncated"],
             column_count=len(data_columns),
             has_chart=chart is not None,
-            chart_error_type=chart_failed,
-            stats_error_type=stats_failed,
+            **diagnostics,
             has_schema_warning=bool(schema_warning),
             operation_count=len(payload["operations"] or []),
             duration_ms=build_ms,
@@ -1088,6 +1194,300 @@ def generate_report_endpoint(
         track_report(session_id=session_id, client_id=client, letter=report_type,
                      build_ms=_elapsed_ms(started), ok=False, error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
+
+# ============================================================================
+# ADMIN — the developer report browser (Phase 3b)
+# ============================================================================
+# Token-gated, developer-only routes for inspecting and re-opening past sessions.
+# Nothing here is reachable from the user-facing app: there is no nav entry and the
+# frontend that calls them is stripped from production builds.
+#
+# The central idea is that a report is *derived*, so it is never stored. What gets
+# stored is the source workbook (app/data/session_store.py); a replay rebuilds the
+# report from it by calling the same _build_report() the live endpoint calls. That
+# costs zero LLM quota, and it means a past session re-rendered after a refactor
+# shows what today's code does with that input - a regression check, not an archive.
+
+
+def admin_token(x_admin_token: Optional[str] = Header(None)):
+    """Authorise an admin request, or refuse it.
+
+    Shaped like client_id() above - a plain function reading Header(None), wired in
+    with Depends - so it composes the same way the rest of this file's handlers do.
+
+    An unset ADMIN_TOKEN answers 404, not 401, deliberately: a deployment that never
+    configured these routes should not advertise that they exist. A wrong token when
+    one *is* configured gets 401, because at that point the caller already knows.
+
+    compare_digest rather than == so the comparison doesn't leak the token's length
+    or matching prefix through timing.
+
+    Read per call, and read from os.environ rather than by calling load_dotenv()
+    here. .env reaches the environment as a side effect of importing AI_Engine at
+    startup, so if the data modules failed to import, ADMIN_TOKEN looks unset and
+    every admin route 404s - fail-closed, which is the right direction for a gate.
+    Calling load_dotenv() per request the way emailer does would fix that, but it
+    would also re-populate variables the test suite deliberately deletes, making
+    the gate's behaviour depend on whose .env the suite is running against.
+    """
+    configured = (os.getenv("ADMIN_TOKEN") or "").strip()
+    if not configured:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not x_admin_token or not secrets.compare_digest(str(x_admin_token), configured):
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    return x_admin_token
+
+
+def _require_session_store():
+    """503 when the store failed to import, matching how export refuses."""
+    if not SESSION_STORE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Session history isn't available on this server — "
+                   "app/data/session_store.py failed to import. Check the startup log.",
+        )
+
+
+def rehydrate_session(session_id):
+    """Rebuild a SESSIONS entry from disk. No LLM call.
+
+    Only three things are needed to make a session real again: the recommendations
+    (stored verbatim in the manifest), the tables (rebuilt by re-reading the saved
+    workbooks through DataLoader), and the file profiles.
+
+    Profiles are *re-derived* rather than read back from the manifest, even though
+    the manifest holds a copy. The manifest's are plain JSON, and the one consumer
+    on this path - _axis_granularity - walks `profile.columns[].temporal_granularity`
+    as attributes, so dicts would silently yield no granularity and every date axis
+    would replay at day resolution. Re-profiling is deterministic and involves no
+    model call, so the honest fix is to recompute rather than to half-restore. The
+    manifest copy stays for inspection.
+
+    Raises:
+        HTTPException: 404 if the session was never saved, 410 if its source files
+            have since been deleted, 422 if the saved workbooks no longer load.
+    """
+    manifest = session_store.load_manifest(session_id)
+    if manifest is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved session {session_id} — it was never saved "
+                   f"(SAVE_REPORT_HISTORY off) or has been deleted.",
+        )
+
+    paths = session_store.source_paths(session_id)
+    if not paths:
+        # The directory is the source of truth (see session_store's docstring): a
+        # manifest with no source/ is expired, not broken. 410 says so precisely.
+        raise HTTPException(
+            status_code=410,
+            detail=f"Session {session_id} is no longer replayable — its saved source "
+                   f"files have been deleted. The manifest remains.",
+        )
+
+    loader = DataLoader()
+    # sheet_selections is passed through, not defaulted: it decides which worksheets
+    # exist and therefore what the table keys are, and the recommendations reference
+    # those keys. Replaying without it loads sheets the original run excluded.
+    loader.add_files(paths, manifest.get("sheet_selections"))
+    tables = loader.tables()
+    if not tables:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Session {session_id} loaded no tables — the saved files may be "
+                   f"corrupt, or the sheet selection no longer matches them.",
+        )
+
+    profiles = SummaryGenerator().profile_all_files(loader)
+
+    return {
+        "files": manifest.get("files") or [],
+        "status": "complete",
+        "created_at": manifest.get("saved_at"),
+        "file_profiles": profiles,
+        "recommendations": manifest.get("recommendations"),
+        "analysis": manifest.get("recommendations"),
+        "tables": tables,
+        # Marks this entry as reconstructed rather than uploaded. Nothing branches on
+        # it today; it exists so that a session in SESSIONS can be told apart from a
+        # live one when debugging.
+        "rehydrated": True,
+    }
+
+
+@app.get("/api/admin/sessions")
+def admin_list_sessions(limit: int = 200, _token: str = Depends(admin_token)):
+    """Every saved session, newest first.
+
+    Cheap: it reads manifests, never opens a workbook. `replayable` reflects whether
+    the source files are still on disk, so a hand-pruned session_data/ renders as a
+    disabled row instead of failing the whole listing.
+    """
+    _require_session_store()
+    sessions = session_store.list_sessions(limit=limit)
+    return {
+        "sessions": sessions,
+        "history_enabled": session_store.history_enabled(),
+        "live_sessions": sorted(SESSIONS.keys()),
+        # The footprint of everything listed. Retention is a conversation about this
+        # number, so the page that shows what is being kept also shows what it costs.
+        "total_bytes": sum(s["bytes"] for s in sessions),
+    }
+
+
+@app.get("/api/admin/sessions/{session_id}")
+def admin_session_detail(session_id: str, _token: str = Depends(admin_token)):
+    """One saved session's recommendations, verbatim from its manifest.
+
+    A separate route rather than a field on the listing: the listing returns up to
+    200 sessions, and the recommendations are the full LLM output - carrying them
+    per row would inflate every response to draw the switcher for one session.
+
+    Deliberately does *not* call rehydrate_session(). Drawing a report switcher
+    needs the recommendation list and nothing else, and rehydrating would re-read
+    and re-profile every saved workbook to answer a question the manifest already
+    answers. Only /reports/{letter} pays that cost, and only when a report is asked
+    for.
+    """
+    _require_session_store()
+    manifest = session_store.load_manifest(session_id)
+    if manifest is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved session {session_id} — it was never saved "
+                   f"(SAVE_REPORT_HISTORY off) or has been deleted.",
+        )
+
+    return {
+        "session_id": session_id,
+        "saved_at": manifest.get("saved_at"),
+        "client_id": manifest.get("client_id"),
+        "app_version": manifest.get("app_version"),
+        # Same fallback as list_sessions: upload metadata first, then the names
+        # actually copied, so a snapshot saved without file metadata still names
+        # its own inputs.
+        "files": (
+            [f.get("name") for f in (manifest.get("files") or [])]
+            or list(manifest.get("source_files") or [])
+        ),
+        "replayable": session_store.is_replayable(session_id),
+        "recommendations": manifest.get("recommendations"),
+    }
+
+
+@app.get("/api/admin/sessions/{session_id}/reports/{letter}")
+def admin_replay_report(session_id: str, letter: str, _token: str = Depends(admin_token)):
+    """Rebuild one report from a saved session and return it.
+
+    Rehydrates *into* SESSIONS, which makes the session genuinely exist again rather
+    than existing only for the duration of this call. That is what lets export work
+    on a replayed session: _resolve_export finds it by the same key.
+
+    A session already in memory (live, or replayed a moment ago) is reused, so
+    replaying B after A does not re-read the workbook from disk.
+    """
+    _require_session_store()
+    letter = (letter or "").strip().upper()
+
+    session = SESSIONS.get(session_id)
+    if session is None:
+        session = rehydrate_session(session_id)
+        SESSIONS[session_id] = session
+
+    if not session.get("recommendations"):
+        raise HTTPException(status_code=400, detail="No recommendations found in session")
+
+    cached = (session.get("reports") or {}).get(letter)
+    if cached:
+        return _response_of(cached)
+
+    # HTTPException (a 422 from a recommendation that no longer executes) is left to
+    # propagate untouched - D6's whole point is that a replay failing where the live
+    # run succeeded is a finding, and the viewer must show it rather than a blank.
+    stored, _diagnostics = _build_report(session, session_id, letter)
+    session.setdefault("reports", {})[letter] = stored
+    return _response_of(stored)
+
+
+@app.delete("/api/admin/sessions/{session_id}")
+def admin_delete_session(session_id: str, _token: str = Depends(admin_token)):
+    """Forget one saved session: its manifest and the workbooks it retained.
+
+    Retention is otherwise entirely manual, so the deletion story should at least be
+    reachable from the same interface that shows what is being retained.
+    """
+    _require_session_store()
+    deleted = session_store.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No saved session {session_id}")
+    SESSIONS.pop(session_id, None)
+    return {"session_id": session_id, "deleted": True}
+
+
+@app.post("/api/admin/sessions/prune")
+def admin_prune_sessions(request: PruneRequest, _token: str = Depends(admin_token)):
+    """Delete a set of saved sessions chosen by one criterion. Previews by default.
+
+    POST rather than DELETE because this carries a body and a dry-run flag, and a
+    DELETE with a body is handled inconsistently by proxies and clients.
+
+    The two-step shape is the safety mechanism: `dry_run: true` (the default)
+    returns exactly what *would* go and how many bytes it *would* free, without
+    touching the disk. The caller repeats the call with `dry_run: false` to commit.
+    There is deliberately no single-call "delete everything matching" convenience -
+    this removes the only copy of files a user handed us.
+
+    Retention is otherwise manual and unautomated. `older_than_days` exists so that
+    a policy can be tried on for size before anything is wired to a timer: dry-run
+    it at 30 and you are reading the exact list a 30-day rule would have taken.
+    """
+    _require_session_store()
+    try:
+        result = session_store.prune_sessions(
+            session_ids=request.session_ids,
+            older_than_days=request.older_than_days,
+            keep_newest=request.keep_newest,
+            unreplayable_only=request.unreplayable_only,
+            dry_run=request.dry_run,
+        )
+    except session_store.PruneCriterionError as e:
+        # 400, not 500: the caller asked for something incoherent, and the message
+        # says which of the three criteria to pick.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # A pruned session that is still in memory would keep answering replays from a
+    # snapshot that no longer exists on disk, and would 404 confusingly on the next
+    # restart. Dropping it keeps the two views of "what exists" in agreement.
+    for session_id in result["deleted"]:
+        SESSIONS.pop(session_id, None)
+
+    if result["deleted"]:
+        print(f"[API] Pruned {len(result['deleted'])} session(s), "
+              f"freed {result['freed_bytes']} bytes")
+    return result
+
+
+@app.get("/api/admin/stats")
+def admin_stats(limit: int = 100, _token: str = Depends(admin_token)):
+    """The usage database's raw event log, not just the aggregates /api/stats shows.
+
+    Reads go through telemetry's own accessors rather than raw SQL: they parse the
+    `props` JSON column back into dicts and swallow their own failures, so a caller
+    gets usable rows instead of opaque blobs.
+    """
+    if not TELEMETRY_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Telemetry isn't available on this server — check the startup log.",
+        )
+    return {
+        "summary": telemetry.stats(),
+        "events": telemetry.recent_events(limit=limit),
+        "files": telemetry.recent_files(limit=limit),
+        "reports": telemetry.recent_reports(limit=limit),
+    }
+
 
 # ============================================================================
 # EXPORT — download / email generated reports

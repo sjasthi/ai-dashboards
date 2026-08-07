@@ -237,8 +237,8 @@
 .report-header { margin-bottom: 20px; }
 
 /* Stacked, not a space-between row: as a row the A/B/C group's position depended on
-   how long the provenance line happened to be, so it sat below the metadata on a
-   report with three source files and jumped up to the far right on a report with one. */
+   how long the title/question text happened to be, so it drifted instead of staying
+   in a fixed spot. */
 .report-header__top {
   display: flex;
   flex-direction: column;
@@ -276,13 +276,13 @@
 
 .report-header__question em { font-style: italic; }
 
-/* Provenance: what produced these numbers, and when. */
+/* Provenance: what produced these numbers, and when. Stacks under the section title
+   (see .section__title-group) so it reads as the methods note for the section. */
 .provenance {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
-  margin-top: 12px;
   font-size: var(--size-xs);
   color: var(--color-text-muted);
 }
@@ -584,6 +584,13 @@
   margin-bottom: 12px;
 }
 
+.section__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .section__title {
   display: flex;
   align-items: center;
@@ -861,6 +868,30 @@
   font-size: var(--size-sm);
   color: #B91C1C;
 }
+
+/* Shown only while a developer is viewing a saved session in place of their own.
+   Amber rather than red: nothing is wrong, but every number below it was rebuilt
+   from someone else's stored workbook and must not be mistaken for live data. */
+.replay-banner {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  font-size: var(--size-sm);
+  color: #92400E;
+}
+
+.replay-banner__id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--size-xs);
+}
+
+.replay-banner button { margin-left: auto; }
 
 /* ---------- worksheet picker (upload step) ---------- */
 

@@ -87,12 +87,21 @@ export function directionGlyph(direction) {
   return '—';
 }
 
-/** An ISO timestamp as a local wall-clock time. */
+/**
+ * An ISO timestamp as a local wall-clock time: "11:38 AM".
+ *
+ * hour12 is set explicitly rather than left to the locale. Without it the same
+ * build renders "11:38 AM" or "23:38" depending on the reader's regional
+ * settings, so a screenshot and the machine that produced it could disagree -
+ * and a report stamped "11:38" with no meridiem is genuinely ambiguous.
+ */
 export function clockTime(iso) {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString(undefined, {
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
 }
 
 /**
