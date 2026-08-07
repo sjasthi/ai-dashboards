@@ -20,34 +20,31 @@ formatting-only sheet reports non-empty and then loads as nothing.
 Scanning costs a pass over the cells, which is the price of the two numbers
 agreeing. read_only/on_demand keep that pass streaming, so memory stays flat.
 
-Both readers count the header row, so it is subtracted; `empty` mirrors the
-`df.empty` test that makes DataLoader skip a sheet entirely.
+Both readers also detect which row is the header - not always row 1, since a
+sheet can carry blank spacer rows above its real header - and subtract it (and
+anything above it) from the row count; `empty` mirrors the `df.empty` test that
+makes DataLoader skip a sheet entirely.
 """
 
 import os
 
 from app.data.data_loader import DataLoader, EXCEL_EXTENSIONS
+from app.data.sheet_scan import scan_rows
 
 
 def _extent(rows):
-    """Last 1-based row index carrying a value, and the widest such row.
+    """Header row, last populated row, and the widest row - all from one pass
+    over the sheet's raw cells (see sheet_scan.scan_rows).
 
-    Rows past that point exist in the file but hold only formatting, so they are
-    not part of the table pandas will load. A cell is empty only when it holds
-    nothing at all - None from openpyxl, '' from xlrd. Whitespace is a value to
-    pandas, so '   ' has to count as data here or the two disagree again.
+    Rows past `last_row` exist in the file but hold only formatting, so they are
+    not part of the table pandas will load. Rows before `header_row` exist but
+    are blank - a title/spacer row above the real header - so they are not part
+    of it either. A cell is empty only when it holds nothing at all - None from
+    openpyxl, '' from xlrd. Whitespace is a value to pandas, so '   ' has to
+    count as data here or the two disagree again.
     """
-    last_row = 0
-    width = 0
-    for i, row in enumerate(rows, start=1):
-        filled = 0
-        for j, value in enumerate(row, start=1):
-            if value is not None and value != '':
-                filled = j
-        if filled:
-            last_row = i
-            width = max(width, filled)
-    return last_row, width
+    result = scan_rows(rows)
+    return result.header_row, result.last_row, result.width
 
 
 def _probe_xlsx(path):
@@ -85,15 +82,23 @@ def _probe_xls(path):
         book.release_resources()
 
 
-def _sheet_entry(name, raw_rows, columns):
-    """Normalise one sheet. `raw_rows` counts the header, `rows` does not."""
-    raw_rows = raw_rows or 0
+def _sheet_entry(name, header_row, last_row, columns):
+    """Normalise one sheet. `header_row` is the row pandas should treat as the
+    header (1-based; 0 for a fully blank sheet) - not always row 1, since a
+    sheet can carry blank spacer rows above its real header. `rows` counts
+    what's left after both the header and anything above it are excluded.
+    """
+    header_row = header_row or 0
+    last_row = last_row or 0
     columns = columns or 0
-    rows = max(raw_rows - 1, 0) if columns else 0
+    rows = max(last_row - header_row, 0) if columns else 0
     return {
         "name": name,
         "rows": rows,
         "columns": columns,
+        # 0-based, matching pandas' read_excel(header=...) - what DataLoader
+        # must pass so it loads the same header row this probe assumed.
+        "header_row": max(header_row - 1, 0),
         # A header-only or blank sheet produces an empty DataFrame, which
         # DataLoader._add_excel skips. Flagged so the UI can say so rather than
         # offer a checkbox that does nothing.

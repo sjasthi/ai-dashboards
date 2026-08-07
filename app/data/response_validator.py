@@ -26,6 +26,22 @@ def _canonical_key(filename: str) -> str:
     return re.sub(r"[\s_-]+", " ", cleaned).strip()
 
 
+def _sheet_only_key(filename: str) -> str:
+    """Canonical key of just the sheet/table portion of a name, with any trailing
+    "(workbook stem)" disambiguator and the extension both dropped - so
+    "accounts.xlsx" and "accounts (missing columns).xlsx" produce the same key.
+
+    A workbook that ships its own data_dictionary sheet usually lists bare table
+    names ("accounts", not "accounts (workbook).xlsx"), and the LLM sometimes
+    echoes those bare names into files_involved instead of the fully-qualified
+    name it was actually given. That's a bigger miss than _canonical_key repairs
+    (it drops a whole word, not just punctuation), so it gets its own lookup.
+    """
+    stem = re.sub(r"\.[^.\s)]+$", "", filename.strip())
+    stem = re.sub(r"\s*\([^)]*\)\s*$", "", stem)
+    return _canonical_key(stem)
+
+
 def _canonicalize_filenames(
     parsed: RecommendationsResponse,
     valid_filenames: Set[str]
@@ -38,10 +54,16 @@ def _canonicalize_filenames(
     used to fail validation and force an entire retry, so repair the near-miss here
     rather than spending another round trip on it. Only an unambiguous match is
     accepted - if two uploaded files normalize the same way, we can't safely guess.
+
+    A second, coarser pass (_sheet_only_key) catches the LLM dropping the entire
+    "(workbook stem)" disambiguator rather than just mangling it - again, only when
+    exactly one uploaded file's sheet-only portion matches.
     """
     by_key: Dict[str, List[str]] = {}
+    by_sheet_key: Dict[str, List[str]] = {}
     for name in valid_filenames:
         by_key.setdefault(_canonical_key(name), []).append(name)
+        by_sheet_key.setdefault(_sheet_only_key(name), []).append(name)
 
     unknown = set()
     for rec in parsed.recommendations:
@@ -56,10 +78,20 @@ def _canonicalize_filenames(
                 if len(matches) == 1:
                     print(f"[Validator] Repaired filename {filename!r} -> {matches[0]!r}")
                     resolved.append(matches[0])
-                else:
-                    # unknown, or ambiguous between two real files
-                    resolved.append(filename)
-                    unknown.add(filename)
+                    continue
+
+                sheet_matches = by_sheet_key.get(_sheet_only_key(filename), [])
+                if len(sheet_matches) == 1:
+                    print(
+                        f"[Validator] Repaired filename {filename!r} -> "
+                        f"{sheet_matches[0]!r} (dropped workbook suffix)"
+                    )
+                    resolved.append(sheet_matches[0])
+                    continue
+
+                # unknown, or ambiguous between two real files
+                resolved.append(filename)
+                unknown.add(filename)
             op.files_involved = resolved
 
     return unknown

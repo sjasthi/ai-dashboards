@@ -163,6 +163,12 @@ class SummaryGenerator:
         for file_path, df in data_loader.files:
             filename = os.path.basename(file_path)
             profile = self.profile_df_with_ydata(filename, df)
+            # Structural repairs DataLoader made while loading this table (a
+            # shifted header row, a relabeled unnamed column) go through the
+            # same quality_flags channel as every other data-quality note, so
+            # the LLM sees them instead of silently working from a repaired
+            # schema it has no idea was repaired.
+            profile.quality_flags = profile.quality_flags + data_loader.load_warnings.get(filename, [])
             profiles.append(profile)
         return profiles
 

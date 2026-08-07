@@ -588,6 +588,25 @@
       }
     }
   },
+  "extensions/xlsx/leading_blank_row.xlsx": {
+    "sha256": "09832ba27cfc67b5585df9773a8382c3fb36a13884debf793f61aca4fc063075",
+    "kind": "excel",
+    "rows": 7,
+    "sheets": [
+      {
+        "name": "products",
+        "rows": 7,
+        "columns": 3,
+        "empty": false
+      }
+    ],
+    "tables": {
+      "leading_blank_row.xlsx": {
+        "rows": 7,
+        "columns": 3
+      }
+    }
+  },
   "extensions/xlsx/part_categories.xlsx": {
     "sha256": "3d8c16e69f59605f5fc9bf43d362520a7f0892c5198a4f52901f9d9bd2758ca8",
     "kind": "excel",
