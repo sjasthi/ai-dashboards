@@ -4,7 +4,9 @@ import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
 import SettingsDashboard from './components/Settingsdashboard';
-import { REPORT_TYPE_LETTERS, generateReport } from './api';
+import NavStats from './components/ui/NavStats';
+import { REPORT_TYPE_LETTERS, fetchStats, generateReport, sendEvents } from './api';
+import { isNewVisit } from './clientId';
 
 /**
  * The developer session browser, behind two independent gates.
@@ -27,9 +29,13 @@ const DEV_TAB_ENABLED = !!DevReportBrowser
   && new URLSearchParams(window.location.search).has('dev');
 
 export default function App() {
-  // Home is the landing tab: arriving on Upload gave no answer to "what is this",
-  // and the visit counter has nowhere to be recorded from otherwise.
+  // Home is the landing tab: arriving on Upload gave no answer to "what is this".
   const [activeTab, setActiveTab] = useState('home');
+
+  // The usage counters shown in the nav. Held here rather than in the page that
+  // used to own them because the nav outlives every tab: read once per page load,
+  // not once per tab click.
+  const [stats, setStats] = useState(null);
 
   // Raw File objects picked in the Upload tab
   const [files, setFiles] = useState([]);
@@ -42,6 +48,25 @@ export default function App() {
   const [inspections, setInspections] = useState({});
   const [selections, setSelections] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
+
+  // Read once, on arrival. The visit is reported before the counters are read, so
+  // the person arriving is included in the number they are about to see rather
+  // than showing up on someone else's next page load.
+  useEffect(() => {
+    let cancelled = false;
+
+    const arrival = isNewVisit()
+      ? sendEvents([{ event: 'visit_started' }])
+      : Promise.resolve(null);
+
+    arrival
+      .then(() => fetchStats())
+      .then(data => { if (!cancelled) setStats(data); })
+      // A missing counter is not worth an error message in the nav bar.
+      .catch(() => { if (!cancelled) setStats(null); });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Populated once /api/analyze-full succeeds
   const [sessionId, setSessionId] = useState(null);
@@ -349,6 +374,7 @@ export default function App() {
           ))}
         </div>
 
+        <NavStats stats={stats} />
       </nav>
 
       <main className="app-main">

@@ -77,10 +77,75 @@
 
 .app-main { padding: 32px 40px; }
 
+/* ---------- usage counters in the nav ---------- */
+
+/* These sit in the nav's third slot, which the brand/tabs split left to right.
+   The label-over-value stack is sized to land at 34px - the height of the brand
+   logo beside it - so the counters fit the nav band that already exists instead
+   of making the bar taller. Change --nav-height or these font sizes together. */
+.app-nav__stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.nav-stat { display: flex; align-items: center; gap: 8px; }
+
+/* The hairline between groups is a border on the later sibling, so there are no
+   divider elements to keep in sync with the number of counters. */
+.nav-stat + .nav-stat {
+  border-left: 1px solid var(--color-border);
+  padding-left: 16px;
+}
+
+.nav-stat__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.nav-stat__text { display: flex; flex-direction: column; }
+
+.nav-stat__label {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Tabular figures so the three values keep the same width as they tick up and
+   the dividers don't shuffle sideways. */
+.nav-stat__value {
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The full wording, for screen readers only - the visible label is abbreviated
+   to fit the nav. */
+.nav-stat__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 900px) {
   .app-nav { padding: 12px 20px; }
   .app-nav__tabs { gap: 20px; }
   .app-main { padding: 24px 20px; }
+  .app-nav__stats { gap: 12px; }
+  .nav-stat + .nav-stat { padding-left: 12px; }
 }
 
 /* Below this the brand and tabs genuinely don't fit on one line, so the tabs get their
@@ -96,6 +161,20 @@
   }
   .app-nav__tabs::-webkit-scrollbar { display: none; }
   .app-main { padding: 20px 16px; }
+
+  /* The tabs have taken their own row, so the counters stay on the first one
+     opposite the brand. Only the number survives - the icon says which is which,
+     and the title/screen-reader label still carries the full wording. */
+  .app-nav__stats { gap: 10px; }
+  .nav-stat + .nav-stat { padding-left: 10px; }
+  .nav-stat { gap: 6px; }
+  .nav-stat__label { display: none; }
+  .nav-stat__value { font-size: 16px; }
+}
+
+/* Brand plus three counters genuinely does not fit here, and the brand wins. */
+@media (max-width: 400px) {
+  .app-nav__stats { display: none; }
 }
 
 /* ---------- page + header ---------- */
@@ -347,10 +426,6 @@
   gap: 16px;
   margin-bottom: 20px;
 }
-
-/* The home page shows three counters, not four. Without this they would stretch
-   across three quarters of the row and leave a gap where a fourth tile isn't. */
-.kpi-row--three { grid-template-columns: repeat(3, 1fr); }
 
 .stat-tile {
   padding: 18px 20px;
@@ -1032,10 +1107,6 @@
 @media (max-width: 1080px) {
   .results-grid { grid-template-columns: minmax(0, 1fr); }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  /* Four tiles fold to 2x2 cleanly; three fold to 2+1 and leave a visible hole
-     next to the last one. These hold a label and a number, so they stay abreast
-     until the 640px rule below drops every KPI row to a single column. */
-  .kpi-row--three { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 860px) {

@@ -1,16 +1,11 @@
-import { useEffect, useState } from 'react';
 import Card from './ui/Card';
-import StatTile from './ui/StatTile';
-import { fetchStats, sendEvents } from '../api';
-import { isNewVisit } from '../clientId';
 
 /**
- * The landing tab: what the app does, and how much it has been used.
+ * The landing tab: what the app does.
  *
- * Counters come from GET /api/stats, which is aggregate-only and needs no session.
- * When the backend is down the fetch fails quietly, `stats` stays null, and
- * StatTile renders an em-dash - the description below it is static and still
- * renders, so the page never goes blank because a counter was unavailable.
+ * The usage counters used to live here as a row of cards. They are in the nav bar
+ * now (NavStats), where they are visible from every tab and cost no vertical
+ * space, so this page is purely the explanation.
  */
 
 const STEPS = [
@@ -29,27 +24,6 @@ const STEPS = [
 ];
 
 export default function HomeDashboard({ onStart }) {
-  const [stats, setStats] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // The visit is reported before the counters are read, so the person arriving
-    // is included in the number they are about to see rather than showing up on
-    // someone else's next page load.
-    const arrival = isNewVisit()
-      ? sendEvents([{ event: 'visit_started' }])
-      : Promise.resolve(null);
-
-    arrival
-      .then(() => fetchStats())
-      .then(data => { if (!cancelled) setStats(data); })
-      // A missing counter is not worth an error message on a landing page.
-      .catch(() => { if (!cancelled) setStats(null); });
-
-    return () => { cancelled = true; };
-  }, []);
-
   return (
     <div className="home-page">
       <div className="eyebrow eyebrow--accent">AI-DASHBOARD</div>
@@ -59,14 +33,6 @@ export default function HomeDashboard({ onStart }) {
         profiles it, decides what is worth showing, and builds the charts and
         figures to show it.
       </p>
-
-      <div className="kpi-row kpi-row--three">
-        {/* Counted on a browser session's first successful analysis, not on
-            arrival - someone who reads this page and leaves is a visitor. */}
-        <StatTile label="Users" value={stats?.users} />
-        <StatTile label="Files processed" value={stats?.files_processed} />
-        <StatTile label="Reports built" value={stats?.reports_built} />
-      </div>
 
       <Card className="home-steps">
         <h2 className="home-steps__title">How it works</h2>
