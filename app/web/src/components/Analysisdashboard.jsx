@@ -1,23 +1,13 @@
 import { REPORT_TYPE_LETTERS } from '../api';
 
-function PatternBadge({ pattern }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: '999px',
-      fontSize: '11px',
-      fontWeight: 700,
-      letterSpacing: '0.03em',
-      color: '#2563eb',
-      background: '#eff6ff',
-      border: '1px solid #bfdbfe'
-    }}>
-      {pattern}
-    </span>
-  );
-}
-
+/**
+ * One recommended report, as a card the user can open.
+ *
+ * Deliberately not here: the pattern badge (COMPOSITION / TREND / ...) and the
+ * model's data-quality caveat. The pattern names the pipeline's internal recipe,
+ * which the reader is not choosing between, and the caveat is shown on the report
+ * itself - beside the numbers it actually qualifies - rather than twice.
+ */
 function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, isBuilt, errorMsg }) {
   return (
     <div style={{
@@ -27,14 +17,11 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
       padding: '22px',
       marginBottom: '16px'
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <div>
-          <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>
-            RANK {rec.rank ?? index + 1}
-          </div>
-          <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>{rec.report_name}</h3>
+      <div style={{ marginBottom: '10px' }}>
+        <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>
+          RANK {rec.rank ?? index + 1}
         </div>
-        {rec.pattern_used && <PatternBadge pattern={rec.pattern_used} />}
+        <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>{rec.report_name}</h3>
       </div>
 
       {rec.question_answered && (
@@ -49,20 +36,6 @@ function RecommendationCard({ rec, index, onSelect, isGenerating, isSelected, is
             <li key={i}>{bullet}</li>
           ))}
         </ul>
-      )}
-
-      {rec.data_quality_warning && (
-        <div style={{
-          marginBottom: '14px',
-          padding: '10px 12px',
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          borderRadius: '6px',
-          fontSize: '13px',
-          color: '#92400e'
-        }}>
-          ⚠ {rec.data_quality_warning}
-        </div>
       )}
 
       {/* Errors are per-report and shown here rather than in a page-level banner:

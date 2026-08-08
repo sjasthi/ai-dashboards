@@ -37,8 +37,9 @@
 
 .eyebrow--accent { color: var(--color-accent); }
 
-/* A quiet marker of where a claim came from. Every computed card carries one, so
-   the model's text is never mistaken for a measurement. */
+/* A quiet marker of where a claim came from, so the model's text is never mistaken
+   for a measurement. Only model-authored content is marked now: the "computed"
+   variant sat on all four insight cards at once and distinguished nothing. */
 .chip {
   display: inline-block;
   padding: 2px 8px;
@@ -51,12 +52,6 @@
   color: var(--color-text-muted);
   background: var(--color-bg);
   white-space: nowrap;
-}
-
-.chip--computed {
-  color: var(--color-accent);
-  background: var(--color-accent-muted);
-  border-color: #BFDBFE;
 }
 
 .chip--ai {
@@ -354,6 +349,16 @@
 }
 
 .report-header__question em { font-style: italic; }
+
+/* Scope: which rows this report is about. Quieter than the question above it -
+   it qualifies the numbers rather than announcing anything, and it is not a
+   warning, so it takes no amber and no icon. */
+.report-header__scope {
+  margin: 6px 0 0 0;
+  font-size: var(--size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
 
 /* Provenance: what produced these numbers, and when. Stacks under the section title
    (see .section__title-group) so it reads as the methods note for the section. */

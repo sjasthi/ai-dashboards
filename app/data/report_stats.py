@@ -20,6 +20,7 @@ Usage (in api.py, inside generate_report_endpoint, after `chart = build_chart_fi
 
 import math
 import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -75,6 +76,7 @@ def build_report_stats(
     granularity: Optional[str] = None,
     llm_caveat: Optional[str] = None,
     schema_warning: Optional[str] = None,
+    row_ledger: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute descriptive, trend, concentration and outlier statistics from a report
@@ -89,7 +91,7 @@ def build_report_stats(
     (`top_insight_text` / `anomaly_text` / `recommendation_text` / `quality_text`),
     so callers can drop it into a response without extra branching.
     """
-    quality = _quality_block(df, plotly_config, llm_caveat, schema_warning)
+    quality = _quality_block(df, plotly_config, llm_caveat, schema_warning, row_ledger)
 
     if df is None or df.empty or not plotly_config:
         return _unavailable_result("The report returned no rows to analyze.", quality)
@@ -518,12 +520,23 @@ def _quality_block(
     plotly_config: Optional[Dict[str, Any]],
     llm_caveat: Optional[str],
     schema_warning: Optional[str],
+    row_ledger: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Completeness measured on the report itself, plus any warning carried in.
 
     The LLM's caveat is kept but kept *separate* - it is a guess made before the data
     was aggregated, and the frontend labels it as such rather than mixing it in with
     measured null counts.
+
+    Two facts come from the builder's row ledger and are deliberately not merged:
+
+    - Rows a *filter* removed are the report's scope. "Won deals only, 4,238 of
+      8,800 rows" describes what the report covers; calling those rows excluded
+      would read as data going missing when nothing went wrong.
+    - Rows an inner *join* dropped are a defect. They met the user's scope and were
+      removed anyway, usually because the same thing is spelled two ways in two
+      files, and the report's totals come out short with nothing else on the page
+      saying so. Only this half becomes a warning.
     """
     null_pct = None
     null_count = None
@@ -534,13 +547,37 @@ def _quality_block(
             null_count = int(df[col].isna().sum())
             null_pct = _round(null_count / len(df) * 100)
 
-    text_parts: List[str] = []
+    ledger = row_ledger or {}
+    join_losses = ledger.get("join_losses") or []
+    join_loss_rows = sum(int(loss.get("rows") or 0) for loss in join_losses)
+    join_rescues = ledger.get("join_rescues") or []
+    join_rescue_rows = sum(int(r.get("rows") or 0) for r in join_rescues)
+
+    # The join loss leads: it is the one statement here that means a number on the
+    # chart is wrong, so it should not sit behind a null count of zero.
+    warning_parts: List[str] = [_join_loss_sentence(loss) for loss in join_losses]
     if null_count:
-        text_parts.append(f"{null_count} of {len(df)} rows ({null_pct}%) have no measured value.")
-    elif null_count == 0:
-        text_parts.append("No missing values in the charted measure.")
+        warning_parts.append(f"{null_count} of {len(df)} rows ({null_pct}%) are missing data.")
     if schema_warning:
-        text_parts.append(f"Schema: {schema_warning}")
+        warning_parts.append(f"Schema: {schema_warning}")
+
+    text_parts = list(warning_parts)
+
+    # The all-clear only when that is the whole story. Appended to a dropped-rows
+    # warning it reads as a contradiction - the rows that went missing are exactly
+    # the ones no longer there to be counted. Keyed on the warnings rather than on
+    # text_parts so a rescue-only report keeps the line: a rescue is not a
+    # completeness finding and must not stand in for one.
+    #
+    # "in this chart" rather than "in the charted measure": both sentences describe
+    # the one column the chart plots, but the reader has no reason to know the word
+    # measure, and the card is titled Data quality already.
+    if not warning_parts and null_count == 0:
+        text_parts.append("No missing data in this chart.")
+
+    # Rescues last, and never part of warning_parts: nothing is missing and nothing
+    # needs fixing in the report, so this must not set the card's warning tone.
+    text_parts.extend(_join_rescue_sentence(r) for r in join_rescues)
 
     return {
         "null_count": null_count,
@@ -548,7 +585,98 @@ def _quality_block(
         "schema_warning": schema_warning,
         "llm_caveat": llm_caveat,
         "quality_text": " ".join(text_parts) if text_parts else None,
+        "join_losses": join_losses,
+        "join_loss_rows": join_loss_rows,
+        "join_rescues": join_rescues,
+        "join_rescue_rows": join_rescue_rows,
+        "scope_text": _scope_sentence(ledger),
     }
+
+
+def _join_rescue_sentence(rescue: Dict[str, Any]) -> str:
+    """A repair stated as a fact, not a warning.
+
+    These rows are in the report and their numbers are right. What the reader needs
+    is to know the two files spell the same thing differently, because that is a
+    fact about their data they will meet again - and because a silent repair would
+    remove any reason to fix the source.
+    """
+    rows = int(rescue.get("rows") or 0)
+    noun = "row" if rows == 1 else "rows"
+    key = rescue.get("key") or "the join key"
+    where = _display_filename(rescue.get("file"))
+    sentence = (
+        f"{rows:,} {noun} matched on {key} in {where} by ignoring case, spacing "
+        f"and punctuation."
+    )
+
+    pairs = [
+        p for p in (rescue.get("pairs") or [])
+        if str(p.get("left", "")).strip() and str(p.get("right", "")).strip()
+    ]
+    if pairs:
+        shown = ", ".join(f"“{p['left']}” matched “{p['right']}”" for p in pairs[:3])
+        sentence += f" {shown}."
+    return sentence
+
+
+def _join_loss_sentence(loss: Dict[str, Any]) -> str:
+    """One dropped-rows warning, naming the values that failed to match.
+
+    The example values are the point: an unmatched key is nearly always readable as
+    a typo the moment it is shown next to the file it failed against.
+    """
+    rows = int(loss.get("rows") or 0)
+    where = _display_filename(loss.get("file"))
+    noun = "row" if rows == 1 else "rows"
+    sentence = (
+        f"{rows:,} {noun} had no matching entry in {where} and are not included "
+        f"in this report."
+    )
+
+    examples = [str(e) for e in (loss.get("examples") or []) if str(e).strip()]
+    if examples:
+        shown = ", ".join(f"“{e}”" for e in examples[:3])
+        sentence += f" Unmatched {loss.get('key') or 'key'} values include {shown}."
+    return sentence
+
+
+def _scope_sentence(ledger: Dict[str, Any]) -> Optional[str]:
+    """What the report covers, stated as a definition rather than as a loss.
+
+    None when nothing was filtered - a report over every row has no scope worth
+    stating, and "8,800 of 8,800 rows" is noise.
+    """
+    scope = ledger.get("scope") or []
+    if not scope:
+        return None
+
+    source_rows = ledger.get("source_rows")
+    rows_after = scope[-1].get("rows_after")
+    if source_rows is None or rows_after is None or rows_after == source_rows:
+        return None
+
+    conditions = [
+        f"{c.get('column')} {c.get('condition')}".strip()
+        for step in scope for c in (step.get("conditions") or [])
+        if c.get("column")
+    ]
+    where = f"Filtered to {', '.join(conditions)}" if conditions else "Filtered"
+    return f"{where} — {rows_after:,} of {source_rows:,} rows."
+
+
+def _display_filename(name: Optional[str]) -> str:
+    """A file name a reader recognises.
+
+    Sheets from a workbook arrive as "products (whole workbook name).xlsx"; the
+    workbook is the same one for every sheet in the report, so it identifies
+    nothing and only makes the sentence hard to read. The leading sheet name is
+    what the reader picked in the Upload tab.
+    """
+    if not name:
+        return "the joined file"
+    stem = Path(str(name)).stem
+    return stem.split(" (")[0].strip() or stem
 
 
 def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:

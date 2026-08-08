@@ -14,11 +14,13 @@ import { collectChartImages, triggerDownload } from '../export';
  * Laid out as an inverted pyramid: computed headline numbers, then the chart with its
  * findings, then the distribution summary, then the rows themselves.
  *
- * Every claim on this page is labelled with where it came from. Statistics computed
- * from the report's own rows carry a "computed" chip; the model's pre-execution text
- * is kept as context and marked as such. Before this, the model's *question* was
- * displayed as the top insight and its guess about data quality was rendered as a
- * detected anomaly - neither had ever been checked against the data.
+ * Model-authored text on this page is labelled as such - the AI question above the
+ * report, the AI note inside Data quality - and everything unlabelled is computed
+ * from the report's own rows. Marking the computed side too was the original
+ * design, but a chip on all four insight cards distinguished nothing. Before this,
+ * the model's *question* was displayed as the top insight and its guess about data
+ * quality was rendered as a detected anomaly - neither had ever been checked
+ * against the data.
  */
 export default function ReportsDashboard({
   reports = {},
@@ -77,6 +79,7 @@ export default function ReportsDashboard({
 
       <ReportHeader
         report={report}
+        scopeText={stats?.scope_text}
         recList={recList}
         activeType={activeType}
         onSelectType={onSelectType}
@@ -204,7 +207,7 @@ function ReplayBanner({ sessionId, onExit }) {
 /* ------------------------------------------------------------------ header */
 
 function ReportHeader({
-  report, recList, activeType, onSelectType, inFlight,
+  report, scopeText, recList, activeType, onSelectType, inFlight,
   comparing, onToggleCompare,
 }) {
   const letters = recList.map((_, i) => String.fromCharCode(65 + i));
@@ -227,6 +230,12 @@ function ReportHeader({
               <em>“{question}”</em>
             </p>
           )}
+
+          {/* Beside the title rather than down in the provenance line, because it
+              is what stops someone reading the headline number as a total for the
+              whole file. Stated as a definition, not as rows lost: the filter is
+              the report, and phrasing it as an exclusion reads as a fault. */}
+          {scopeText && <p className="report-header__scope">{scopeText}</p>}
         </div>
 
         <div className="report-header__controls">
@@ -339,6 +348,9 @@ function KpiRow({ stats, report }) {
         sublabel={stats.trough_label || `lowest ${measure}`}
       />
       {stats.blocks?.includes('trend') ? (
+        /* No sparkline: the chart directly below plots the same series at full
+           size, so a thumbnail of it cost tile height to repeat what the reader
+           was about to see anyway. */
         <StatTile
           label="Trend"
           value={signedPercent(stats.trend_pct_change)}
@@ -349,7 +361,6 @@ function KpiRow({ stats, report }) {
               ? `${stats.trend_strength} · R² ${stats.trend_r2}`
               : null,
           }}
-          sparkline={stats.sparkline}
         />
       ) : stats.blocks?.includes('concentration') ? (
         <StatTile
@@ -421,7 +432,7 @@ function InsightRail({ report, stats, hasStats }) {
 
   return (
     <div className="insight-rail">
-      <InsightCard title="Key finding" chip>
+      <InsightCard title="Key finding">
         {stats.top_insight_text}
       </InsightCard>
 
@@ -431,7 +442,6 @@ function InsightRail({ report, stats, hasStats }) {
         title={outlierCount ? `Outliers (${outlierCount})` : 'Outliers'}
         icon={outlierCount ? '⚠' : null}
         variant={outlierCount ? 'warn' : undefined}
-        chip
       >
         {stats.anomaly_text}
         {outliers.length > 0 && (
@@ -449,23 +459,46 @@ function InsightRail({ report, stats, hasStats }) {
         )}
       </InsightCard>
 
+      {/* The model's caveat is deliberately not here. It is written from the whole
+          file's null counts, before this report's filters and joins run, so it
+          routinely warns about rows the report already excluded - measured against
+          one session's workbook, two caveats cited 24% and 16% of rows missing a
+          field that was in fact missing from 0 of the report's own 4,238 rows. It
+          contradicted the measured line directly below it.
+
+          Rows lost to a join are the warning it should have been: measured, and a
+          real hole in the numbers above. Rows removed by a filter are not a fault
+          and live in the provenance line as scope.
+
+          stats.join_rescue_rows is deliberately absent from both expressions below.
+          A rescued row is in the report and its number is right; the sentence about
+          it rides inside quality_text and is stated in the card's normal tone. */}
       <InsightCard
         title="Data quality"
-        variant={stats.null_count || report.schema_warning ? 'warn' : undefined}
-        chip
+        variant={
+          stats.null_count || stats.join_loss_rows || report.schema_warning
+            ? 'warn'
+            : undefined
+        }
+        icon={stats.join_loss_rows ? '⚠' : null}
       >
-        {stats.quality_text || 'No completeness issues found in the charted measure.'}
-        {stats.llm_caveat && <AiNote text={stats.llm_caveat} />}
+        {stats.quality_text || 'No issues found.'}
       </InsightCard>
 
-      <InsightCard title="What to check next" icon="✓" variant="good" chip>
+      <InsightCard title="What to check next" icon="✓" variant="good">
         {stats.recommendation_text}
       </InsightCard>
     </div>
   );
 }
 
-function InsightCard({ title, icon, variant, chip, children }) {
+/**
+ * Every card in the rail used to carry a "computed" chip. When all four say the
+ * same thing the chip stops distinguishing anything - what marks model-authored
+ * text is the AI note inside the card, which is where the distinction is actually
+ * load-bearing.
+ */
+function InsightCard({ title, icon, variant, children }) {
   return (
     <Card className={`insight-card${variant ? ` insight-card--${variant}` : ''}`}>
       <div className="insight-card__head">
@@ -473,7 +506,6 @@ function InsightCard({ title, icon, variant, chip, children }) {
           {icon && <span aria-hidden="true">{icon}</span>}
           {title}
         </span>
-        {chip && <span className="chip chip--computed">computed</span>}
       </div>
       <div className="insight-card__body">{children}</div>
     </Card>

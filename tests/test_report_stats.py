@@ -634,7 +634,7 @@ def test_quality_block_present_even_when_stats_unavailable():
 def test_clean_data_reports_no_missing_values():
     stats = build_report_stats(daily_report([1, 2, 3, 4]), cfg())
     assert stats["null_count"] == 0
-    assert "No missing values" in stats["quality_text"]
+    assert "No missing data in this chart." in stats["quality_text"]
 
 
 # ---------------------------------------------------------------------------

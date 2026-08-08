@@ -57,6 +57,19 @@
 
 
 {#
+  Which rows the report is about, next to its title - same placement and same
+  wording as the dashboard. A definition, not a warning: the filter is what the
+  report means, so it takes no chip and no amber.
+#}
+{% macro scope_line(r) -%}
+{% set s = r.stats or {} %}
+{% if s.scope_text %}
+<p class="scope">{{ s.scope_text }}</p>
+{% endif %}
+{%- endmacro %}
+
+
+{#
   The same bits, in the same order, as the Provenance strip on screen. A reader
   who checked the numbers in the app has to be able to confirm this is the same
   run - which means the file list, the row count and the timestamp, not a
@@ -188,10 +201,18 @@
     {% endif %}
   {% endcall %}
 
+  {# The model's caveat is not shown here, matching the dashboard: it is written
+     from whole-file null counts before this report's filters and joins run, so it
+     warns about rows the report already excluded and contradicts the measured line
+     above it. Rows an inner join dropped are measured, and are already in
+     quality_text.
+
+     s.join_rescue_rows is deliberately not in the warn test below: a rescued row is
+     in the report and its number is right, and its sentence already rides inside
+     quality_text. #}
   {% call finding_body('Data quality',
-                       'warn' if (s.null_count or r.schema_warning) else '') %}
-    <p>{{ s.quality_text or 'No completeness issues found in the charted measure.' }}</p>
-    {% if s.llm_caveat %}{{ ai_note(s.llm_caveat) }}{% endif %}
+                       'warn' if (s.null_count or s.join_loss_rows or r.schema_warning) else '') %}
+    <p>{{ s.quality_text or 'No issues found.' }}</p>
   {% endcall %}
 
   {{ finding_block('What to check next', s.recommendation_text, variant='good') }}
@@ -474,6 +495,7 @@
 {% macro report_overview(r) -%}
 {{ page_header(r) }}
 {{ ai_question(r) }}
+{{ scope_line(r) }}
 {{ provenance_strip(r) }}
 {{ warning_banner(r.schema_warning) }}
 {{ kpi_table(r) }}
