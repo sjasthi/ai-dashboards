@@ -19,6 +19,13 @@
   --color-danger:         #DC2626;
   --color-danger-muted:   #FEF2F2;
 
+  /* The first chart series colour, mirroring COLORWAY[0] in app/data/chart_builder.py.
+     Keep the two in step. Anything that draws the report's own measure outside Plotly -
+     the distribution card's box plot - wears this rather than --color-accent, so it
+     reads as the same data as the chart above it and not as a piece of UI chrome. */
+  --color-series-1:       #0072B2;
+  --color-series-1-wash:  #E6F0F7;
+
   /* Typography */
   --font-ui:       'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;

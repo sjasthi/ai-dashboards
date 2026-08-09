@@ -143,6 +143,68 @@ def test_symmetric_data_has_no_skew_flag():
 
 
 # ---------------------------------------------------------------------------
+# Band labels - the words the distribution card and both exports render
+# ---------------------------------------------------------------------------
+
+def test_skew_label_names_the_direction():
+    stats = build_report_stats(daily_report([1, 1, 2, 2, 2, 3, 3, 4, 50, 60]), cfg())
+    assert stats["skew_level"] == "right"
+    assert stats["skew_label"] == "Right-skewed"
+
+
+def test_symmetric_data_is_labelled_symmetric_not_left_blank():
+    # skew_flag is None here, but a ratio *was* computed and came back near zero.
+    # "Symmetric" is a finding; a blank badge would read as "not measured".
+    stats = build_report_stats(daily_report([10, 20, 30, 40, 50]), cfg())
+    assert stats["skew_flag"] is None
+    assert stats["skew_level"] == "symmetric"
+    assert stats["skew_label"] == "Symmetric"
+
+
+def test_unmeasurable_skew_has_no_label():
+    # Every value identical: the scale collapses, so nothing was measured and the
+    # card must show no badge rather than claim symmetry.
+    stats = build_report_stats(daily_report([7, 7, 7, 7, 7]), cfg())
+    assert stats["skew_ratio"] is None
+    assert stats["skew_level"] is None
+    assert stats["skew_label"] is None
+
+
+@pytest.mark.parametrize(
+    "values, level, word",
+    [
+        # CV ~4%: tight cluster.
+        ([100, 101, 99, 102, 98, 100], "low", "Low variance"),
+        # CV ~30%.
+        ([50, 100, 150, 100, 75, 125], "moderate", "Moderate variance"),
+        # CV ~120%: one spike dwarfs the rest.
+        ([1, 2, 3, 4, 5, 60], "high", "High variance"),
+    ],
+)
+def test_variance_bands(values, level, word):
+    stats = build_report_stats(daily_report(values), cfg())
+    assert stats["variance_level"] == level
+    assert stats["variance_label"] == f"{word} ({stats['cv']}%)"
+
+
+def test_variance_band_boundaries_are_inclusive_at_the_top():
+    from app.data.report_stats import _CV_LOW, _CV_MODERATE
+
+    # Guards the comparison operators rather than any particular dataset: `moderate`
+    # owns both edges, so neither boundary value can fall through to a neighbouring
+    # band or to no band at all.
+    assert _CV_LOW < _CV_MODERATE
+
+
+def test_variance_label_absent_when_cv_undefined():
+    # CV is undefined at a mean of zero, and an undefined ratio is not a low one.
+    stats = build_report_stats(daily_report([-10, 10, -20, 20]), cfg())
+    assert stats["cv"] is None
+    assert stats["variance_level"] is None
+    assert stats["variance_label"] is None
+
+
+# ---------------------------------------------------------------------------
 # The `sum` gate - the bug where means got added up
 # ---------------------------------------------------------------------------
 

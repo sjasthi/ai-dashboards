@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import BoxPlotBar from './ui/BoxPlotBar';
 import Card from './ui/Card';
 import DataTable from './ui/DataTable';
+import Meter from './ui/Meter';
 import Plot from './ui/Plot';
 import Section from './ui/Section';
 import StatTile from './ui/StatTile';
-import { clockTime, compactNumber, signedPercent } from '../format';
+import { clockTime, compactNumber, exactNumber, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
 import { collectChartImages, triggerDownload } from '../export';
 
@@ -79,7 +81,6 @@ export default function ReportsDashboard({
 
       <ReportHeader
         report={report}
-        scopeText={stats?.scope_text}
         recList={recList}
         activeType={activeType}
         onSelectType={onSelectType}
@@ -131,11 +132,17 @@ export default function ReportsDashboard({
             <InsightRail report={report} stats={stats} hasStats={hasStats} />
           </div>
 
-          {hasStats && <DistributionStrip stats={stats} />}
+          {hasStats && <DistributionCard stats={stats} />}
 
           <Section
             title="Report data"
-            subtitle={<Provenance report={report} fileProfiles={fileProfiles} />}
+            subtitle={
+              <Provenance
+                report={report}
+                fileProfiles={fileProfiles}
+                scopeText={stats?.scope_text}
+              />
+            }
             actions={
               <button className="table-toggle" onClick={() => setShowTable((s) => !s)}>
                 {showTable ? 'Hide table' : 'Show table'}
@@ -206,8 +213,20 @@ function ReplayBanner({ sessionId, onExit }) {
 
 /* ------------------------------------------------------------------ header */
 
+/**
+ * Two lines shorter than it was, to buy the distribution card its height.
+ *
+ * Gone: the pattern eyebrow (COMPOSITION / RANKING / TREND). It named a branch of the
+ * pipeline, not anything about the reader's data, and the report's own title says what
+ * the report is.
+ *
+ * Gone too: the scope sentence, which now rides in the provenance line under "Report
+ * data". It still has to be on the page - it is what stops someone reading the
+ * headline number as a total for the whole file - but the provenance line already
+ * wraps, so it costs no height there.
+ */
 function ReportHeader({
-  report, scopeText, recList, activeType, onSelectType, inFlight,
+  report, recList, activeType, onSelectType, inFlight,
   comparing, onToggleCompare,
 }) {
   const letters = recList.map((_, i) => String.fromCharCode(65 + i));
@@ -218,9 +237,6 @@ function ReportHeader({
     <header className="report-header">
       <div className="report-header__top">
         <div className="report-header__text">
-          <span className="eyebrow">
-            {report?.pattern_used || rec?.pattern_used || 'Report'}
-          </span>
           <h1 className="report-header__title">
             {report?.report_name || rec?.report_name || `Report ${activeType}`}
           </h1>
@@ -230,12 +246,6 @@ function ReportHeader({
               <em>“{question}”</em>
             </p>
           )}
-
-          {/* Beside the title rather than down in the provenance line, because it
-              is what stops someone reading the headline number as a total for the
-              whole file. Stated as a definition, not as rows lost: the filter is
-              the report, and phrasing it as an exclusion reads as a fault. */}
-          {scopeText && <p className="report-header__scope">{scopeText}</p>}
         </div>
 
         <div className="report-header__controls">
@@ -279,10 +289,14 @@ function ReportHeader({
  * to tell a fresh result from a stale one, or to check that the pipeline filtered
  * what they thought it filtered.
  */
-function Provenance({ report, fileProfiles }) {
+function Provenance({ report, fileProfiles, scopeText }) {
   if (!report) return null;
 
   const bits = [];
+  // Moved down from beside the title, which the page needed the height back from.
+  // Still first in the line, and still stated as a definition rather than as rows
+  // lost: the filter is the report, and phrasing it as an exclusion reads as a fault.
+  if (scopeText) bits.push(scopeText);
   const files = report.source_files?.length
     ? report.source_files
     : (fileProfiles || []).map((f) => f.name);
@@ -388,8 +402,14 @@ function ChartPanel({ report, stats }) {
     <Card className="chart-card">
       <div className="chart-card__head">
         <h2 className="chart-card__title">{title}</h2>
+        {/* Sample size rides here rather than taking a cell in the distribution card.
+            It qualifies everything on the page - how much data every figure below is
+            drawn from - so it belongs beside what is being measured. */}
         {stats?.available && stats.measure_label && (
-          <span className="eyebrow">{stats.measure_label}</span>
+          <span className="eyebrow">
+            {stats.measure_label}
+            {stats.count != null && ` · n = ${stats.count.toLocaleString()}`}
+          </span>
         )}
       </div>
 
@@ -409,11 +429,20 @@ function ChartPanel({ report, stats }) {
 
 /* ------------------------------------------------------------ insight rail */
 
+/**
+ * Four findings in one card, ruled apart by hairlines.
+ *
+ * They used to be four separate cards. Four surfaces cost three 16px gaps and eight
+ * paddings to say what one surface and three hairlines say, and the rail is the taller
+ * of the two columns in the results grid - so that stack was setting the height of the
+ * whole band, and with it how much of the page fits on a screen. The findings belong
+ * together anyway: they are one reading of one report, not four unrelated panels.
+ */
 function InsightRail({ report, stats, hasStats }) {
   if (!hasStats) {
     return (
-      <div className="insight-rail">
-        <Card className="insight-card">
+      <Card className="insight-rail">
+        <div className="insight-row">
           <div className="insight-card__head">
             <span className="insight-card__title">No statistics available</span>
           </div>
@@ -422,8 +451,8 @@ function InsightRail({ report, stats, hasStats }) {
               'This report has no numeric measure to compute statistics from.'}
           </div>
           {stats?.llm_caveat && <AiNote text={stats.llm_caveat} />}
-        </Card>
-      </div>
+        </div>
+      </Card>
     );
   }
 
@@ -431,7 +460,7 @@ function InsightRail({ report, stats, hasStats }) {
   const outlierCount = stats.anomaly_count || 0;
 
   return (
-    <div className="insight-rail">
+    <Card className="insight-rail">
       <InsightCard title="Key finding">
         {stats.top_insight_text}
       </InsightCard>
@@ -488,19 +517,24 @@ function InsightRail({ report, stats, hasStats }) {
       <InsightCard title="What to check next" icon="✓" variant="good">
         {stats.recommendation_text}
       </InsightCard>
-    </div>
+    </Card>
   );
 }
 
 /**
- * Every card in the rail used to carry a "computed" chip. When all four say the
- * same thing the chip stops distinguishing anything - what marks model-authored
- * text is the AI note inside the card, which is where the distinction is actually
- * load-bearing.
+ * One finding: a ruled row inside the rail, no longer a card of its own.
+ *
+ * Every one of these used to carry a "computed" chip. When all four say the same
+ * thing the chip stops distinguishing anything - what marks model-authored text is
+ * the AI note inside the row, which is where the distinction is actually load-bearing.
+ *
+ * The amber variant survives the merge as a tinted row rather than a tinted card. It
+ * still has to be able to shout: it is the only thing on the page that says a number
+ * above it is standing on a hole in the data.
  */
 function InsightCard({ title, icon, variant, children }) {
   return (
-    <Card className={`insight-card${variant ? ` insight-card--${variant}` : ''}`}>
+    <div className={`insight-row${variant ? ` insight-row--${variant}` : ''}`}>
       <div className="insight-card__head">
         <span className="insight-card__title">
           {icon && <span aria-hidden="true">{icon}</span>}
@@ -508,7 +542,7 @@ function InsightCard({ title, icon, variant, children }) {
         </span>
       </div>
       <div className="insight-card__body">{children}</div>
-    </Card>
+    </div>
   );
 }
 
@@ -524,6 +558,116 @@ function AiNote({ text }) {
 
 /* ---------------------------------------------------- distribution summary */
 
+/**
+ * Ten numbers, grouped by the three jobs they actually do.
+ *
+ * This was a flat strip of ten equal cells. Every statistic got the same weight, and
+ * the five-number summary - which is one shape - was five separate figures the reader
+ * had to hold in their head and compare. Now the summary is drawn on a shared scale,
+ * the two measures of centre sit together with the skew between them, and the three
+ * measures of spread sit under one meter.
+ *
+ * The ten cells are still here, behind the disclosure. Nothing the card visualises is
+ * reachable only by hovering a mark: the exact figures are one click away, and the
+ * chart's own values are in the table below. A tooltip enhances, it never gates.
+ */
+function DistributionCard({ stats }) {
+  const [showAll, setShowAll] = useState(false);
+
+  const skewTitle = stats.skew_ratio != null
+    ? `The mean sits ${Math.abs(stats.skew_ratio)} interquartile ranges ` +
+      `${stats.skew_ratio > 0 ? 'above' : 'below'} the median.`
+    : undefined;
+
+  return (
+    <Card className="dist-card">
+      <div className="dist-card__head">
+        <span className="eyebrow">Distribution</span>
+        <button
+          type="button"
+          className="link-btn"
+          aria-expanded={showAll}
+          onClick={() => setShowAll((s) => !s)}
+        >
+          {showAll ? 'Hide all statistics' : 'Show all statistics'}{' '}
+          <span aria-hidden="true">{showAll ? '▲' : '▼'}</span>
+        </button>
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label">Range</div>
+        <BoxPlotBar
+          min={stats.min}
+          p25={stats.p25}
+          median={stats.median}
+          p75={stats.p75}
+          max={stats.max}
+          fenceLow={stats.fence_low}
+          fenceHigh={stats.fence_high}
+          anomalies={stats.anomalies || []}
+          measureLabel={stats.measure_label}
+        />
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label">Centre</div>
+        {/* Full precision, not compactNumber. The whole point of this cell is the gap
+            between the two figures, and compaction closes it: a mean of 1,046,332 and
+            a median of 1,032,891 both render as "1M", so the cell showed two identical
+            numbers next to a badge announcing the series was skewed. */}
+        <div className="dist-card__pair">
+          <span className="dist-card__pair-label">mean</span>
+          <span className="dist-card__pair-value">{exactNumber(stats.mean)}</span>
+          <span className="dist-card__pair-label">median</span>
+          <span className="dist-card__pair-value">{exactNumber(stats.median)}</span>
+        </div>
+        {/* Neutral, not a status colour: a skewed series is a shape, not a problem.
+            What it does tell the reader is which of the two figures above to trust as
+            the typical value. */}
+        {stats.skew_label && (
+          <span className="chip chip--neutral" title={skewTitle}>{stats.skew_label}</span>
+        )}
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label">Spread</div>
+        {/* CV has no upper bound, so the meter saturates at 100% and two very
+            different extremes fill the same bar. That is why the badge underneath
+            prints the figure rather than leaving the bar to carry it: the meter
+            shows the band, the badge shows the number. */}
+        <Meter
+          value={stats.cv}
+          level={stats.variance_level}
+          label={stats.variance_label || 'Variance not measurable'}
+        />
+        <div className="dist-card__badge-row">
+          <span
+            className={`chip chip--${VARIANCE_CHIP[stats.variance_level] || 'neutral'}`}
+            title="Coefficient of variation — the spread of the values relative to their average."
+          >
+            {stats.variance_label || 'Variance —'}
+          </span>
+        </div>
+        <div className="dist-card__note">
+          σ {compactNumber(stats.std)} · IQR {compactNumber(stats.iqr)}
+          {stats.pct_within_1sd != null && <> · {stats.pct_within_1sd}% within 1σ</>}
+        </div>
+      </div>
+
+      {showAll && <DistributionStrip stats={stats} />}
+    </Card>
+  );
+}
+
+/* A wide spread is a property of the data, not a fault, so the top band is amber and
+   never red - red on this page means something went wrong. */
+const VARIANCE_CHIP = { low: 'good', moderate: 'neutral', high: 'warn' };
+
+/**
+ * The ten raw figures. No longer the page's distribution summary - it is what
+ * DistributionCard's disclosure opens - but still the place every exact value lives,
+ * and still what the PDF export renders.
+ */
 function DistributionStrip({ stats }) {
   const items = [
     ['n', stats.count?.toLocaleString()],
@@ -539,14 +683,14 @@ function DistributionStrip({ stats }) {
   ].filter(([, v]) => v !== undefined && v !== null);
 
   return (
-    <Card className="stat-strip">
+    <div className="stat-strip dist-card__all">
       {items.map(([label, value]) => (
         <div className="stat-strip__item" key={label}>
           <div className="stat-strip__label">{label}</div>
           <div className="stat-strip__value">{value}</div>
         </div>
       ))}
-    </Card>
+    </div>
   );
 }
 

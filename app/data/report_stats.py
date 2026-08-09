@@ -61,6 +61,30 @@ _R2_MODERATE = 0.2
 # report - enough of them and the headline categories aren't really the story.
 _TAIL_SHARE = 0.01
 
+# CV bands behind the variance badge. A bare "CV: 88%" tells a reader who doesn't know
+# the statistic nothing at all, so the band is named in words and the number rides
+# along in parentheses.
+#
+# The wording stays neutral on purpose. A wide spread is not a fault - it is a property
+# of the data - so the badge says "High variance", never "poor" or "unstable", and the
+# top band is amber rather than red. Red in this app means something went wrong.
+_CV_LOW = 15.0
+_CV_MODERATE = 50.0
+
+# Authored here rather than in the UI because three places render them - the dashboard,
+# the HTML export and the PDF export - and three copies of a threshold drift.
+_VARIANCE_LABELS = {
+    "low": "Low variance",
+    "moderate": "Moderate variance",
+    "high": "High variance",
+}
+
+_SKEW_LABELS = {
+    "right": "Right-skewed",
+    "left": "Left-skewed",
+    "symmetric": "Symmetric",
+}
+
 _STRFTIME_BY_GRANULARITY = {
     "yearly": "%Y",
     "monthly": "%b %Y",
@@ -320,6 +344,30 @@ def _descriptive_block(
     else:
         out["skew_ratio"] = None
         out["skew_flag"] = None
+
+    # skew_flag is None both when the data is symmetric and when the scale collapsed and
+    # nothing could be measured. Those are different claims, so the badge only says
+    # "Symmetric" for the first: a ratio was computed and it came back near zero.
+    if out["skew_flag"]:
+        out["skew_level"] = out["skew_flag"]
+    elif out["skew_ratio"] is not None:
+        out["skew_level"] = "symmetric"
+    else:
+        out["skew_level"] = None
+    out["skew_label"] = _SKEW_LABELS.get(out["skew_level"])
+
+    cv = out["cv"]
+    if cv is None:
+        out["variance_level"] = None
+        out["variance_label"] = None
+    else:
+        if cv < _CV_LOW:
+            out["variance_level"] = "low"
+        elif cv <= _CV_MODERATE:
+            out["variance_level"] = "moderate"
+        else:
+            out["variance_level"] = "high"
+        out["variance_label"] = f"{_VARIANCE_LABELS[out['variance_level']]} ({cv}%)"
 
     peak_pos = int(values.values.argmax())
     trough_pos = int(values.values.argmin())

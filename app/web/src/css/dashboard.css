@@ -60,6 +60,13 @@
   border-color: #DDD6FE;
 }
 
+/* Bands for a measured property of the data, not a verdict on it. Amber is the top of
+   the scale rather than red: red in this app means something went wrong, and a widely
+   spread series has not gone wrong. */
+.chip--good { color: var(--color-success); background: #F0FDF4; border-color: #BBF7D0; }
+.chip--warn { color: var(--color-warning); background: #FFFBEB; border-color: #FDE68A; }
+.chip--neutral { color: var(--color-text-secondary); }
+
 /* ---------- app shell ---------- */
 
 /* The nav's two groups (brand, tabs) each shrink before they wrap. Left to itself
@@ -329,8 +336,10 @@
   flex-wrap: wrap;
 }
 
+/* No top margin: the 6px here used to clear the pattern eyebrow above the title, and
+   with that gone it was just a stray offset at the top of the page. */
 .report-header__title {
-  margin: 6px 0 0 0;
+  margin: 0;
   font-size: var(--size-2xl);
   font-weight: var(--weight-bold);
   line-height: 1.25;
@@ -349,16 +358,6 @@
 }
 
 .report-header__question em { font-style: italic; }
-
-/* Scope: which rows this report is about. Quieter than the question above it -
-   it qualifies the numbers rather than announcing anything, and it is not a
-   warning, so it takes no amber and no icon. */
-.report-header__scope {
-  margin: 6px 0 0 0;
-  font-size: var(--size-xs);
-  color: var(--color-text-muted);
-  line-height: 1.5;
-}
 
 /* Provenance: what produced these numbers, and when. Stacks under the section title
    (see .section__title-group) so it reads as the methods note for the section. */
@@ -505,9 +504,13 @@
 
 /* Height is a floor, not a cap: the plot needs room for its own x-axis band, and a
    fixed height that excludes it leaves the card with a tiny nested scrollbar. */
+/* Sized against the insight rail beside it: the grid is as tall as its taller column,
+   so a plot floor above the rail's height buys nothing but scroll. 320 + the card's own
+   chrome lands the chart card just under the merged rail. Still a floor, not a cap - a
+   sideways bar chart computes its own height in chartLayout.js and ignores this. */
 .chart-card__plot {
   width: 100%;
-  min-height: 420px;
+  min-height: 320px;
 }
 
 .chart-card__placeholder {
@@ -522,14 +525,20 @@
   line-height: 1.6;
 }
 
+/* One card, four ruled rows - not four cards. Four surfaces spent three 16px gaps and
+   eight paddings saying what one surface and three hairlines say, and the rail is the
+   taller column in the results grid, so that stack was setting the height of the whole
+   band. Same mechanism as the distribution card: a hairline, not a gap. */
 .insight-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   min-width: 0;
+  overflow: hidden;
 }
 
-.insight-card { padding: 16px 18px; }
+.insight-row { padding: 13px 18px; }
+
+/* On the row, not between the rows, so the tinted warn background below runs the full
+   width of its own row and stops cleanly at the rule. */
+.insight-row + .insight-row { border-top: 1px solid var(--color-border); }
 
 .insight-card__head {
   display: flex;
@@ -556,13 +565,24 @@
   line-height: 1.55;
 }
 
-/* Amber is reserved for a warning that was actually detected. A card that always
-   renders amber teaches the reader to ignore it. */
-.insight-card--warn { border-color: #FDE68A; background: #FFFBEB; }
-.insight-card--warn .insight-card__title { color: var(--color-warning); }
-.insight-card--warn .insight-card__body { color: #78350F; }
+/* Amber is reserved for a warning that was actually detected. A row that always renders
+   amber teaches the reader to ignore it.
+   As a row rather than a card it can no longer be marked by a border colour, so the
+   tint carries it - plus a solid amber edge on the leading side, which is what still
+   reads as "this one" when the row is stacked flush against its neighbours. */
+.insight-row--warn {
+  background: #FFFBEB;
+  box-shadow: inset 3px 0 0 #FDE68A;
+}
 
-.insight-card--good .insight-card__title { color: var(--color-success); }
+/* Outliers and Data quality can both fire at once. A grey rule laid across the join
+   between two amber rows reads as a seam in the tint rather than as a divider. */
+.insight-row--warn + .insight-row--warn { border-top-color: #FDE68A; }
+
+.insight-row--warn .insight-card__title { color: var(--color-warning); }
+.insight-row--warn .insight-card__body { color: #78350F; }
+
+.insight-row--good .insight-card__title { color: var(--color-success); }
 
 .outlier-list {
   margin: 12px 0 0 0;
@@ -610,6 +630,219 @@
   font-weight: var(--weight-bold);
   color: #7C3AED;
 }
+
+/* ---------- distribution card ---------- */
+
+/* Three zones, one per statistical job: the five-number summary as a shape, the two
+   measures of centre with the skew between them, and the three measures of spread
+   under one meter. The flat ten-cell strip this replaced gave equal weight to ten
+   numbers that do three different jobs, and named none of them.
+   The strip itself is still below - it is what the disclosure opens. */
+.dist-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 1fr 1fr;
+  margin-bottom: 20px;
+  /* Trims the per-cell dividers at the container's edge; see .dist-card__cell. */
+  overflow: hidden;
+}
+
+.dist-card__head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* Tight vertically: the row carries a label and a button, and the card is competing
+     for the same screen as the chart above it. */
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.dist-card__head .link-btn { padding: 4px 10px; }
+
+/* The same right + bottom hairline mechanism as .stat-strip__item, for the same
+   reason - a tinted backdrop would show through an empty trailing cell. */
+.dist-card__cell {
+  padding: 14px 18px 16px;
+  min-width: 0;
+  box-shadow:
+    1px 0 0 var(--color-border),
+    0 1px 0 var(--color-border);
+}
+
+.dist-card__cell-label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+/* mean and median as a two-column readout, so the eye compares them vertically
+   rather than reading two sentences. */
+.dist-card__pair {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.dist-card__pair-label {
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+}
+
+.dist-card__pair-value {
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.dist-card__badge-row { margin-top: 8px; }
+
+.dist-card__note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The disclosure body: the .stat-strip grid, spanning all three zones inside the same
+   card rather than as a second surface below it. Its own bottom margin is the strip's
+   from when it was a standalone card, and would open a gap inside this one. */
+.dist-card__all {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+/* ---------- box plot bar ---------- */
+
+.boxplot { padding-top: 6px; }
+
+.boxplot__track {
+  position: relative;
+  height: 24px;
+  margin: 2px 0;
+}
+
+.boxplot__whisker {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.boxplot__cap {
+  position: absolute;
+  top: 6px;
+  width: 1px;
+  height: 12px;
+  background: var(--color-border);
+}
+
+.boxplot__box {
+  position: absolute;
+  top: 2px;
+  height: 20px;
+  min-width: 2px;
+  border-radius: 4px;
+  background: var(--color-series-1);
+  opacity: 0.24;
+}
+
+.boxplot__median {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 24px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--color-series-1);
+}
+
+.boxplot__fence {
+  position: absolute;
+  top: 4px;
+  width: 1px;
+  height: 16px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-text-muted) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/* The 2px ring is the surface colour, so overlapping flags stay countable where a
+   cluster of outliers lands on the same part of the range. */
+.boxplot__anomaly {
+  position: absolute;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  opacity: 0.75;
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+
+.boxplot__labels-bottom {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.boxplot__label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.boxplot__quartiles {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.boxplot--flat .boxplot__caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ---------- meter ---------- */
+
+/* The track is a wash of the fill's own hue, not grey: at a small fill a grey track
+   leaves almost none of the bar carrying the state. */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--color-accent-muted);
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+}
+
+.meter--low { background: #DCFCE7; }
+.meter--low .meter__fill { background: var(--color-success); }
+
+.meter--moderate { background: var(--color-accent-muted); }
+.meter--moderate .meter__fill { background: var(--color-accent); }
+
+.meter--high { background: #FEF3C7; }
+.meter--high .meter__fill { background: var(--color-warning); }
 
 /* ---------- distribution strip ---------- */
 
@@ -1112,6 +1345,10 @@
 @media (max-width: 1080px) {
   .results-grid { grid-template-columns: minmax(0, 1fr); }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  /* The box plot needs the width more than the three zones need to be side by side:
+     squeezed into a third of a narrow page its labels start colliding with its own
+     end caps. Stacking gives it the full card. */
+  .dist-card { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 860px) {

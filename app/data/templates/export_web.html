@@ -106,6 +106,56 @@
              border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 10px; }
 
   /* ---------- distribution ---------- */
+
+  /* Mirrors the dashboard's .dist-card / .boxplot / .meter. This target is a real
+     browser, so it carries the same marks; the PDF gets the numeric table instead
+     (see distribution_card in _macros.html). The series blue is COLORWAY[0] from
+     chart_builder.py, not the UI accent - the bar draws the report's own measure. */
+  .h3 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 18px 0 8px;
+        text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .dist { width: 100%; border-collapse: collapse; border: 1px solid var(--border);
+          border-radius: 8px; overflow: hidden; margin-bottom: 4px; }
+  .dist__cell { padding: 14px 18px 16px; vertical-align: top;
+                border-right: 1px solid var(--rule); }
+  .dist__cell--last { border-right: none; }
+  .dist__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+                 color: var(--ink-3); margin-bottom: 10px; }
+  .dist__pair { font-size: 13px; color: var(--ink-2); margin-bottom: 2px; }
+  .dist__pair strong { color: var(--ink); float: right; }
+  .dist__badge { display: inline-block; margin-top: 10px; padding: 2px 8px;
+                 border: 1px solid var(--border); border-radius: 999px; font-size: 10px;
+                 font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+                 color: var(--ink-2); background: var(--bg); }
+  .dist__badge--low { color: var(--good); background: #F0FDF4; border-color: #BBF7D0; }
+  .dist__badge--high { color: var(--warn); background: var(--warn-bg); border-color: #FDE68A; }
+  .dist__note { margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+  .dist__prose { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+
+  .bp__track { position: relative; height: 24px; margin: 2px 0; }
+  .bp__whisker { position: absolute; top: 50%; left: 0; right: 0; height: 1px;
+                 background: var(--border); }
+  .bp__cap { position: absolute; top: 6px; width: 1px; height: 12px; background: var(--border); }
+  .bp__box { position: absolute; top: 2px; height: 20px; min-width: 2px;
+             border-radius: 4px; background: #0072B2; opacity: 0.18; }
+  .bp__median { position: absolute; top: 0; width: 2px; height: 24px; margin-left: -1px;
+                border-radius: 1px; background: #0072B2; }
+  .bp__fence { position: absolute; top: 4px; width: 1px; height: 16px;
+               background: repeating-linear-gradient(to bottom, var(--ink-3) 0 2px, transparent 2px 4px); }
+  .bp__anomaly { position: absolute; top: 9px; width: 6px; height: 6px; margin-left: -3px;
+                 border-radius: 50%; background: var(--warn); opacity: 0.75;
+                 box-shadow: 0 0 0 2px var(--surface); }
+  .bp__ends { display: flex; justify-content: space-between; font-size: 11px;
+              color: var(--ink-2); }
+  .bp__quartiles { margin-top: 4px; font-size: 11px; color: var(--ink-3); }
+
+  .meter { height: 6px; border-radius: 3px; overflow: hidden; background: var(--accent-muted); }
+  .meter__fill { height: 100%; border-radius: 3px; background: var(--accent); }
+  .meter--low { background: #DCFCE7; }
+  .meter--low .meter__fill { background: var(--good); }
+  .meter--high { background: #FEF3C7; }
+  .meter--high .meter__fill { background: var(--warn); }
+
   .strip { width: 100%; border-collapse: collapse; border: 1px solid var(--border);
            border-radius: 8px; overflow: hidden; }
   .strip__cell { padding: 12px 6px; text-align: center; border-right: 1px solid var(--rule); }
@@ -188,7 +238,7 @@
   {% for r in reports %}
   <div class="doc break">
     {{ m.report_overview(r) }}
-    {{ m.report_analysis(r) }}
+    {{ m.report_analysis(r, rich=true) }}
   </div>
   {% endfor %}
 
@@ -209,7 +259,7 @@
 
   <div class="doc">
     {{ m.report_overview(r) }}
-    {{ m.report_analysis(r) }}
+    {{ m.report_analysis(r, rich=true) }}
     <h2 class="h2">How to read the labels</h2>
     {{ m.label_legend() }}
   </div>
