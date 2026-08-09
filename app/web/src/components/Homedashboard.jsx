@@ -11,28 +11,43 @@ import Card from './ui/Card';
 const STEPS = [
   {
     title: 'Upload',
-    body: 'Add CSV or Excel files. Multi-sheet workbooks are read sheet by sheet, so you choose which worksheets to include before anything runs.',
+    subtitle: 'Drop in your files.',
+    body: "Upload your CSV or Excel spreadsheets and choose the worksheets you want to use. We'll take it from there.",
   },
   {
-    title: 'Analyse',
-    body: 'Each file is profiled - column types, ranges, and relationships across files - and an AI model proposes the reports worth building from it.',
+    title: 'Let AI do the thinking',
+    subtitle: "We'll find what matters.",
+    body: 'Your data is analyzed automatically, and AI figures out which insights, charts, and reports are most useful.',
   },
   {
-    title: 'Report',
-    body: 'Each report is built from your actual rows, with a chart, computed KPIs, and any data-quality warnings. Export to PDF or HTML, or send it by email.',
+    title: 'Get your reports',
+    subtitle: 'Ready to use.',
+    body: [
+      'Your reports are built from your data with useful charts, key numbers, and a variety of other metrics.',
+      "Once you're done download them as a PDF or HTML. You can even share them by email!",
+    ]
   },
 ];
 
 export default function HomeDashboard({ onStart }) {
   return (
     <div className="home-page">
-      <div className="eyebrow eyebrow--accent">AI-DASHBOARD</div>
+      <div className="home-intro">
+        <div className="eyebrow eyebrow--accent">AI-DASHBOARD</div>
 
-      <p className="home-hero">
-        Turn a spreadsheet into a set of reports. Upload your data, and the app
-        profiles it, decides what is worth showing, and builds the charts and
-        figures to show it.
-      </p>
+        <div className="home-hero">
+          <h1 className="home-hero__title">
+            Just upload it. We'll take it from here.
+          </h1>
+          <p className="home-hero__body">
+            Simply upload your spreadsheet and let AI do the rest.
+            Your data is analyzed, the most useful insights are identified, and a set of reports is built for you.
+          </p>
+          <p className="home-hero__emphasis">
+            We'll figure out what matters. No additional steps. Just upload and go.
+          </p>
+        </div>
+      </div>
 
       <Card className="home-steps">
         <h2 className="home-steps__title">How it works</h2>
@@ -40,9 +55,19 @@ export default function HomeDashboard({ onStart }) {
           {STEPS.map((step, i) => (
             <li key={step.title} className="home-step">
               <span className="home-step__num">{i + 1}</span>
-              <div>
+              <div className="home-step__content">
                 <div className="home-step__title">{step.title}</div>
-                <p className="home-step__body">{step.body}</p>
+                <p className="home-step__subtitle">{step.subtitle}</p>
+                <p className="home-step__body">
+                  {Array.isArray(step.body)
+                    ? step.body.map((line, idx) => (
+                        <span key={idx}>
+                          {idx > 0 && <br />}
+                          {line}
+                        </span>
+                      ))
+                    : step.body}
+                </p>
               </div>
             </li>
           ))}

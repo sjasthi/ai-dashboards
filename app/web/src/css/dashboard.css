@@ -72,7 +72,21 @@
 /* The nav's two groups (brand, tabs) each shrink before they wrap. Left to itself
    flexbox squeezed the brand until "AI-Dashboard" broke mid-phrase, which reads as
    a layout bug rather than as a narrow screen. */
-.app-nav { padding: 14px 32px; gap: 16px; }
+.app-nav { padding: 14px 32px; }
+
+/* The bar itself (.app-nav) stays full-bleed for its background/border; this is
+   the flex row that used to live on .app-nav directly, now capped to the same
+   width as the page content so the brand and stats land above the content
+   column's edges instead of the viewport's on wide screens. */
+.app-nav__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
 .app-nav__brand { gap: 10px; flex-shrink: 0; }
 .app-nav__brand span { white-space: nowrap; }
 .app-nav__tabs { gap: 32px; }
@@ -153,7 +167,8 @@
 /* Below this the brand and tabs genuinely don't fit on one line, so the tabs get their
    own full-width row instead of being crushed against the brand. */
 @media (max-width: 640px) {
-  .app-nav { flex-wrap: wrap; padding: 12px 16px; }
+  .app-nav { padding: 12px 16px; }
+  .app-nav__inner { flex-wrap: wrap; }
   .app-nav__tabs {
     order: 3;
     width: 100%;
@@ -206,11 +221,39 @@
 
 /* ---------- home ---------- */
 
+/* No side padding: the eyebrow and hero text should reach the same left/right
+   edges as the "How it works" card's outer border below it, not stop 28px
+   short to match the card's internal (padded) text. */
+.home-intro {
+  padding: 0;
+}
+
 .home-hero {
-  margin: 12px 0 24px;
+  margin: 16px 0 20px;
+}
+
+.home-hero__title {
+  margin: 0 0 16px;
+  font-size: var(--size-3xl);
+  line-height: 1.25;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.home-hero__body {
+  margin: 0 0 16px;
   font-size: var(--size-lg);
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--color-text-secondary);
+}
+
+.home-hero__emphasis {
+  margin: 0;
+  font-size: var(--size-lg);
+  line-height: 1.6;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .home-steps {
@@ -233,7 +276,7 @@
 .home-step {
   display: flex;
   gap: 14px;
-  padding: 14px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -254,16 +297,34 @@
   justify-content: center;
 }
 
+/* Stretches to the row's full width so the body copy below can use the
+   card's actual measure instead of shrink-wrapping to its own content. */
+.home-step__content {
+  flex: 1;
+  min-width: 0;
+}
+
 .home-step__title {
+  font-size: var(--size-lg);
   font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* The "hook" line - wears the accent colour so it reads as the takeaway,
+   distinct from both the heading above and the explanatory copy below. */
+.home-step__subtitle {
+  margin: 3px 0 0;
+  font-size: var(--size-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-accent);
 }
 
 .home-step__body {
-  margin: 2px 0 0;
-  max-width: 62ch;
+  margin: 4px 0 0;
+  max-width: none;
   font-size: var(--size-sm);
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--color-text-secondary);
 }
 
@@ -522,6 +583,13 @@
   box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05), 0 6px 16px rgba(17, 24, 39, 0.08);
 }
 
+.stat-tile__label-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .stat-tile__label {
   font-size: var(--size-xs);
   font-weight: var(--weight-semibold);
@@ -529,14 +597,31 @@
   color: var(--color-text-secondary);
 }
 
-/* The subtext that used to sit under the value, now folded into the label line.
-   Bolder and darker than the label itself - the qualifier (what the number is
-   *of*) is the thing a reader needs to catch, not a footnote to the label. */
-.stat-tile__label-sub {
+/* Name (e.g. "GTK") and its vs-average delta share one row, packed tight on the
+   left rather than pushed to the tile's edges - one claim, not two. The delta stays
+   in secondary ink rather than the success/danger used for a trend's own direction:
+   sitting above or below average isn't a verdict here the way an upward revenue
+   trend is on the 4th tile. */
+.stat-tile__name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.stat-tile__name {
+  font-size: var(--size-xs);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0;
   color: var(--color-text-primary);
-  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.stat-tile__delta-inline {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Proportional figures deliberately: tabular-nums gives every digit the width of a
@@ -809,13 +894,16 @@
 
 .dist-card__cell-label-row .dist-card__cell-label { margin-bottom: 0; }
 
-/* mean and median as a two-column readout, so the eye compares them vertically
-   rather than reading two sentences. */
+/* mean and median as two side-by-side label/value stacks (grid-auto-flow: column
+   fills each column - label then value - before starting the next), so the pair
+   reads as one compact row instead of spanning two. */
 .dist-card__pair {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 10px;
-  align-items: baseline;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  justify-content: start;
+  column-gap: 28px;
+  row-gap: 2px;
   margin-bottom: 10px;
 }
 

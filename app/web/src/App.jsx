@@ -354,43 +354,45 @@ export default function App() {
           inline styles beat media queries, so anything that has to change at a
           breakpoint can't be set on the element. */}
       <nav className="app-nav" style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         background: 'white',
         borderBottom: '1px solid #e2e8f0'
       }}>
-        <div className="app-nav__brand" style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{
-            width: '34px',
-            height: '34px',
-            borderRadius: '8px',
-            background: '#2563eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="12" width="4" height="9" rx="1" fill="white" />
-              <rect x="10" y="7" width="4" height="14" rx="1" fill="white" />
-              <rect x="17" y="3" width="4" height="18" rx="1" fill="white" />
-            </svg>
-          </div>
-          <span style={{ fontWeight: 700, fontSize: '1.25rem', color: '#1e293b' }}>
-            AI-Dashboard
-          </span>
-        </div>
-
-        <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['home', 'upload', 'analysis', 'reports',
-            ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
-            <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+        {/* Bounded to the same max-width as the page content below (dashboard.css),
+            so the brand/tabs/stats align with the content column instead of hugging
+            the raw viewport edges on wide screens - the bar itself stays full-bleed. */}
+        <div className="app-nav__inner">
+          <div className="app-nav__brand" style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="12" width="4" height="9" rx="1" fill="white" />
+                <rect x="10" y="7" width="4" height="14" rx="1" fill="white" />
+                <rect x="17" y="3" width="4" height="18" rx="1" fill="white" />
+              </svg>
             </div>
-          ))}
-        </div>
+            <span style={{ fontWeight: 700, fontSize: '1.25rem', color: '#1e293b' }}>
+              AI-Dashboard
+            </span>
+          </div>
 
-        <NavStats stats={stats} />
+          <div className="app-nav__tabs" style={{ display: 'flex' }}>
+            {['home', 'upload', 'analysis', 'reports',
+              ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
+              <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          <NavStats stats={stats} />
+        </div>
       </nav>
 
       <main className="app-main">

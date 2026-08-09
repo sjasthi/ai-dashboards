@@ -398,8 +398,11 @@ class SummaryGenerator:
             null_count = int(series.isnull().sum())
             null_percent = (null_count / len(df)) * 100 if len(df) else 0.0
 
-            # Detect role
-            role = detect_column_role(col_name, dtype, unique_count, len(df))
+            # Detect role. Excel headers can be numeric, a date, or blank (see
+            # data_loader.py's deliberate "strip only string headers" comment) -
+            # str() here is what makes ColumnProfile.name reliably a str for every
+            # downstream .lower()/.strip() call, matching its type hint.
+            role = detect_column_role(str(col_name), dtype, unique_count, len(df))
 
             # Numeric stats if available
             min_val = max_val = mean_val = None
@@ -434,7 +437,7 @@ class SummaryGenerator:
                 ]
 
             col_profiles.append(ColumnProfile(
-                name=col_name,
+                name=str(col_name),
                 dtype=dtype,
                 unique_values=unique_count,
                 null_count=null_count,

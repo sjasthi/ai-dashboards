@@ -86,6 +86,19 @@ _SKEW_LABELS = {
     "symmetric": "Symmetric",
 }
 
+# A keyword match on the un-suffixed column name, not a schema fact - no column in
+# this pipeline is ever typed as currency. Mirrors the money-measure vocabulary
+# recommendation_requester.py already uses to steer the LLM ("revenue, cost,
+# freight...", recommendation_requester.py:184) rather than inventing a second list.
+# Deliberately excludes generic words like "total" that name an aggregation rather
+# than a unit of money.
+_MONEY_WORDS = {
+    "revenue", "cost", "costs", "price", "prices", "value", "sales", "amount",
+    "budget", "spend", "salary", "salaries", "income", "profit", "profits",
+    "freight", "fee", "fees", "expense", "expenses", "payment", "payments",
+    "earnings", "wage", "wages", "margin", "fare",
+}
+
 _STRFTIME_BY_GRANULARITY = {
     "yearly": "%Y",
     "monthly": "%b %Y",
@@ -395,6 +408,7 @@ def _descriptive_block(
     if cv is None:
         out["variance_level"] = None
         out["variance_label"] = None
+        out["variance_tier_label"] = None
     else:
         if cv < _CV_LOW:
             out["variance_level"] = "low"
@@ -402,7 +416,11 @@ def _descriptive_block(
             out["variance_level"] = "moderate"
         else:
             out["variance_level"] = "high"
-        out["variance_label"] = f"{_VARIANCE_LABELS[out['variance_level']]} ({cv}%)"
+        out["variance_tier_label"] = _VARIANCE_LABELS[out["variance_level"]]
+        # Kept for anywhere still spelling out the number (PDF/HTML export prose);
+        # the KPI tile shows the number in its own value slot and only needs the
+        # bare tier word above.
+        out["variance_label"] = f"{out['variance_tier_label']} ({cv}%)"
 
     peak_pos = int(values.values.argmax())
     trough_pos = int(values.values.argmin())
@@ -539,7 +557,11 @@ def _outlier_block(
     """
     n = len(values)
     if n < 4:
-        return {"anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None}
+        return {
+            "anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None,
+            "fence_low": None, "fence_high": None,
+            "peak_is_outlier": False, "trough_is_outlier": False,
+        }
 
     median = float(values.median())
     mad = float((values - median).abs().median())
@@ -577,7 +599,11 @@ def _outlier_block(
         scores = pd.Series(np.nan, index=values.index)
         flagged = deviations > 0
     else:
-        return {"anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None}
+        return {
+            "anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None,
+            "fence_low": None, "fence_high": None,
+            "peak_is_outlier": False, "trough_is_outlier": False,
+        }
 
     anomalies: List[Dict[str, Any]] = []
     for pos in np.flatnonzero(flagged.to_numpy()):
@@ -597,6 +623,14 @@ def _outlier_block(
 
     anomalies.sort(key=lambda a: a["deviation"] or 0, reverse=True)
 
+    # The dataset's max/min always carry the largest deviation on their side, so if
+    # either is flagged at all it's flagged here - checked against the full list,
+    # before the sidebar-sized slice below, so a truncated `shown` can never hide it.
+    peak_value = float(values.max())
+    trough_value = float(values.min())
+    peak_is_outlier = any(a["direction"] == "high" and a["value"] == peak_value for a in anomalies)
+    trough_is_outlier = any(a["direction"] == "low" and a["value"] == trough_value for a in anomalies)
+
     # A wide report can flag more points than any sidebar can show. Send the most
     # extreme few and report the true count alongside, so the UI never implies the
     # list is complete.
@@ -609,6 +643,8 @@ def _outlier_block(
         "anomaly_threshold": threshold,
         "fence_low": _round(lo_fence) if iqr > 0 else None,
         "fence_high": _round(hi_fence) if iqr > 0 else None,
+        "peak_is_outlier": peak_is_outlier,
+        "trough_is_outlier": trough_is_outlier,
     }
 
 
@@ -776,6 +812,21 @@ def _display_filename(name: Optional[str]) -> str:
     return stem.split(" (")[0].strip() or stem
 
 
+def _looks_like_currency(base_column: str, agg: Optional[str]) -> bool:
+    """Whether this measure reads as a dollar amount rather than a plain count.
+
+    COUNT/NUNIQUE never qualifies, whatever the base name looks like - "color_count"
+    is a count of rows, not money, no matter that "color" or any other base name
+    might otherwise coincide with a money word. Everything else (sum, mean, a raw
+    pass-through column) is a real aggregate of the underlying values, so a money
+    base name still means money.
+    """
+    if agg in ("count", "nunique"):
+        return False
+    words = re.split(r"[_\s]+", base_column.lower())
+    return any(w in _MONEY_WORDS for w in words)
+
+
 def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
     """The single number the dashboard leads with.
 
@@ -785,6 +836,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
     """
     base, agg = split_agg_suffix(value_col)
     base_label = humanize_column(value_col)
+    is_currency = _looks_like_currency(base, agg)
 
     if agg in ADDITIVE_AGGS:
         total = _round(stats["_sum_raw"])
@@ -794,6 +846,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
             "headline_sublabel": f"across {stats['count']:,} data points",
             "sum": total,
             "sum_is_meaningful": True,
+            "measure_is_currency": is_currency,
         }
 
     return {
@@ -802,6 +855,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
         "headline_sublabel": f"± {stats['std']} std dev",
         "sum": None,
         "sum_is_meaningful": False,
+        "measure_is_currency": is_currency,
     }
 
 

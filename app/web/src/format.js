@@ -88,6 +88,41 @@ export function directionGlyph(direction) {
 }
 
 /**
+ * How far a single value sits from the series average, as a compact inline badge.
+ *
+ * Rounded to a whole percent rather than the one-decimal precision `signedPercent`
+ * uses elsewhere - this rides next to a category name in a tight KPI tile, where a
+ * decimal costs width a trend headline can afford. Returns null when there's no
+ * mean to compare against, or when the value doesn't differ from it at whole-percent
+ * resolution - "+0% vs avg" beside an up/down arrow would claim a direction that
+ * isn't there.
+ */
+export function deltaVsAverage(value, mean) {
+  if (typeof value !== 'number' || typeof mean !== 'number' || !Number.isFinite(mean) || mean === 0) {
+    return null;
+  }
+  const pct = Math.round(((value - mean) / Math.abs(mean)) * 100);
+  if (pct === 0) return null;
+  return {
+    direction: pct > 0 ? 'up' : 'down',
+    text: `${pct > 0 ? '+' : '−'}${Math.abs(pct)}% vs avg`,
+  };
+}
+
+/**
+ * "$4.2M" when `isCurrency`, "4.2M" otherwise - one call site for both.
+ *
+ * Passes `null`/`undefined` straight through rather than pre-rendering the em-dash
+ * itself: StatTile's own isEmpty check looks for null/undefined/'', and a formatted
+ * '—' string here would slip past that check and lose the muted empty styling.
+ */
+export function compactMeasure(value, isCurrency) {
+  if (value === null || value === undefined) return value;
+  const formatted = compactNumber(value);
+  return isCurrency && formatted !== '—' ? `$${formatted}` : formatted;
+}
+
+/**
  * An ISO timestamp as a local wall-clock time: "11:38 AM".
  *
  * hour12 is set explicitly rather than left to the locale. Without it the same

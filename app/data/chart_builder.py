@@ -75,10 +75,19 @@ COLORWAY = [
 
 def humanize_column(column: str) -> str:
     """Turn a raw/derived column name into a readable axis label, e.g.
-    "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group"."""
+    "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group",
+    "categoryName" -> "Category Name"."""
     base, qualifier = split_agg_suffix(column)
-    label = base.replace("_", " ").strip().title()
+    spaced = _CAMEL_BOUNDARY.sub(" ", base.replace("_", " "))
+    label = spaced.strip().title()
     return f"{label} ({AGG_SUFFIXES[qualifier]})" if qualifier else label
+
+
+# Inserted before a camelCase/PascalCase word boundary so "categoryName" and
+# "ID" runs split into words before .title() runs - .title() only capitalizes
+# the first letter of each whitespace-delimited run, so "CategoryName" with no
+# separator otherwise collapses to "Categoryname".
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def split_agg_suffix(column: str) -> Tuple[str, Optional[str]]:

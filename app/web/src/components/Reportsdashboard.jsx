@@ -7,7 +7,7 @@ import Plot from './ui/Plot';
 import Section from './ui/Section';
 import SkewGlyph from './ui/SkewGlyph';
 import StatTile from './ui/StatTile';
-import { compactNumber, directionGlyph, signedPercent } from '../format';
+import { compactMeasure, deltaVsAverage, compactNumber, directionGlyph, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
 import { collectChartImages, triggerDownload } from '../export';
 
@@ -388,51 +388,60 @@ function KpiRow({ stats, report }) {
   }
 
   const measure = stats.measure_label || 'value';
+  const isCurrency = !!stats.measure_is_currency;
+  const outlierChip = (
+    <span className="chip chip--warn" title="Flagged as a statistical outlier - see Distribution below">
+      ⚠ outlier
+    </span>
+  );
 
   return (
     <div className="kpi-row">
       <StatTile
         label={stats.headline_label || measure}
-        value={stats.headline_value}
-        sublabel={stats.headline_sublabel}
+        value={compactMeasure(stats.headline_value, isCurrency)}
+        note={stats.headline_sublabel}
       />
       <StatTile
         label="Highest"
-        value={stats.peak_value}
-        sublabel={stats.peak_label || `highest ${measure}`}
+        value={compactMeasure(stats.peak_value, isCurrency)}
+        name={stats.peak_label}
+        delta={deltaVsAverage(stats.peak_value, stats.mean)}
+        chip={stats.peak_is_outlier ? outlierChip : null}
       />
       <StatTile
         label="Lowest"
-        value={stats.trough_value}
-        sublabel={stats.trough_label || `lowest ${measure}`}
+        value={compactMeasure(stats.trough_value, isCurrency)}
+        name={stats.trough_label}
+        delta={deltaVsAverage(stats.trough_value, stats.mean)}
+        chip={stats.trough_is_outlier ? outlierChip : null}
       />
       {stats.blocks?.includes('trend') ? (
         /* No sparkline: the chart directly below plots the same series at full
            size, so a thumbnail of it cost tile height to repeat what the reader
-           was about to see anyway. */
+           was about to see anyway. R² rides in the hover title rather than the
+           visible text - the same move SkewGlyph makes for skewTitle below. */
         <StatTile
           label="Trend"
           value={signedPercent(stats.trend_pct_change)}
-          sublabel={
-            <>
-              <span className={`stat-tile__delta stat-tile__delta--${stats.trend_direction || 'flat'}`}>
-                {directionGlyph(stats.trend_direction)}
-              </span>
-              {stats.trend_strength && <> {stats.trend_strength} · R² {stats.trend_r2}</>}
-            </>
+          note={
+            <span title={stats.trend_r2 != null ? `R² ${stats.trend_r2} — how well a straight line fits this trend` : undefined}>
+              {directionGlyph(stats.trend_direction)}{' '}
+              {stats.trend_direction === 'flat' ? 'steady' : `${stats.trend_strength || ''} trend`.trim()}
+            </span>
           }
         />
       ) : stats.blocks?.includes('concentration') ? (
         <StatTile
-          label="Concentration"
+          label="Top categories"
           value={`${stats.top3_share}%`}
-          sublabel={`top ${Math.min(3, stats.n_categories)} of ${stats.n_categories} categories`}
+          note={(stats.top_labels || []).join(', ')}
         />
       ) : (
         <StatTile
           label="Spread"
           value={stats.cv != null ? `${stats.cv}%` : null}
-          sublabel={`variation around a mean of ${compactNumber(stats.mean)}`}
+          note={stats.variance_tier_label}
         />
       )}
     </div>
