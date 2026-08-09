@@ -482,6 +482,9 @@ def _trend_block(data: pd.DataFrame, values: pd.Series, label_col: str) -> Dict[
     return out
 
 
+_CONCENTRATION_TOP_N = 3
+
+
 def _concentration_block(
     values: pd.Series, labels: pd.Series, granularity: Optional[str]
 ) -> Optional[Dict[str, Any]]:
@@ -489,6 +492,14 @@ def _concentration_block(
 
     Only meaningful for non-negative additive measures - a share of a total that
     mixes positive and negative values isn't a share of anything.
+
+    Also only meaningful when the top `_CONCENTRATION_TOP_N` categories are a real
+    subset of the data, not most or all of it: "top 3 of 3" (or of 4, of 5) is
+    mechanically ~100% no matter how the values are distributed, so it isn't a
+    finding. Requiring the excluded tail to be at least as large as the shown head
+    (n_cat >= 2 * top N) is the same reasoning market-concentration ratios like CR4
+    use - a fixed-count share ratio only carries information once N meaningfully
+    exceeds the count being summed.
     """
     if (values < 0).any():
         return None
@@ -496,20 +507,23 @@ def _concentration_block(
     if total <= 0:
         return None
 
+    n_cat = int(labels.nunique(dropna=True))
+    if n_cat < 2 * _CONCENTRATION_TOP_N:
+        return None
+
     # Rank by position rather than index label, so this holds regardless of what the
     # upstream pipeline left the index looking like. One row per category is the norm
     # here (these axes come out of a groupby), so a row share is a category share.
     order = np.argsort(-values.to_numpy())
     shares = values.to_numpy()[order] / total
-    n_cat = int(labels.nunique(dropna=True))
 
-    top_labels = [_fmt_label(labels.iloc[int(pos)], granularity) for pos in order[:3]]
+    top_labels = [_fmt_label(labels.iloc[int(pos)], granularity) for pos in order[:_CONCENTRATION_TOP_N]]
 
     return {
         "total": _round(total),
         "n_categories": n_cat,
         "top1_share": _round(float(shares[0]) * 100),
-        "top3_share": _round(float(shares[:3].sum()) * 100),
+        "top3_share": _round(float(shares[:_CONCENTRATION_TOP_N].sum()) * 100),
         "top_labels": top_labels,
         "tail_count": int((shares < _TAIL_SHARE).sum()),
     }

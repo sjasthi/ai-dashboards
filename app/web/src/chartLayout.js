@@ -13,6 +13,11 @@
 const INK = '#111827';
 const INK_SECONDARY = '#6B7280';
 const INK_MUTED = '#9CA3AF';
+// Shared by axis ticks/titles and the direct value labels (percentages,
+// min/max). Both need to read clearly at small sizes, where INK_SECONDARY
+// goes washed-out gray - but full INK (near-black) reads as harsh, especially
+// bolded, so this settles a step short of it rather than at it.
+const STRONG_TEXT = '#374151';
 const SURFACE = '#FFFFFF';
 const GRID = '#EEF0F2';
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
@@ -25,6 +30,10 @@ export const PLOT_CONFIG = {
   displayModeBar: false,
   // Tooltips enhance, they never gate: every value is also in the table view.
   displaylogo: false,
+  // dragmode: false (below, in buildLayout) already stops the rubber-band zoom;
+  // this stops double-click from doing anything either, so there's no leftover
+  // gesture on these charts at all.
+  doubleClick: false,
 };
 
 export function buildLayout(chart, stats, { compact = false } = {}) {
@@ -45,8 +54,8 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     gridwidth: 1,
     zeroline: false,
     linecolor: GRID,
-    tickfont: { size: compact ? 9 : 11, color: INK_SECONDARY },
-    title: { font: { size: compact ? 10 : 12, color: INK_SECONDARY } },
+    tickfont: { size: compact ? 10 : 12, color: STRONG_TEXT },
+    title: { font: { size: compact ? 11 : 13, color: STRONG_TEXT, weight: 700 } },
   };
 
   const layout = {
@@ -67,6 +76,13 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     // wastes the vertical space the axis band needs.
     title: undefined,
     showlegend: false,
+    // Plotly's default drag gesture is a rubber-band zoom, undone only by a
+    // double-click most people never discover - they drag by accident (a click
+    // that moves a pixel or two is enough to trigger it), the chart zooms into a
+    // sliver of itself, and it reads as broken rather than "zoomed in". These
+    // charts have no need for interactive zoom, so the gesture is off entirely
+    // rather than swapped for pan.
+    dragmode: false,
   };
 
   if (!NON_CARTESIAN.has(traceType)) {
@@ -238,7 +254,7 @@ function percentLabels(chart, horizontal = false) {
   for (let i = 0; i < measures.length; i += 1) {
     const v = measures[i];
     if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-    const pct = `${((v / total) * 100).toFixed(1)}%`;
+    const pct = `<b>${((v / total) * 100).toFixed(1)}%</b>`;
     labels.push(horizontal
       ? barEndLabel(v, categories[i], pct)
       : pointLabel(categories[i], v, 'bottom', pct));
@@ -250,9 +266,12 @@ function percentLabels(chart, horizontal = false) {
 const LABEL_STYLE = {
   showarrow: false,
   // Text wears text tokens, never the series colour - the mark beside it already
-  // carries identity, and a light hue is illegible as type.
-  font: { size: 11, color: INK_SECONDARY, family: FONT },
-  bgcolor: 'rgba(255,255,255,0.85)',
+  // carries identity, and a light hue is illegible as type. STRONG_TEXT rather
+  // than the secondary tone: these are the numbers a reader is meant to catch
+  // at a glance, not a recessive annotation - but full INK (near-black) bolded
+  // reads as too harsh, so this stops a step short of it.
+  font: { size: 12, color: STRONG_TEXT, family: FONT },
+  bgcolor: 'rgba(255,255,255,0.95)',
   borderpad: 2,
 };
 

@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import BoxPlotBar from './ui/BoxPlotBar';
+import RangeSummary from './ui/RangeSummary';
 import Card from './ui/Card';
 import DataTable from './ui/DataTable';
 import Meter from './ui/Meter';
 import Plot from './ui/Plot';
 import Section from './ui/Section';
+import SkewGlyph from './ui/SkewGlyph';
 import StatTile from './ui/StatTile';
-import { clockTime, compactNumber, directionGlyph, exactNumber, signedPercent } from '../format';
+import { compactNumber, directionGlyph, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
 import { collectChartImages, triggerDownload } from '../export';
 
@@ -37,6 +38,7 @@ export default function ReportsDashboard({
   onExitReplay = null,
 }) {
   const [showTable, setShowTable] = useState(false);
+  const [showSpecs, setShowSpecs] = useState(false);
   const [comparing, setComparing] = useState(false);
 
   const inFlight = generating || new Set();
@@ -135,39 +137,15 @@ export default function ReportsDashboard({
 
           {hasStats && <DistributionCard stats={stats} report={report} />}
 
-          <Section
-            title="Report data"
-            subtitle={
-              <Provenance
-                report={report}
-                fileProfiles={fileProfiles}
-                scopeText={stats?.scope_text}
-              />
-            }
-            actions={
-              <button className="table-toggle" onClick={() => setShowTable((s) => !s)}>
-                {showTable ? 'Hide table' : 'Show table'}
-                <span aria-hidden="true">{showTable ? '▲' : '▼'}</span>
-              </button>
-            }
-          >
-            {showTable ? (
-              <DataTable
-                columns={report.data_columns || []}
-                rows={report.rows || []}
-                totalRows={report.report_rows || 0}
-                truncated={!!report.rows_truncated}
-              />
-            ) : (
-              <Card>
-                <div className="empty-state" style={{ padding: '20px' }}>
-                  {(report.report_rows || 0).toLocaleString()} rows ·{' '}
-                  {(report.data_columns || []).length} columns. Every value in the chart
-                  is readable here as text.
-                </div>
-              </Card>
-            )}
-          </Section>
+          <ReportDataCard
+            report={report}
+            fileProfiles={fileProfiles}
+            scopeText={stats?.scope_text}
+            showSpecs={showSpecs}
+            onToggleSpecs={() => setShowSpecs((s) => !s)}
+            showTable={showTable}
+            onToggleTable={() => setShowTable((s) => !s)}
+          />
         </>
       )}
 
@@ -305,8 +283,6 @@ function Provenance({ report, fileProfiles, scopeText }) {
   if (report.report_rows != null) bits.push(`${report.report_rows.toLocaleString()} data points`);
   if (report.data_columns?.length) bits.push(`${report.data_columns.length} columns`);
   if (report.chart_type) bits.push(`${report.chart_type} chart`);
-  const time = clockTime(report.generated_at);
-  if (time) bits.push(`generated ${time}`);
 
   return (
     <div className="provenance">
@@ -318,6 +294,74 @@ function Provenance({ report, fileProfiles, scopeText }) {
       ))}
       {report.operations?.map((op) => <code key={op}>{op}</code>)}
     </div>
+  );
+}
+
+/**
+ * "Report data - Specifications" plus "Show table", laid out as bordered cells the
+ * same way DistributionCard is - one head row of controls, then a stack of
+ * disclosure content below it - rather than a title with a wrapping subtitle.
+ *
+ * That switch is what keeps "Show table" pinned in place: it used to sit in a
+ * flex row that centered against the title *and* the provenance line beneath it,
+ * so opening "specifications" (which can wrap to two lines) visibly shifted the
+ * button. Two toggles that both open a block below the head row can't do that -
+ * the head row's own height never changes.
+ */
+function ReportDataCard({
+  report, fileProfiles, scopeText, showSpecs, onToggleSpecs, showTable, onToggleTable,
+}) {
+  const rows = report.report_rows || 0;
+  const columns = (report.data_columns || []).length;
+
+  return (
+    <Card className="report-data-card">
+      <div className="report-data-card__head">
+        <div className="report-data-card__title">
+          <span className="eyebrow">Report data –</span>
+          <button
+            type="button"
+            className="build-details__toggle"
+            aria-expanded={showSpecs}
+            onClick={onToggleSpecs}
+          >
+            Specifications
+            <span aria-hidden="true">{showSpecs ? '▲' : '▼'}</span>
+          </button>
+        </div>
+        <button
+          type="button"
+          className="link-btn"
+          aria-expanded={showTable}
+          onClick={onToggleTable}
+        >
+          {showTable ? 'Hide table' : 'Show table'}{' '}
+          <span aria-hidden="true">{showTable ? '▲' : '▼'}</span>
+        </button>
+      </div>
+
+      {showSpecs && (
+        <div className="report-data-card__cell">
+          <Provenance report={report} fileProfiles={fileProfiles} scopeText={scopeText} />
+        </div>
+      )}
+
+      <div className="report-data-card__cell">
+        {showTable ? (
+          <DataTable
+            columns={report.data_columns || []}
+            rows={report.rows || []}
+            totalRows={report.report_rows || 0}
+            truncated={!!report.rows_truncated}
+          />
+        ) : (
+          <div className="empty-state">
+            Report contains: {rows.toLocaleString()} rows · {columns} columns.
+            Select <strong className="report-data-card__cta">Show table</strong> to view report data.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -353,12 +397,12 @@ function KpiRow({ stats, report }) {
         sublabel={stats.headline_sublabel}
       />
       <StatTile
-        label="Peak"
+        label="Highest"
         value={stats.peak_value}
         sublabel={stats.peak_label || `highest ${measure}`}
       />
       <StatTile
-        label="Low"
+        label="Lowest"
         value={stats.trough_value}
         sublabel={stats.trough_label || `lowest ${measure}`}
       />
@@ -540,6 +584,13 @@ function DistributionCard({ stats, report }) {
       `${stats.skew_ratio > 0 ? 'above' : 'below'} the median.`
     : undefined;
 
+  const stdTitle = stats.pct_within_1sd != null
+    ? `Standard deviation (σ) — about ${stats.pct_within_1sd}% of values fall within this distance of the average.`
+    : 'Standard deviation (σ) — the typical distance of a value from the average.';
+  const iqrTitle = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.';
+  const meanTitle = 'Mean — the sum of all values divided by how many there are. Sensitive to outliers.';
+  const medianTitle = 'Median — the middle value when all values are sorted. Unaffected by outliers.';
+
   return (
     <Card className="dist-card">
       <div className="dist-card__head">
@@ -557,7 +608,7 @@ function DistributionCard({ stats, report }) {
 
       <div className="dist-card__cell">
         <div className="dist-card__cell-label">Range</div>
-        <BoxPlotBar
+        <RangeSummary
           min={stats.min}
           p25={stats.p25}
           median={stats.median}
@@ -567,6 +618,7 @@ function DistributionCard({ stats, report }) {
           fenceHigh={stats.fence_high}
           anomalies={stats.anomalies || []}
           measureLabel={stats.measure_label}
+          iqrTitle={iqrTitle}
         />
       </div>
 
@@ -582,30 +634,27 @@ function DistributionCard({ stats, report }) {
             <span className="chip chip--neutral" title={skewTitle}>{stats.skew_label}</span>
           )}
         </div>
-        {/* Full precision, not compactNumber. The whole point of this cell is the gap
-            between the two figures, and compaction closes it: a mean of 1,046,332 and
-            a median of 1,032,891 both render as "1M", so the cell showed two identical
-            numbers next to a badge announcing the series was skewed. */}
+        <SkewGlyph
+          skewLevel={stats.skew_level}
+          skewRatio={stats.skew_ratio}
+          medianTitle={medianTitle}
+          meanTitle={meanTitle}
+        />
         <div className="dist-card__pair">
-          <span className="dist-card__pair-label">mean</span>
-          <span className="dist-card__pair-value">{exactNumber(stats.mean)}</span>
-          <span className="dist-card__pair-label">median</span>
-          <span className="dist-card__pair-value">{exactNumber(stats.median)}</span>
+          <span className="dist-card__pair-label" title={meanTitle}>Average</span>
+          <span className="dist-card__pair-value" title={meanTitle}>{compactNumber(stats.mean)}</span>
+          <span className="dist-card__pair-label" title={medianTitle}>Midpoint</span>
+          <span className="dist-card__pair-value" title={medianTitle}>{compactNumber(stats.median)}</span>
         </div>
       </div>
 
       <div className="dist-card__cell">
-        <div className="dist-card__cell-label">Spread</div>
-        {/* CV has no upper bound, so the meter saturates at 100% and two very
-            different extremes fill the same bar. That is why the badge underneath
-            prints the figure rather than leaving the bar to carry it: the meter
-            shows the band, the badge shows the number. */}
-        <Meter
-          value={stats.cv}
-          level={stats.variance_level}
-          label={stats.variance_label || 'Variance not measurable'}
-        />
-        <div className="dist-card__badge-row">
+        <div className="dist-card__cell-label-row">
+          <div className="dist-card__cell-label">Spread</div>
+          {/* CV has no upper bound, so the meter saturates at 100% and two very
+              different extremes fill the same bar. That is why the badge beside the
+              label prints the figure rather than leaving the bar to carry it: the
+              meter shows the band, the badge shows the number. */}
           <span
             className={`chip chip--${VARIANCE_CHIP[stats.variance_level] || 'neutral'}`}
             title="Coefficient of variation — the spread of the values relative to their average."
@@ -613,9 +662,16 @@ function DistributionCard({ stats, report }) {
             {stats.variance_label || 'Variance —'}
           </span>
         </div>
-        <div className="dist-card__note">
-          σ {compactNumber(stats.std)} · IQR {compactNumber(stats.iqr)}
-          {stats.pct_within_1sd != null && <> · {stats.pct_within_1sd}% within 1σ</>}
+        <Meter
+          value={stats.cv}
+          level={stats.variance_level}
+          label={stats.variance_label || 'Variance not measurable'}
+        />
+        <div className="dist-card__pair dist-card__pair--spread">
+          <span className="dist-card__pair-label" title={stdTitle}>Average variation</span>
+          <span className="dist-card__pair-value" title={stdTitle}>{compactNumber(stats.std)}</span>
+          <span className="dist-card__pair-label" title={iqrTitle}>Range of middle 50%</span>
+          <span className="dist-card__pair-value" title={iqrTitle}>{compactNumber(stats.iqr)}</span>
         </div>
       </div>
 
@@ -847,14 +903,15 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
 
   if (!generated.length) {
     return (
-      <Section title="Export">
-        <Card>
-          <div className="empty-state" style={{ padding: '24px' }}>
-            Generate a report first — then you can download it as a PDF or an HTML
-            file, or email it.
-          </div>
-        </Card>
-      </Section>
+      <Card className="export-panel">
+        <div className="export-panel__head">
+          <span className="eyebrow">Export</span>
+        </div>
+        <div className="empty-state" style={{ padding: '24px' }}>
+          Generate a report first — then you can download it as a PDF or an HTML
+          file, or email it.
+        </div>
+      </Card>
     );
   }
 
@@ -905,9 +962,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
   });
 
   return (
-    <Section
-      title="Export"
-      actions={
+    <Card className="export-panel">
+      <div className="export-panel__head">
+        <span className="eyebrow">Export</span>
         <div className="export-panel__links">
           <button
             className="link-btn"
@@ -924,9 +981,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             Clear
           </button>
         </div>
-      }
-    >
-      <Card className="export-panel">
+      </div>
+
+      <div className="export-panel__body">
         <div className="export-panel__choices">
           {letters.map((letter) => {
             const report = reports[letter];
@@ -981,7 +1038,7 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             id="export-email"
             type="text"
             className="export-panel__input"
-            placeholder="you@example.com, teammate@example.com"
+            placeholder="recipient@example.com"
             value={recipients}
             disabled={disabled || emailConfigured === false}
             onChange={(e) => { setRecipients(e.target.value); setStatus(null); }}
@@ -1022,7 +1079,7 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             {status.text}
           </div>
         )}
-      </Card>
-    </Section>
+      </div>
+    </Card>
   );
 }

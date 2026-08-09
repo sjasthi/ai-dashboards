@@ -115,8 +115,8 @@
   {% if s.available %}
     {% set measure = s.measure_label or 'value' %}
     {{ kpi_cell(s.headline_label or measure, s.headline_value | compact, s.headline_sublabel) }}
-    {{ kpi_cell('Peak', s.peak_value | compact, s.peak_label or ('highest ' ~ measure)) }}
-    {{ kpi_cell('Low', s.trough_value | compact, s.trough_label or ('lowest ' ~ measure)) }}
+    {{ kpi_cell('Highest', s.peak_value | compact, s.peak_label or ('highest ' ~ measure)) }}
+    {{ kpi_cell('Lowest', s.trough_value | compact, s.trough_label or ('lowest ' ~ measure)) }}
     {% if 'trend' in (s.blocks or []) %}
       {{ kpi_cell('Trend', s.trend_pct_change | signed_pct,
                   (s.trend_strength ~ ' · R² ' ~ s.trend_r2) if s.trend_strength else None) }}
@@ -314,27 +314,37 @@
     </td>
 
     <td class="dist__cell" width="25%">
-      <div class="dist__label">Centre</div>
+      <div class="dist__label-row">
+        <div class="dist__label">Centre</div>
+        {% if s.skew_label %}<div class="dist__badge">{{ s.skew_label }}</div>{% endif %}
+      </div>
       {# exact, not compact: this cell exists to show the gap between the two, and
          compact() closes it - 1,046,332 and 1,032,891 both render as "1M". #}
       <div class="dist__pair"><span>mean</span> <strong>{{ s.mean | exact }}</strong></div>
       <div class="dist__pair"><span>median</span> <strong>{{ s.median | exact }}</strong></div>
-      {% if s.skew_label %}<div class="dist__badge">{{ s.skew_label }}</div>{% endif %}
     </td>
 
     <td class="dist__cell dist__cell--last" width="25%">
-      <div class="dist__label">Spread</div>
+      <div class="dist__label-row">
+        <div class="dist__label">Spread</div>
+        {% if s.variance_level %}
+        <div class="dist__badge dist__badge--{{ s.variance_level }}">{{ s.variance_label }}</div>
+        {% else %}
+        <div class="dist__badge">Variance &mdash;</div>
+        {% endif %}
+      </div>
       {% if s.variance_level %}
       <div class="meter meter--{{ s.variance_level }}">
         <div class="meter__fill" style="width: {{ [s.cv, 100] | min | round(2) }}%"></div>
       </div>
-      <div class="dist__badge dist__badge--{{ s.variance_level }}">{{ s.variance_label }}</div>
-      {% else %}
-      <div class="dist__badge">Variance &mdash;</div>
       {% endif %}
-      <div class="dist__note">
-        &sigma; {{ s.std | compact }} &middot; IQR {{ s.iqr | compact }}
-        {%- if s.pct_within_1sd is not none %} &middot; {{ s.pct_within_1sd }}% within 1&sigma;{% endif %}
+      {% set std_title = 'Standard deviation (σ) — about ' ~ s.pct_within_1sd ~ '% of values fall within this distance of the average.' if s.pct_within_1sd is not none else 'Standard deviation (σ) — the typical distance of a value from the average.' %}
+      {% set iqr_title = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.' %}
+      <div class="dist__pair dist__pair--spread" title="{{ std_title }}">
+        <span>Average variation</span> <strong>{{ s.std | compact }}</strong>
+      </div>
+      <div class="dist__pair dist__pair--spread" title="{{ iqr_title }}">
+        <span>Range of middle 50%</span> <strong>{{ s.iqr | compact }}</strong>
       </div>
     </td>
   </tr>

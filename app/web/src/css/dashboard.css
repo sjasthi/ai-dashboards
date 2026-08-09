@@ -200,6 +200,10 @@
    horizontal scrolling, which the other three pages have no equivalent of. */
 .reports-page { max-width: 1280px; }
 
+/* Developer tool: same cap as Reports, whose flow it borrows (session cards, prune
+   panel) - unconstrained, it stretched edge to edge of .app-main with no ceiling. */
+.dev-browser { max-width: 1280px; margin: 0 auto; font-family: var(--font-ui); }
+
 /* ---------- home ---------- */
 
 .home-hero {
@@ -381,6 +385,71 @@
   border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
 }
+
+/* "Report data - Specifications": the toggle sits beside the eyebrow in
+   .report-data-card__head and opens the provenance line in the cell below it. */
+.build-details__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: text-decoration-color 120ms ease, color 120ms ease;
+}
+
+.build-details__toggle:hover {
+  color: var(--color-accent-hover);
+  text-decoration-color: var(--color-accent-hover);
+}
+
+/* Report data: same cell/hairline language as .dist-card - a head row of controls
+   whose height never changes, then a stack of full-width disclosure cells below
+   it, each divided by a 1px shadow rather than a margin so corners stay clean. */
+.report-data-card { margin-bottom: 20px; overflow: hidden; }
+
+.report-data-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.report-data-card__head .link-btn { padding: 4px 10px; }
+
+.report-data-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-data-card__cell {
+  padding: 14px 18px 16px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.report-data-card__cell:last-child { box-shadow: none; }
+
+/* Un-padded here, unlike the empty state's usual centred block - this cell already
+   carries its own padding. Still centred, though: a single sentence naming the
+   control that opens the table reads as a caption for the whole card, not a
+   quadrant's left-aligned data. */
+.report-data-card__cell .empty-state { padding: 0; }
+
+/* Bold only, same muted gray as the sentence around it - enough to draw the eye to
+   the control being named without competing with the actual button above. */
+.report-data-card__cta { font-weight: var(--weight-semibold); }
 
 /* ---------- segmented control (report A / B / C) ---------- */
 
@@ -753,6 +822,7 @@
 .dist-card__pair-label {
   font-size: var(--size-xs);
   color: var(--color-text-secondary);
+  cursor: help;
 }
 
 .dist-card__pair-value {
@@ -762,13 +832,12 @@
   color: var(--color-text-primary);
 }
 
-.dist-card__badge-row { margin-top: 8px; }
-
-.dist-card__note {
+/* The Spread cell's two supporting rows, following the badge that states the
+   verdict - same label/value grid as Centre's mean/median, so the two numbers
+   backing "High variance" read as evidence rather than a caption. */
+.dist-card__pair--spread {
   margin-top: 8px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
+  margin-bottom: 0;
 }
 
 /* The disclosure body: the .stat-strip grid, spanning all three zones inside the same
@@ -825,9 +894,24 @@
 
 .dist-card__meta-body .outlier-list { margin-top: 10px; }
 
-/* ---------- box plot bar ---------- */
+/* ---------- range summary (headline + box plot bar) ---------- */
 
-.boxplot { padding-top: 6px; }
+/* Plain-language headline above the chart. Reuses .dist-card__pair-label/-value
+   verbatim - the same label/value styling Center's mean/median already carry - so
+   "Most values fall between" and the "497.11 → 2,741.37" figure match their
+   treatment exactly rather than approximating it. The definition lives in the hover
+   title, not on the page. */
+.range-summary__lead {
+  margin: 0 0 8px;
+  line-height: 1.45;
+  cursor: help;
+}
+
+.range-summary--flat .range-summary__caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
 
 .boxplot__track {
   position: relative;
@@ -840,16 +924,19 @@
   top: 50%;
   left: 0;
   right: 0;
-  height: 1px;
-  background: var(--color-border);
+  height: 2px;
+  margin-top: -1px;
+  background: var(--color-text-muted);
+  opacity: 0.55;
 }
 
 .boxplot__cap {
   position: absolute;
-  top: 6px;
-  width: 1px;
-  height: 12px;
-  background: var(--color-border);
+  top: 5px;
+  width: 2px;
+  height: 14px;
+  background: var(--color-text-muted);
+  opacity: 0.55;
 }
 
 .boxplot__box {
@@ -912,17 +999,28 @@
   white-space: nowrap;
 }
 
-.boxplot__quartiles {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
+/* ---------- skew glyph (center cell) ---------- */
+
+/* Sits where the Meter sits in the Spread cell: between the label row and the
+   mean/median readout. The curve is a fixed silhouette per skew direction and stays
+   recessive; the two ticks are the real marks, one hue two shades per the dumbbell
+   convention - median solid (matches .boxplot__median next door), mean dashed. */
+.skew-glyph { display: block; margin: 2px 0 10px; }
+
+.skew-glyph__curve {
+  stroke: var(--color-text-muted);
+  stroke-width: 1.5;
+  opacity: 0.35;
 }
 
-.boxplot--flat .boxplot__caption {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--color-text-muted);
+.skew-glyph__tick { stroke-width: 2; cursor: help; }
+
+.skew-glyph__tick--median { stroke: var(--color-series-1); }
+
+.skew-glyph__tick--mean {
+  stroke: var(--color-series-1);
+  stroke-dasharray: 3 2;
+  opacity: 0.6;
 }
 
 /* ---------- meter ---------- */
@@ -1028,11 +1126,11 @@
   font-family: inherit;
   font-size: var(--size-xs);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
+  color: var(--color-accent);
   cursor: pointer;
 }
 
-.table-toggle:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
+.table-toggle:hover { border-color: var(--color-border-focus); background: var(--color-accent-muted); color: var(--color-accent-hover); }
 
 .table-wrap {
   overflow: auto;
@@ -1137,6 +1235,8 @@
   font-weight: var(--weight-semibold);
   color: var(--color-accent);
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .link-btn:hover:not(:disabled) { background: var(--color-accent-muted); }
@@ -1144,7 +1244,18 @@
 
 /* ---------- export ---------- */
 
-.export-panel {
+.export-panel { overflow: hidden; }
+
+.export-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.export-panel__body {
   padding: 20px;
   display: flex;
   flex-direction: column;

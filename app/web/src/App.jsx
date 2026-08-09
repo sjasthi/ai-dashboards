@@ -3,7 +3,6 @@ import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
-import SettingsDashboard from './components/Settingsdashboard';
 import NavStats from './components/ui/NavStats';
 import { REPORT_TYPE_LETTERS, fetchStats, generateReport, sendEvents } from './api';
 import { isNewVisit } from './clientId';
@@ -383,7 +382,7 @@ export default function App() {
         </div>
 
         <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['home', 'upload', 'analysis', 'reports', 'settings',
+          {['home', 'upload', 'analysis', 'reports',
             ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
             <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -453,7 +452,6 @@ export default function App() {
             onExitReplay={replay ? () => setReplay(null) : null}
           />
         )}
-        {activeTab === 'settings' && <SettingsDashboard />}
         {/* Hands back a saved session for `replay` above - a slot the prefetch
             effect doesn't watch. Writing one into sessionId/recommendations instead
             would build every remaining letter for a session someone only wanted to
