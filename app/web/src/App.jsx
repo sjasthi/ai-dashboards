@@ -216,19 +216,21 @@ export default function App() {
   }, []);
 
   /**
-   * The Reports page's letter switcher while a replay is open.
+   * Build one letter of the open replay, if it isn't built or building already.
+   *
+   * Split out from `requestReplayReport` so the background prefetch below can call
+   * it without also stealing the active tab out from under whichever letter the
+   * developer is actually looking at.
    *
    * Deliberately without ensureReport's generation counter and in-flight map: those
    * exist because a background queue and a user click race for the same letter, and
    * because a new upload can invalidate a request already in the air. Neither
-   * happens here - every request starts from a click, and a replay is never
-   * replaced underneath itself. The one guard that is still needed is against a
-   * response arriving after the developer left the replay or opened a different
-   * session, which is what the session id check does.
+   * happens here - every request starts from a click or this one prefetch effect,
+   * and a replay is never replaced underneath itself. The one guard that is still
+   * needed is against a response arriving after the developer left the replay or
+   * opened a different session, which is what the session id check does.
    */
-  const requestReplayReport = useCallback((letter) => {
-    setActiveReportType(letter);
-
+  const ensureReplayReport = useCallback((letter) => {
     const active = replayRef.current;
     if (!active || active.reports[letter] || active.generating.has(letter)) return;
 
@@ -267,6 +269,34 @@ export default function App() {
       });
   }, []);
 
+  /** The Reports page's letter switcher while a replay is open. */
+  const requestReplayReport = useCallback((letter) => {
+    setActiveReportType(letter);
+    ensureReplayReport(letter);
+  }, [ensureReplayReport]);
+
+  /**
+   * Build every other letter of an opened replay in the background, same as the
+   * live prefetch queue below does for `sessionId`/`recommendations`. The developer
+   * browser only rebuilds the one letter it opens with (openReport in
+   * DevReportBrowser.jsx costs one request, not three, to list-then-peek quickly),
+   * so without this A/B/C only finished generating one at a time, on click, same as
+   * the live page used to.
+   */
+  useEffect(() => {
+    const sid = replay?.sessionId;
+    const recList = replay?.recommendations?.recommendations;
+    if (!sid || !recList?.length) return;
+
+    recList
+      .map((_, i) => REPORT_TYPE_LETTERS[i])
+      .filter(Boolean)
+      .forEach((letter) => ensureReplayReport(letter));
+    // Re-runs only when a *different* session is opened, not on every report
+    // that streams in - ensureReplayReport reads live state off replayRef itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replay?.sessionId, ensureReplayReport]);
+
   const startNewSession = useCallback(() => {
     // A new upload invalidates every report built from the previous one. Requests
     // already in the air aren't cancellable, but bumping the generation makes
@@ -292,9 +322,8 @@ export default function App() {
    * user spends a while reading the recommendations before picking one. Building
    * them during that time means the report is usually already there on click.
    *
-   * One at a time, in rank order: the server is a single uvicorn worker and pandas
-   * holds the GIL, so three at once finish no sooner but triple peak memory and
-   * compete with whatever the user actually clicks.
+   * All three fire at once so A/B/C are ready together rather than trickling in
+   * rank order.
    */
   useEffect(() => {
     const recList = recommendations?.recommendations;
@@ -304,21 +333,9 @@ export default function App() {
       .map((_, i) => REPORT_TYPE_LETTERS[i])
       .filter(Boolean);
 
-    // Checked between reports, not just at the start: a new upload begins ~7s
-    // before its session id exists, and this queue should stop the moment the user
-    // kicks one off rather than keep building reports for data they've replaced.
-    const gen = generation.current;
-    let cancelled = false;
-    (async () => {
-      for (const letter of letters) {
-        if (cancelled || generation.current !== gen) return;
-        // Resolves rather than rejects, and returns the in-flight promise if the
-        // user got to this letter first, so the queue never double-requests.
-        await ensureReport(letter, sessionId);
-      }
-    })();
-
-    return () => { cancelled = true; };
+    // ensureReport resolves rather than rejects, and returns the in-flight promise
+    // if the user got to this letter first, so firing all three never double-requests.
+    letters.forEach((letter) => { ensureReport(letter, sessionId); });
   }, [sessionId, recommendations, ensureReport]);
 
   const getTabStyle = (tab) => ({

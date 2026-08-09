@@ -387,7 +387,7 @@
 .segmented {
   display: inline-flex;
   padding: 3px;
-  gap: 2px;
+  gap: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg);
@@ -406,6 +406,13 @@
   white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease;
 }
+
+/* Feint hairline between the letters, same mechanism as the divider between the
+   distribution card's cells - a rule between neighbours, not a border on every
+   tile, so it disappears where a tile is pressed instead of boxing it in. */
+.segmented__btn + .segmented__btn { box-shadow: -1px 0 0 var(--color-border); }
+.segmented__btn[aria-pressed='true'] + .segmented__btn,
+.segmented__btn:has(+ .segmented__btn[aria-pressed='true']) { box-shadow: none; }
 
 .segmented__btn:hover:not(:disabled) { color: var(--color-text-primary); }
 
@@ -432,11 +439,18 @@
 }
 
 .stat-tile {
-  padding: 18px 20px;
+  padding: 20px 20px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 4px 10px rgba(17, 24, 39, 0.05);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.stat-tile:hover {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05), 0 6px 16px rgba(17, 24, 39, 0.08);
 }
 
 .stat-tile__label {
@@ -446,13 +460,23 @@
   color: var(--color-text-secondary);
 }
 
+/* The subtext that used to sit under the value, now folded into the label line.
+   Bolder and darker than the label itself - the qualifier (what the number is
+   *of*) is the thing a reader needs to catch, not a footnote to the label. */
+.stat-tile__label-sub {
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  color: var(--color-text-primary);
+  text-transform: none;
+}
+
 /* Proportional figures deliberately: tabular-nums gives every digit the width of a
    zero, which makes a value like 121 look loose at this size. */
 .stat-tile__value {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: var(--weight-semibold);
   line-height: 1.1;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
 }
@@ -584,6 +608,31 @@
 
 .insight-row--good .insight-card__title { color: var(--color-success); }
 
+.ai-insights-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-insights-list li {
+  position: relative;
+  padding-left: 14px;
+}
+
+.ai-insights-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7C3AED;
+}
+
 .outlier-list {
   margin: 12px 0 0 0;
   padding: 0;
@@ -679,6 +728,18 @@
   margin-bottom: 10px;
 }
 
+/* Center's label carries the skew chip beside it, so the two need their own row
+   rather than the plain label's bottom margin. */
+.dist-card__cell-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dist-card__cell-label-row .dist-card__cell-label { margin-bottom: 0; }
+
 /* mean and median as a two-column readout, so the eye compares them vertically
    rather than reading two sentences. */
 .dist-card__pair {
@@ -717,6 +778,52 @@
   grid-column: 1 / -1;
   margin-bottom: 0;
 }
+
+/* Outliers + data quality, folded into the disclosure below the stat strip they
+   describe. Two compact columns rather than the two full cards these used to be -
+   this is the detail view, so it can assume the reader already has the headline
+   from "Key finding" and just wants the numbers behind it. */
+.dist-card__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--color-border);
+}
+
+.dist-card__meta-col {
+  padding: 14px 18px 16px;
+  min-width: 0;
+  box-shadow: 1px 0 0 var(--color-border);
+}
+
+.dist-card__meta-col:last-child { box-shadow: none; }
+
+.dist-card__meta-col--warn {
+  background: #FFFBEB;
+  box-shadow: inset 3px 0 0 #FDE68A;
+}
+
+.dist-card__meta-col--warn + .dist-card__meta-col--warn { box-shadow: inset -3px 0 0 #FDE68A; }
+
+.dist-card__meta-label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.dist-card__meta-col--warn .dist-card__meta-label { color: var(--color-warning); }
+
+.dist-card__meta-body {
+  font-size: var(--size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.dist-card__meta-col--warn .dist-card__meta-body { color: #78350F; }
+
+.dist-card__meta-body .outlier-list { margin-top: 10px; }
 
 /* ---------- box plot bar ---------- */
 
@@ -1349,6 +1456,9 @@
      squeezed into a third of a narrow page its labels start colliding with its own
      end caps. Stacking gives it the full card. */
   .dist-card { grid-template-columns: minmax(0, 1fr); }
+  .dist-card__meta { grid-template-columns: minmax(0, 1fr); }
+  .dist-card__meta-col { box-shadow: none !important; border-top: 1px solid var(--color-border); }
+  .dist-card__meta-col:first-child { border-top: none; }
 }
 
 @media (max-width: 860px) {

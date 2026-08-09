@@ -576,6 +576,30 @@ def test_granularity_flows_into_peak_label():
     assert stats["peak_label"] == "2022"
 
 
+def test_year_month_label_strings_infer_monthly_granularity_without_a_hint():
+    """A derived column (e.g. regex_extract("close_date", "^(\\d{4}-\\d{2})") ->
+    "close_month") isn't in any file profile, so the caller can't pass a granularity
+    hint for it - _axis_granularity's exact-name lookup misses and passes None.
+    pd.to_datetime still happily parses "2023-06" as 2023-06-01, so without inferring
+    monthly-ness from the strings themselves, the peak label would fabricate a "1"
+    day-of-month: "1 Jun 2023" instead of "Jun 2023"."""
+    df = pd.DataFrame({
+        "close_month": ["2023-03", "2023-04", "2023-05", "2023-06"],
+        "sales_sum": [10, 90, 20, 30],
+    })
+    stats = build_report_stats(df, cfg(x="close_month", y="sales_sum"))
+    assert stats["peak_label"] == "Apr 2023"
+
+
+def test_year_label_strings_infer_yearly_granularity_without_a_hint():
+    df = pd.DataFrame({
+        "sale_year": ["2021", "2022", "2023", "2024"],
+        "sales_sum": [10, 90, 20, 30],
+    })
+    stats = build_report_stats(df, cfg(x="sale_year", y="sales_sum"))
+    assert stats["peak_label"] == "2022"
+
+
 # ---------------------------------------------------------------------------
 # Ordered-axis detection
 # ---------------------------------------------------------------------------

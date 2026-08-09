@@ -16,7 +16,10 @@ export default function StatTile({ label, value, sublabel, delta, sparkline }) {
 
   return (
     <Card className="stat-tile">
-      <div className="stat-tile__label">{label}</div>
+      <div className="stat-tile__label">
+        {label}
+        {sublabel && <span className="stat-tile__label-sub"> — {sublabel}</span>}
+      </div>
       <div className={`stat-tile__value${isEmpty ? ' stat-tile__value--empty' : ''}`}>
         {isEmpty ? '—' : display}
       </div>
@@ -24,13 +27,13 @@ export default function StatTile({ label, value, sublabel, delta, sparkline }) {
       {delta && (
         <div className="stat-tile__sub">
           <span className={`stat-tile__delta stat-tile__delta--${delta.direction || 'flat'}`}>
-            {directionGlyph(delta.direction)} {signedPercent(delta.pct)}
+            {directionGlyph(delta.direction)}
+            {delta.pct != null && <> {signedPercent(delta.pct)}</>}
           </span>
           {delta.note && <> · {delta.note}</>}
         </div>
       )}
 
-      {sublabel && <div className="stat-tile__sub">{sublabel}</div>}
       {sparkline && <Sparkline points={sparkline} />}
     </Card>
   );

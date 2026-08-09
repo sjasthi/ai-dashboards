@@ -3,8 +3,10 @@
  *
  * The figure itself is built server-side (app/data/chart_builder.py). This module only
  * dresses it: recessive chrome, and a small number of *selective* direct labels driven
- * by the computed statistics. Never a value on every point - a label beside every dot
- * is chaos and goes unread; the axis, the tooltip and the table carry the rest.
+ * by the computed statistics. A label beside every point is chaos and goes unread on a
+ * line or scatter, so those still only get their two extremes; a bar chart is the
+ * exception, because it's rarely more than a handful of categories and each one's share
+ * of the total is exactly the reading a bar chart exists to give.
  *
  * Plotly takes literal colours, so these mirror tokens.css. Keep them in step.
  */
@@ -109,9 +111,17 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     if (shape) layout.shapes = [...(base.shapes || []), shape.line];
     if (shape?.annotation) layout.annotations = [...(base.annotations || []), shape.annotation];
 
-    const extremes = extremeLabels(chart, traceType, horizontal);
-    if (extremes.length) {
-      layout.annotations = [...(layout.annotations || []), ...extremes];
+    // A bar chart gets a percent-of-total label on every bar instead of the
+    // min/max value labels: with only a handful of categories (the common case
+    // for a bar chart here) a share of the whole reads faster than an absolute
+    // number, and labelling every point costs nothing extra to scan when there
+    // are this few of them. Line/scatter/histogram keep the two extreme labels -
+    // "percent of total" isn't a meaningful reading of a trend over time.
+    const pointLabels = traceType === 'bar'
+      ? percentLabels(chart, horizontal)
+      : extremeLabels(chart, traceType, horizontal);
+    if (pointLabels.length) {
+      layout.annotations = [...(layout.annotations || []), ...pointLabels];
     }
   }
 
@@ -202,6 +212,40 @@ function extremeLabels(chart, traceType, horizontal = false) {
   ];
 }
 
+/**
+ * Percent-of-total for every bar, placed just past the bar's own end.
+ *
+ * Same anchor as `barEndLabel`/`pointLabel` below (past the tip, outside the
+ * fill) so the label never sits on top of the bar's own colour - a value drawn
+ * inside a solid bar has to fight the fill for contrast, and Plotly's own
+ * `text`/`textposition` puts every label inside the bar with no per-point escape
+ * hatch for the short ones. Reading straight off the plotted arrays, not off
+ * `stats`, keeps this in step with whatever chart_builder actually drew
+ * (it re-sorts and can cap categories before this runs).
+ */
+function percentLabels(chart, horizontal = false) {
+  const trace = chart?.data?.[0];
+  const measures = horizontal ? trace?.x : trace?.y;
+  const categories = horizontal ? trace?.y : trace?.x;
+  if (!Array.isArray(measures) || !Array.isArray(categories)) return [];
+
+  const total = measures.reduce((sum, v) => (
+    typeof v === 'number' && Number.isFinite(v) ? sum + v : sum
+  ), 0);
+  if (!total) return [];
+
+  const labels = [];
+  for (let i = 0; i < measures.length; i += 1) {
+    const v = measures[i];
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const pct = `${((v / total) * 100).toFixed(1)}%`;
+    labels.push(horizontal
+      ? barEndLabel(v, categories[i], pct)
+      : pointLabel(categories[i], v, 'bottom', pct));
+  }
+  return labels;
+}
+
 /** Shared type treatment for both orientations' value labels. */
 const LABEL_STYLE = {
   showarrow: false,
@@ -212,23 +256,23 @@ const LABEL_STYLE = {
   borderpad: 2,
 };
 
-function pointLabel(x, y, yanchor) {
+function pointLabel(x, y, yanchor, text) {
   return {
     ...LABEL_STYLE,
     x,
     y,
-    text: formatTick(y),
+    text: text ?? formatTick(y),
     yanchor,
     yshift: yanchor === 'bottom' ? 8 : -8,
   };
 }
 
-function barEndLabel(value, category) {
+function barEndLabel(value, category, text) {
   return {
     ...LABEL_STYLE,
     x: value,
     y: category,
-    text: formatTick(value),
+    text: text ?? formatTick(value),
     xanchor: 'left',
     xshift: 6,
   };

@@ -6,7 +6,7 @@ import Meter from './ui/Meter';
 import Plot from './ui/Plot';
 import Section from './ui/Section';
 import StatTile from './ui/StatTile';
-import { clockTime, compactNumber, exactNumber, signedPercent } from '../format';
+import { clockTime, compactNumber, directionGlyph, exactNumber, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
 import { collectChartImages, triggerDownload } from '../export';
 
@@ -43,6 +43,7 @@ export default function ReportsDashboard({
   const report = reports[activeType];
   const activeError = errors[activeType];
   const recList = recommendations?.recommendations || [];
+  const rec = recList[activeType.charCodeAt(0) - 65];
   const stats = report?.stats;
   const hasStats = !!stats?.available;
 
@@ -129,10 +130,10 @@ export default function ReportsDashboard({
 
           <div className="results-grid">
             <ChartPanel report={report} stats={stats} />
-            <InsightRail report={report} stats={stats} hasStats={hasStats} />
+            <InsightRail report={report} stats={stats} hasStats={hasStats} rec={rec} />
           </div>
 
-          {hasStats && <DistributionCard stats={stats} />}
+          {hasStats && <DistributionCard stats={stats} report={report} />}
 
           <Section
             title="Report data"
@@ -368,13 +369,14 @@ function KpiRow({ stats, report }) {
         <StatTile
           label="Trend"
           value={signedPercent(stats.trend_pct_change)}
-          delta={{
-            direction: stats.trend_direction,
-            pct: stats.trend_pct_change,
-            note: stats.trend_strength
-              ? `${stats.trend_strength} · R² ${stats.trend_r2}`
-              : null,
-          }}
+          sublabel={
+            <>
+              <span className={`stat-tile__delta stat-tile__delta--${stats.trend_direction || 'flat'}`}>
+                {directionGlyph(stats.trend_direction)}
+              </span>
+              {stats.trend_strength && <> {stats.trend_strength} · R² {stats.trend_r2}</>}
+            </>
+          }
         />
       ) : stats.blocks?.includes('concentration') ? (
         <StatTile
@@ -406,10 +408,7 @@ function ChartPanel({ report, stats }) {
             It qualifies everything on the page - how much data every figure below is
             drawn from - so it belongs beside what is being measured. */}
         {stats?.available && stats.measure_label && (
-          <span className="eyebrow">
-            {stats.measure_label}
-            {stats.count != null && ` · n = ${stats.count.toLocaleString()}`}
-          </span>
+          <span className="eyebrow">{stats.measure_label}</span>
         )}
       </div>
 
@@ -430,15 +429,19 @@ function ChartPanel({ report, stats }) {
 /* ------------------------------------------------------------ insight rail */
 
 /**
- * Four findings in one card, ruled apart by hairlines.
+ * Two findings in one card, ruled apart by a hairline.
  *
- * They used to be four separate cards. Four surfaces cost three 16px gaps and eight
- * paddings to say what one surface and three hairlines say, and the rail is the taller
- * of the two columns in the results grid - so that stack was setting the height of the
- * whole band, and with it how much of the page fits on a screen. The findings belong
- * together anyway: they are one reading of one report, not four unrelated panels.
+ * Used to be four. Outliers and data quality moved into the distribution card's
+ * "show all statistics" disclosure - they're measurements about the same numbers
+ * that card already summarises, not a separate reading of the report - and "what
+ * to check next" is gone outright, it never told a reader anything the key finding
+ * hadn't already said. What replaced that space is the model's own rationale for
+ * recommending this report: the same two bullets shown on the Analysis page,
+ * carried over so a reader who jumped straight here still gets them.
  */
-function InsightRail({ report, stats, hasStats }) {
+function InsightRail({ report, stats, hasStats, rec }) {
+  const bullets = (rec?.rationale_bullets || []).slice(1, 3);
+
   if (!hasStats) {
     return (
       <Card className="insight-rail">
@@ -452,12 +455,10 @@ function InsightRail({ report, stats, hasStats }) {
           </div>
           {stats?.llm_caveat && <AiNote text={stats.llm_caveat} />}
         </div>
+        {bullets.length > 0 && <AiInsightsCard bullets={bullets} />}
       </Card>
     );
   }
-
-  const outliers = stats.anomalies || [];
-  const outlierCount = stats.anomaly_count || 0;
 
   return (
     <Card className="insight-rail">
@@ -465,59 +466,19 @@ function InsightRail({ report, stats, hasStats }) {
         {stats.top_insight_text}
       </InsightCard>
 
-      {/* Amber only when something was actually detected. A warning card that always
-          looks like a warning stops being read as one. */}
-      <InsightCard
-        title={outlierCount ? `Outliers (${outlierCount})` : 'Outliers'}
-        icon={outlierCount ? '⚠' : null}
-        variant={outlierCount ? 'warn' : undefined}
-      >
-        {stats.anomaly_text}
-        {outliers.length > 0 && (
-          <ul className="outlier-list">
-            {outliers.slice(0, 5).map((a, i) => (
-              <li key={i}>
-                <span className="outlier-list__label">{a.label}</span>
-                <span className="outlier-list__value">
-                  {compactNumber(a.value)}
-                  {a.score != null && ` · z ${a.score > 0 ? '+' : ''}${a.score}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </InsightCard>
-
-      {/* The model's caveat is deliberately not here. It is written from the whole
-          file's null counts, before this report's filters and joins run, so it
-          routinely warns about rows the report already excluded - measured against
-          one session's workbook, two caveats cited 24% and 16% of rows missing a
-          field that was in fact missing from 0 of the report's own 4,238 rows. It
-          contradicted the measured line directly below it.
-
-          Rows lost to a join are the warning it should have been: measured, and a
-          real hole in the numbers above. Rows removed by a filter are not a fault
-          and live in the provenance line as scope.
-
-          stats.join_rescue_rows is deliberately absent from both expressions below.
-          A rescued row is in the report and its number is right; the sentence about
-          it rides inside quality_text and is stated in the card's normal tone. */}
-      <InsightCard
-        title="Data quality"
-        variant={
-          stats.null_count || stats.join_loss_rows || report.schema_warning
-            ? 'warn'
-            : undefined
-        }
-        icon={stats.join_loss_rows ? '⚠' : null}
-      >
-        {stats.quality_text || 'No issues found.'}
-      </InsightCard>
-
-      <InsightCard title="What to check next" icon="✓" variant="good">
-        {stats.recommendation_text}
-      </InsightCard>
+      {bullets.length > 0 && <AiInsightsCard bullets={bullets} />}
     </Card>
+  );
+}
+
+/** The model's own rationale for this report - why it expects this and how to use it. */
+function AiInsightsCard({ bullets }) {
+  return (
+    <InsightCard title="AI insights">
+      <ul className="ai-insights-list">
+        {bullets.map((b, i) => <li key={i}>{b}</li>)}
+      </ul>
+    </InsightCard>
   );
 }
 
@@ -571,7 +532,7 @@ function AiNote({ text }) {
  * reachable only by hovering a mark: the exact figures are one click away, and the
  * chart's own values are in the table below. A tooltip enhances, it never gates.
  */
-function DistributionCard({ stats }) {
+function DistributionCard({ stats, report }) {
   const [showAll, setShowAll] = useState(false);
 
   const skewTitle = stats.skew_ratio != null
@@ -610,7 +571,17 @@ function DistributionCard({ stats }) {
       </div>
 
       <div className="dist-card__cell">
-        <div className="dist-card__cell-label">Centre</div>
+        <div className="dist-card__cell-label-row">
+          <div className="dist-card__cell-label">Center</div>
+          {/* Neutral, not a status colour: a skewed series is a shape, not a
+              problem. What it does tell the reader is which of the two figures
+              below to trust as the typical value. Alongside the section label
+              rather than under the numbers, so it reads as a property of "center"
+              being described, not a third stat competing with mean/median. */}
+          {stats.skew_label && (
+            <span className="chip chip--neutral" title={skewTitle}>{stats.skew_label}</span>
+          )}
+        </div>
         {/* Full precision, not compactNumber. The whole point of this cell is the gap
             between the two figures, and compaction closes it: a mean of 1,046,332 and
             a median of 1,032,891 both render as "1M", so the cell showed two identical
@@ -621,12 +592,6 @@ function DistributionCard({ stats }) {
           <span className="dist-card__pair-label">median</span>
           <span className="dist-card__pair-value">{exactNumber(stats.median)}</span>
         </div>
-        {/* Neutral, not a status colour: a skewed series is a shape, not a problem.
-            What it does tell the reader is which of the two figures above to trust as
-            the typical value. */}
-        {stats.skew_label && (
-          <span className="chip chip--neutral" title={skewTitle}>{stats.skew_label}</span>
-        )}
       </div>
 
       <div className="dist-card__cell">
@@ -654,7 +619,7 @@ function DistributionCard({ stats }) {
         </div>
       </div>
 
-      {showAll && <DistributionStrip stats={stats} />}
+      {showAll && <DistributionStrip stats={stats} report={report} />}
     </Card>
   );
 }
@@ -664,11 +629,16 @@ function DistributionCard({ stats }) {
 const VARIANCE_CHIP = { low: 'good', moderate: 'neutral', high: 'warn' };
 
 /**
- * The ten raw figures. No longer the page's distribution summary - it is what
- * DistributionCard's disclosure opens - but still the place every exact value lives,
- * and still what the PDF export renders.
+ * The ten raw figures, plus outliers and data quality. No longer the page's
+ * distribution summary - it is what DistributionCard's disclosure opens - but
+ * still the place every exact value lives, and still what the PDF export renders.
+ *
+ * Outliers and data quality used to be their own cards beside the chart. They
+ * moved here because they're both measurements about the same numbers this strip
+ * already lays out, not a separate reading of the report - and putting them
+ * behind the same disclosure keeps the default view to what most readers need.
  */
-function DistributionStrip({ stats }) {
+function DistributionStrip({ stats, report }) {
   const items = [
     ['n', stats.count?.toLocaleString()],
     ['min', compactNumber(stats.min)],
@@ -682,15 +652,55 @@ function DistributionStrip({ stats }) {
     ['CV', stats.cv != null ? `${stats.cv}%` : '—'],
   ].filter(([, v]) => v !== undefined && v !== null);
 
+  const outliers = stats.anomalies || [];
+  const outlierCount = stats.anomaly_count || 0;
+  // Same reasoning as the insight rail used to carry in its comment: a join loss
+  // or a schema warning is a real hole in the numbers above and earns the amber
+  // tint; a filter's excluded rows are scope, not a fault, and live elsewhere.
+  const qualityWarn = !!(stats.null_count || stats.join_loss_rows || report?.schema_warning);
+
   return (
-    <div className="stat-strip dist-card__all">
-      {items.map(([label, value]) => (
-        <div className="stat-strip__item" key={label}>
-          <div className="stat-strip__label">{label}</div>
-          <div className="stat-strip__value">{value}</div>
+    <>
+      <div className="stat-strip dist-card__all">
+        {items.map(([label, value]) => (
+          <div className="stat-strip__item" key={label}>
+            <div className="stat-strip__label">{label}</div>
+            <div className="stat-strip__value">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="dist-card__all dist-card__meta">
+        <div className={`dist-card__meta-col${outlierCount ? ' dist-card__meta-col--warn' : ''}`}>
+          <div className="dist-card__meta-label">
+            {outlierCount ? `⚠ Outliers (${outlierCount})` : 'Outliers'}
+          </div>
+          <div className="dist-card__meta-body">
+            {stats.anomaly_text}
+            {outliers.length > 0 && (
+              <ul className="outlier-list">
+                {outliers.slice(0, 5).map((a, i) => (
+                  <li key={i}>
+                    <span className="outlier-list__label">{a.label}</span>
+                    <span className="outlier-list__value">
+                      {compactNumber(a.value)}
+                      {a.score != null && ` · z ${a.score > 0 ? '+' : ''}${a.score}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-      ))}
-    </div>
+
+        <div className={`dist-card__meta-col${qualityWarn ? ' dist-card__meta-col--warn' : ''}`}>
+          <div className="dist-card__meta-label">
+            {qualityWarn ? '⚠ Data quality' : 'Data quality'}
+          </div>
+          <div className="dist-card__meta-body">{stats.quality_text || 'No issues found.'}</div>
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -19,6 +19,7 @@ Usage (in api.py, inside generate_report_endpoint, after `chart = build_chart_fi
 """
 
 import math
+import re
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -154,6 +155,10 @@ def build_report_stats(
         if parsed is not None:
             display_labels = parsed
 
+    # The label values themselves can only narrow granularity, never widen it - see
+    # _label_granularity for why this has to override the file-profile-derived value.
+    granularity = _label_granularity(labels) or granularity
+
     result: Dict[str, Any] = {
         "available": True,
         "blocks": [],
@@ -242,6 +247,36 @@ def _as_datetime(labels: Optional[pd.Series]) -> Optional[pd.Series]:
         parsed = pd.to_datetime(labels, errors="coerce")
     # All-or-nothing: a column where only some values parse is not a date axis.
     return parsed if parsed.notna().all() else None
+
+
+_YEAR_RE = re.compile(r"^\d{4}$")
+_YEAR_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _label_granularity(labels: Optional[pd.Series]) -> Optional[str]:
+    """Granularity implied by the label strings themselves, e.g. a "close_month"
+    column produced by regex-extracting "2017-06" out of a daily close_date.
+
+    _axis_granularity (api.py) looks up granularity by column name against the
+    *original* file profile, so a derived column like that - present in the report's
+    dataframe but not in any uploaded file - always misses and falls back to
+    day-precision formatting. pd.to_datetime happily parses "2017-06" as
+    2017-06-01, so the miss doesn't surface as a missing value; it surfaces as a
+    fabricated "1" day-of-month in every date this axis prints. Checking the raw
+    strings catches it regardless of what the derived column happens to be named,
+    and can only make the result coarser - a "YYYY-MM" string can't carry day
+    precision no matter what granularity the source column was profiled at.
+    """
+    if labels is None:
+        return None
+    non_null = labels.dropna().astype(str)
+    if non_null.empty:
+        return None
+    if non_null.str.match(_YEAR_MONTH_RE).all():
+        return "monthly"
+    if non_null.str.match(_YEAR_RE).all():
+        return "yearly"
+    return None
 
 
 def _is_ordered_axis(labels: pd.Series) -> bool:
