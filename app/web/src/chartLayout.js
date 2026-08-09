@@ -46,6 +46,12 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
   // below that points at a measure - the median line, the min/max labels - has to
   // follow it across.
   const horizontal = trace?.orientation === 'h';
+  // A pie's slices ARE its identity, not a magnitude - color is the only thing that
+  // says "this is red", so unlike a single-series bar/line (title already names the
+  // one thing plotted) it needs the dependable identity channel a legend gives.
+  // The compact compare-card thumbnail skips it: there's no room, and its own card
+  // heading names the report.
+  const isPie = traceType === 'pie';
 
   const axis = {
     gridcolor: GRID,
@@ -75,7 +81,7 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     // The card's own heading already names the chart; repeating it inside the plot
     // wastes the vertical space the axis band needs.
     title: undefined,
-    showlegend: false,
+    showlegend: isPie && !compact,
     // Plotly's default drag gesture is a rubber-band zoom, undone only by a
     // double-click most people never discover - they drag by accident (a click
     // that moves a pixel or two is enough to trigger it), the chart zooms into a
@@ -84,6 +90,20 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     // rather than swapped for pan.
     dragmode: false,
   };
+
+  if (isPie && !compact) {
+    // Sits in the margin Plotly auto-expands for it (margin.autoexpand defaults
+    // true), clear of the wedges - text tokens, not a series colour, per the
+    // legend/label rule: identity comes from the swatch beside the name.
+    layout.legend = {
+      font: { size: 12, color: STRONG_TEXT, family: FONT },
+      bgcolor: 'rgba(0,0,0,0)',
+      bordercolor: 'transparent',
+      itemsizing: 'constant',
+      yanchor: 'middle',
+      y: 0.5,
+    };
+  }
 
   if (!NON_CARTESIAN.has(traceType)) {
     // `axis` only carries title *font* styling, while base.xaxis/yaxis (built server-side

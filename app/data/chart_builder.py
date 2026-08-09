@@ -287,7 +287,15 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         labels, values = _prepare_categorical(df, x_axis, y_axis)
         if trace_type == "pie":
             labels, values = _cap_pie(labels, values)
-            fig = go.Figure(go.Pie(labels=labels, values=values))
+            # Percent is the in-wedge label (a name doesn't fit inside a 7.5% slice);
+            # the category name lives in the legend instead - see chartLayout.js,
+            # which is where showlegend actually gets turned on for pie.
+            fig = go.Figure(go.Pie(
+                labels=labels,
+                values=values,
+                textinfo="percent",
+                hovertemplate="%{label}: %{value} (%{percent})<extra></extra>",
+            ))
         elif _prefers_horizontal(labels):
             # Plotly fills a categorical y-axis from the bottom up, so the arrays are
             # reversed to put the first row (the largest value, or the first ordinal
