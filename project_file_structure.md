@@ -1,6 +1,6 @@
 # Project File Structure
 
-Current repository layout, regenerated from the tracked file list on 2026-07-28.
+Current repository layout, regenerated from the tracked file list on 2026-08-10.
 If you add or remove a module, update this file in the same commit.
 
 ```text
@@ -8,15 +8,12 @@ ai-dashboards/
 ├── app/
 │   ├── __init__.py
 │   ├── api.py                      # FastAPI server — THE entry point (uvicorn app.api:app)
-│   │                               #   GET  /health
-│   │                               #   POST /api/analyze-full     -> profiles + LLM recommendations
-│   │                               #   POST /api/generate-report  -> report rows + chart + stats
-│   │                               #   GET  /api/export/{sid}/status -> generated letters, email readiness
-│   │                               #   POST /api/export/{sid}        -> PDF/HTML download of selected reports
-│   │                               #   POST /api/export/{sid}/email  -> the same document, as an attachment
+│   │                               #   see README.MD's API Reference for the full route list
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── data_loader.py          # Reads CSV/Excel into DataFrames; handles multi-sheet workbooks
+│   │   ├── sheet_scan.py           # Shared raw-row scanning used by workbook_probe and data_loader
+│   │   ├── workbook_probe.py       # Fast sheet/row-count metadata for the upload screen, pre-analysis
 │   │   ├── summary_builder.py      # Profiles each file (columns, roles, stats) + detects join keys
 │   │   ├── recommendation_requester.py  # Builds the system/user prompts; owns REPORT_PATTERNS
 │   │   ├── AI_Engine.py            # LLM calls: Gemini -> Groq -> local Ollama fallback chain
@@ -27,11 +24,13 @@ ai-dashboards/
 │   │   ├── report_stats.py         # Descriptive/trend/outlier stats + prose narrative
 │   │   ├── export_builder.py       # Renders reports to PDF (xhtml2pdf) and standalone HTML
 │   │   ├── emailer.py              # Sends an export over SMTP (SMTP_* in .env)
-│   │   ├── templates/              # Jinja templates for the exports
-│   │   │   ├── _macros.html        #   All content markup — shared by both targets
-│   │   │   ├── export_pdf.html     #   Print shell: @page, footer frame, table layout
-│   │   │   └── export_web.html     #   Standalone HTML shell: no external requests
-│   │   └── session_manager.py      # Writes per-session artifacts under session_data/
+│   │   ├── session_manager.py      # Writes SAVE_DEBUG_FILES artifacts under session_data/
+│   │   ├── session_store.py        # Writes/reads SAVE_REPORT_HISTORY snapshots under session_data/
+│   │   ├── telemetry.py            # Usage tracking — writes usage.db (see docs/DATABASE_SCHEMA.md)
+│   │   └── templates/              # Jinja templates for the exports
+│   │       ├── _macros.html        #   All content markup — shared by both targets
+│   │       ├── export_pdf.html     #   Print shell: @page, footer frame, table layout
+│   │       └── export_web.html     #   Standalone HTML shell: no external requests
 │   └── web/                        # React + Vite frontend
 │       ├── index.html              # App shell: loads /src/main.jsx + the Plotly CDN
 │       ├── vite.config.js
@@ -42,41 +41,43 @@ ai-dashboards/
 │           ├── main.jsx            # Entry point: mounts <App>, imports the two stylesheets
 │           ├── App.jsx             # Nav, tab routing, and all shared session state
 │           ├── api.js              # fetch client for the backend
+│           ├── clientId.js         # Anonymous per-browser id sent as X-Client-Id
 │           ├── export.js           # Rasterises charts to PNG for export; triggers downloads
 │           ├── format.js           # Number/label formatting helpers
 │           ├── chartLayout.js      # Plotly layout theming (reused to theme the export PNGs)
 │           ├── components/
+│           │   ├── Homedashboard.jsx      # Landing tab — what the app does
 │           │   ├── Uploaddashboard.jsx    # Step 1 — file upload, POSTs /api/analyze-full
 │           │   ├── Analysisdashboard.jsx  # Step 2 — recommendation cards
 │           │   ├── Reportsdashboard.jsx   # Step 3 — chart, stats, table, compare view, export
 │           │   ├── Settingsdashboard.jsx  # Settings (UI only — not yet persisted)
-│           │   └── ui/                    # Card, DataTable, Plot, Section, Sparkline, StatTile
+│           │   └── ui/                    # Card, DataTable, Meter, NavStats, Plot, RangeSummary,
+│           │                              # Section, SkewGlyph, Sparkline, StatTile
+│           ├── dev/                # Dev-only report browser (see docs/DEV_REPORT_BROWSER.md);
+│           │                       # stripped from production builds at build time
+│           │   ├── DevReportBrowser.jsx
+│           │   └── adminApi.js
 │           └── css/
 │               ├── tokens.css      # Design tokens (colors, spacing, radii)
 │               └── dashboard.css   # All component styling
-├── scripts/
-│   └── replay_report.py            # Dev tool: rebuilds a report from a saved LLM response
-│                                   # with no LLM call (needs SAVE_DEBUG_FILES=true)
-├── tests/
-│   ├── test_generate_report_api.py # Integration tests for POST /api/generate-report
-│   ├── test_export_api.py          # Integration tests for the /api/export/* routes
-│   └── test_report_stats.py        # Unit tests for report_stats.py
-├── datasets/                       # Sample data — 8 folders, see below
 ├── docs/
+│   ├── DATABASE_SCHEMA.md          # usage.db schema and ER diagram
 │   ├── EXPORT_FEATURE.md           # Report export: architecture, renderer constraints,
 │   │                               # document design. READ BEFORE touching export code.
-│   ├── REACT_MIGRATION_SUMMARY.md  # Record of the vanilla-JS -> React migration
+│   ├── EXPORT_LIVE_SYNC.md         # Keeping the export in sync with the live report
 │   ├── USAGE_DB_BROWSING.md        # Reading usage.db in a browser (Datasette) + useful SQL
-│   ├── course_requirements.md      # The original project brief
-│   ├── website mockup.png
+│   ├── DEV_REPORT_BROWSER.md       # Re-opening a past analysis without an LLM call
+│   ├── TEST_PLAN.md                # Test plan of record for the upload/loading pipeline
 │   └── archive/                    # Superseded docs + retired code (see its README)
-├── session_data/                   # Generated debug artifacts (gitignored)
+├── session_data/                   # Generated debug/replay artifacts (gitignored)
+├── test_results/                   # Generated by scripts/run_test_plan.py (gitignored)
+├── usage.db                        # Usage tracking database (gitignored)
 ├── .env.example                    # Config template — copy to .env
 ├── requirements.txt                # Python runtime dependencies (pip, exact pins)
 ├── requirements-dev.txt            # The above plus pytest, ruff and datasette
 ├── README.MD
-├── RUNNING_APP.md
-├── project_file_structure.md       # This file
+├── project_file_structure.md       
+├── course_requirements.md          # The original course brief (historical)
 ├── weekly_deliverables_plan.md
 └── LICENSE
 ```
@@ -106,28 +107,16 @@ POST /api/export/{session_id}          (Reportsdashboard.jsx ExportPanel)
   -> file download (one report = single layout, several = combined + comparison)
 ```
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full technical walkthrough,
+including telemetry, email, and session persistence.
+
 ## Datasets
 
 `datasets/` holds eight sample sets used for manual testing:
 
-| Folder | Notes |
-|---|---|
-| `CRM sales opportunities` | Multi-file with join keys |
-| `Enterprise E-Commerce Intelligence` | Multi-file; `source.txt` records provenance |
-| `excel tests` | The four upload scenarios from the brief — see below |
-| `food supplier` | Multi-file relational (Northwind-style) |
-| `game sales` | Single file; good for ranking/distribution |
-| `lego` | Multi-file relational; `downloads_schema.png` shows the schema |
-| `restaurant orders` | Multi-file plus a data dictionary |
-| `starbucks_nutrition` | Single file, numeric-heavy |
-
 The `excel tests/` filenames encode the four upload cases the brief calls for
-(see [docs/course_requirements.md](docs/course_requirements.md)):
+(see [course_requirements.md](course_requirements.md)):
 
-| File prefix | Scenario |
-|---|---|
-| `1 single-single` | one workbook, one worksheet |
-| `2 multi-single` | multiple workbooks, one worksheet each |
-| `3 single-multi` | one workbook, multiple worksheets |
-| `4 multi-multi` | multiple workbooks, multiple worksheets each |
-| `xls test` | legacy `.xls` format (exercises the `xlrd` path) |
+The larger, structured corpus under `tests/data/` (107 files, committed) is
+separate from `datasets/` and exists specifically for the automated test suite —
+see [docs/TEST_PLAN.md](docs/TEST_PLAN.md).

@@ -1,12 +1,9 @@
 # Keeping the export in sync with the live report
 
-Claude-maintenance doc. Read this *before* touching `app/data/templates/` or
-`app/data/export_builder.py` in response to a "the download doesn't match the
-report" request — it's the checklist and the fast verification loop that made the
-2026-08-10 KPI-tile resync (currency prefix, delta-vs-average, outlier chip, "Top
-categories" wording) tractable in one sitting. `docs/EXPORT_FEATURE.md` is the
-orientation doc for the export feature generally; this one is specifically about
-the fact that it has a twin, and the twin drifts.
+Read this before touching `app/data/templates/` or `app/data/export_builder.py` in
+response to "the download doesn't match the report." `docs/EXPORT_FEATURE.md` is
+the orientation doc for the export feature generally; this one is specifically
+about the fact that it has a twin, and the twin drifts.
 
 ---
 
@@ -61,49 +58,6 @@ Anything in that second list is a candidate for drift. Read its diff — most
 `report_stats.py` changes are new/renamed fields (harmless until something reads
 them), but a diff touching `StatTile.jsx`/`Reportsdashboard.jsx`/`format.js` almost
 always changes what gets *shown*, which is exactly what the export needs ported.
-
-**As of this writing**, the export was resynced through commit `c0f36df`
-("more ui updates" — the StatTile/KpiRow redesign: currency-prefixed values,
-delta-vs-average badges, the outlier chip, "Top categories" wording) and `ea9a4e6`
-("updated pie chart labeling" — needed no template change, see above). Anything
-past those two on the live side has *not* been checked against the export.
-
-**Separately**, on 2026-08-10 the export's *own* content and layout (not a port of
-a live-side diff — the live dashboard didn't change) went through a decluttering
-pass at the user's request, in three rounds:
-
-Round 1 removed every `computed` / `AI question` chip; the per-report page dropped
-its file-lineage sentence and scope line (`docs/EXPORT_FEATURE.md`'s "how it was
-built" detail moved into a rewritten, plain-language Method & Provenance section,
-present on single-report exports too, not just combined ones); Executive Summary
-was renamed "Key findings per report" and lost its "what to check next" list; the
-Recommendations section was removed outright; Findings now follows Distribution
-instead of preceding it; and the generated timestamp moved to exactly one place per
-document (the cover for a combined export, the report header for a single one)
-instead of being repeated in every provenance strip.
-
-Round 2 (still 2026-08-10) went further on the one chip Round 1 kept: the `AI note`
-chip on the rationale block is gone too, replaced by a plain `Note:` label inside a
-section now headed "AI notes" (was "Why the model proposed this report") — **the
-outlier chip in the KPI tiles is now the only chip left anywhere in the document**,
-see the provenance comment at the top of `_macros.html`. The same round ported the
-live Distribution card's Range/Center/Spread graphics (box plot, skew bell-curve,
-variance meter — `RangeSummary.jsx`/`SkewGlyph.jsx`) into `distribution_card()` for
-the **web export only** (`report_analysis(r, rich=true)`); the PDF keeps the
-numeric-only `distribution_table()` since xhtml2pdf can't render the inline SVG the
-skew curve needs. In the PDF specifically, `report_analysis()`'s internal
-`<div class="break">` was moved to sit immediately before Findings rather than
-around the whole analysis block, so Distribution now shares a page with the KPI
-tiles and chart it explains, while Findings + AI notes jump to a fresh page instead
-of trailing along.
-
-Round 3 added a `brand_header()` — the nav bar's logo mark plus "AI-Dashboard"
-wordmark (`App.jsx`'s `.app-nav__brand`) — above the title on the cover (combined
-export) and above each single-report page. See point 9 below for why it's a table,
-not a div, and a baked PNG, not inline SVG.
-
-`git log` for the commit(s) that land this once reviewed; no SHA is recorded here
-because it hadn't landed as of this note.
 
 ---
 
@@ -253,7 +207,7 @@ scroll a full document screenshot to the right spot.
    design surface with its own constraints (`_ABSENT_TREND`/`_ABSENT_CONC`, the
    "different measures" caption — see `docs/EXPORT_FEATURE.md`).
 
-9. **Two adjacent inline elements with `margin-left` on the second one is the
+8. **Two adjacent inline elements with `margin-left` on the second one is the
    documented pattern for point 4 above, but it is not universally reliable** — it
    worked for `.kpi__delta` and the outlier chip, but silently rendered as zero gap
    for the brand mark's icon-then-wordmark lockup (confirmed by rendering, not
@@ -263,7 +217,7 @@ scroll a full document screenshot to the right spot.
    `<td>`s instead, which is what `brand_header()` does and what every other
    "two things side by side" case in this file already does for the same reason.
 
-10. **An unwidthed `<table>` stretches to the full available page width in
+9. **An unwidthed `<table>` stretches to the full available page width in
     xhtml2pdf, unlike a browser, which shrink-wraps it to its content** —
     confirmed by rendering the table-ized `brand_header()` with no `width` set: the
     icon landed far left and the wordmark far right, overlapping the title below
@@ -272,7 +226,7 @@ scroll a full document screenshot to the right spot.
     the current example. This is a PDF-only concern; the same unwidthed table in
     `export_web.html` shrink-wraps correctly because it's a real browser.
 
-11. **Verify, then run `tests/test_export_api.py`.** It doesn't assert exact
+10. **Verify, then run `tests/test_export_api.py`.** It doesn't assert exact
    wording for most of this (a deliberate choice in that file — see its own
    comments), so a passing suite is necessary but not sufficient; the visual/text
    check above is what actually catches wording drift. Run it anyway — it does
@@ -281,12 +235,3 @@ scroll a full document screenshot to the right spot.
    removed), the handful of assertions in that file that do pin exact text need a
    deliberate update to match — that's not the suite catching a regression, that's
    the suite doing its job of noticing the contract moved.
-
----
-
-## After a resync, update the baseline note above
-
-Once you've walked the checklist and re-verified, update the "As of this writing"
-paragraph in this doc with the new commit SHA(s), so the next person (or Claude
-session) doing this diffs from the right starting point instead of re-auditing
-everything from `c0f36df` again.

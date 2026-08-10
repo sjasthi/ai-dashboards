@@ -6,9 +6,7 @@
 **Author:** Patrick
 **Status:** Active
 
-Derived from IEEE 829-1998, trimmed to what this project actually needs. Companion
-to [Test_Usage_PrevLoad_PLAN.md](Test_Usage_PrevLoad_PLAN.md), which holds the
-design rationale; this document is the plan of record.
+Derived from IEEE 829-1998, trimmed to what this project actually needs.
 
 ---
 
@@ -47,7 +45,6 @@ Deliberately not tested here, with the reason:
 
 ## 2. References
 
-- [Test_Usage_PrevLoad_PLAN.md](Test_Usage_PrevLoad_PLAN.md) — design rationale, Phase 1
 - `project_file_structure.md` — module layout
 - IEEE 829-1998 — test documentation standard this is derived from
 
@@ -330,119 +327,11 @@ beside a populated one**, which leaves invariant 4's second half unexercised
 
 ### 10.4 Inventory
 
-Verified 2026-08-02. `sha256` is the first 12 hex digits.
-
-**107 files, 12.2 MB.**
-
-| File | Bytes | Kind | Sheets | Rows | sha256 |
-|---|---:|---|---|---:|---|
-| `extensions/csv/accounts.csv` | 4,670 | csv | — | 85 | `e5242324768a` |
-| `extensions/csv/behavior.csv` | 969,783 | csv | — | 25,000 | `f39729ffd9cc` |
-| `extensions/csv/colors.csv` | 3,669 | csv | — | 135 | `1aa4c2a394c9` |
-| `extensions/csv/customers.csv` | 1,366,176 | csv | — | 25,000 | `024566f26b0c` |
-| `extensions/csv/data_dictionary.csv` | 996 | csv | — | 21 | `22b34e498d07` |
-| `extensions/csv/inventories.csv` | 185,752 | csv | — | 11,681 | `c3bc331a60ea` |
-| `extensions/csv/inventory_sets.csv` | 44,754 | csv | — | 2,846 | `041403317cfa` |
-| `extensions/csv/part_categories.csv` | 1,255 | csv | — | 57 | `83fbfd83609b` |
-| `extensions/csv/products.csv` | 171 | csv | — | 7 | `7c1c8cbbdb6d` |
-| `extensions/csv/sales_pipeline.csv` | 637,773 | csv | — | 8,800 | `825ce8f6c32d` |
-| `extensions/csv/sales_teams.csv` | 1,284 | csv | — | 35 | `aeff1272ebe1` |
-| `extensions/csv/sets.csv` | 519,188 | csv | — | 11,673 | `76c8ff6bed1a` |
-| `extensions/csv/themes.csv` | 11,956 | csv | — | 614 | `7b0c165b3a1c` |
-| `extensions/xls/accounts.xls` | 13,824 | excel | accounts | 85 | `ae9617653676` |
-| `extensions/xls/colors.xls` | 17,920 | excel | colors | 135 | `e4e8bad3bf0f` |
-| `extensions/xls/data_dictionary.xls` | 5,632 | excel | data_dictionary | 21 | `4696c7adb861` |
-| `extensions/xls/format_only_trailing.xls` | 26,112 | excel | Sheet1 | 4 | `82e22579349e` |
-| `extensions/xls/inventories.xls` | 777,216 | excel | inventories | 11,681 | `c826bc269302` |
-| `extensions/xls/inventory_sets.xls` | 203,776 | excel | inventory_sets | 2,846 | `a29145e1ec07` |
-| `extensions/xls/part_categories.xls` | 9,728 | excel | part_categories | 57 | `eecd8520a1c3` |
-| `extensions/xls/products.xls` | 5,632 | excel | products | 7 | `644e55a49162` |
-| `extensions/xls/sales_pipeline.xls` | 1,239,552 | excel | sales_pipeline | 8,800 | `c39b3e4ce736` |
-| `extensions/xls/sales_teams.xls` | 9,728 | excel | sales_teams | 35 | `816d32affb79` |
-| `extensions/xls/sets.xls` | 1,301,504 | excel | sets | 11,673 | `52cb42f69c49` |
-| `extensions/xls/themes.xls` | 46,592 | excel | themes | 614 | `afbe504d6ad1` |
-| `extensions/xlsx/accounts.xlsx` | 8,928 | excel | Sheet1 | 85 | `12aa19c2ddc8` |
-| `extensions/xlsx/colors.xlsx` | 8,741 | excel | Sheet1 | 135 | `1ee1df0e1877` |
-| `extensions/xlsx/data_dictionary.xlsx` | 5,542 | excel | Sheet1 | 21 | `c9a6d427a103` |
-| `extensions/xlsx/format_only_trailing.xlsx` | 8,738 | excel | Sheet1 | 4 | `051afad52bdf` |
-| `extensions/xlsx/inventories.xlsx` | 225,001 | excel | Sheet1 | 11,681 | `bfb24d3bd9b5` |
-| `extensions/xlsx/inventory_sets.xlsx` | 52,104 | excel | Sheet1 | 2,846 | `c7e1af1bd89a` |
-| `extensions/xlsx/part_categories.xlsx` | 6,072 | excel | Sheet1 | 57 | `3d8c16e69f59` |
-| `extensions/xlsx/products.xlsx` | 5,031 | excel | Sheet1 | 7 | `2ac3004d09a6` |
-| `extensions/xlsx/sales_pipeline.xlsx` | 406,858 | excel | Sheet1 | 8,800 | `afebdada75cc` |
-| `extensions/xlsx/sales_teams.xlsx` | 5,786 | excel | Sheet1 | 35 | `dc442fab4470` |
-| `extensions/xlsx/sets.xlsx` | 414,091 | excel | Sheet1 | 11,673 | `69dd9acbbc3b` |
-| `extensions/xlsx/themes.xlsx` | 17,785 | excel | Sheet1 | 614 | `4a7c9e914e82` |
-| `workbooks/xls/1wb-1sheet/example_1_employees/employees.xls` | 9,728 | excel | Employees | 25 | `0e5be976aa3e` |
-| `workbooks/xls/1wb-1sheet/example_2_products/products.xls` | 5,632 | excel | Products | 20 | `0621b35ec001` |
-| `workbooks/xls/1wb-1sheet/example_3_sales_transactions/sales_transactions.xls` | 9,728 | excel | Transactions | 40 | `5d4bacfab3f5` |
-| `workbooks/xls/1wb-1sheet/example_4_weather_observations/weather_observations.xls` | 9,728 | excel | Weather | 30 | `8f6ace09c3f6` |
-| `workbooks/xls/1wb-multisheet/crm/CRM_sales_opportunities.xls` | 1,152,512 | excel | data_dictionary, accounts, sales teams, products, sales pipeline | 8,948 | `79a8bf023a2e` |
-| `workbooks/xls/1wb-multisheet/example_1_company_report/company_report.xls` | 13,824 | excel | Revenue, Expenses, Employees | 99 | `810f2907e6e3` |
-| `workbooks/xls/1wb-multisheet/example_2_sales_dashboard/sales_dashboard.xls` | 13,824 | excel | Sales, Products, Regions | 65 | `03929ff082d8` |
-| `workbooks/xls/1wb-multisheet/example_3_school_records/school_records.xls` | 13,824 | excel | Students, Grades, Teachers | 110 | `cb26795fb530` |
-| `workbooks/xls/1wb-multisheet/example_4_inventory_system/inventory_system.xls` | 9,728 | excel | Products, Suppliers, Stock | 46 | `9590fb8ca31e` |
-| `workbooks/xls/1wb-multisheet/fastfood/fastfood.xls` | 50,688 | excel | bk, mcd | 264 | `2bec72878c71` |
-| `workbooks/xls/1wb-multisheet/stores/Dataset-Bhagwati Store.xls` | 175,616 | excel | Master Data, Opening Stock, Sales Data | 2,232 | `e796be67a1e5` |
-| `workbooks/xls/2+wb-1sheet/example_1_crm/customers.xls` | 9,728 | excel | Customers | 25 | `550dd8725d2c` |
-| `workbooks/xls/2+wb-1sheet/example_1_crm/orders.xls` | 9,728 | excel | Orders | 35 | `19dc89e16616` |
-| `workbooks/xls/2+wb-1sheet/example_2_hr/departments.xls` | 5,632 | excel | Departments | 8 | `39f2aa90eea4` |
-| `workbooks/xls/2+wb-1sheet/example_2_hr/employees.xls` | 9,728 | excel | Employees | 20 | `0b0dbbbb1736` |
-| `workbooks/xls/2+wb-1sheet/example_2_hr/payroll.xls` | 5,632 | excel | Payroll | 20 | `dd098569f3af` |
-| `workbooks/xls/2+wb-1sheet/example_3_retail/inventory.xls` | 5,632 | excel | Inventory | 20 | `40ac53dcb350` |
-| `workbooks/xls/2+wb-1sheet/example_3_retail/products.xls` | 5,632 | excel | Products | 20 | `8b20c7b0cd2b` |
-| `workbooks/xls/2+wb-1sheet/example_4_school/grades.xls` | 13,824 | excel | Grades | 90 | `90043e64793d` |
-| `workbooks/xls/2+wb-1sheet/example_4_school/students.xls` | 9,728 | excel | Students | 30 | `95ab74cfdeff` |
-| `workbooks/xls/2+wb-1sheet/example_4_school/teachers.xls` | 5,632 | excel | Teachers | 12 | `953958f4ce67` |
-| `workbooks/xls/2+wb-1sheet/restaurant/menu_items.xls` | 28,672 | excel | menu_items | 32 | `63a30aea5224` |
-| `workbooks/xls/2+wb-1sheet/restaurant/order_details.xls` | 1,034,240 | excel | order_details | 12,234 | `07173a0ecd72` |
-| `workbooks/xls/2+wb-1sheet/restaurant/restaurant.xls` | 26,624 | excel | 2 multi-single restaurant_db_da | 9 | `f9fe549cf684` |
-| `workbooks/xls/2+wb-multisheet/example_1_finance_budgets/budget_2024.xls` | 5,632 | excel | Q1, Q2, Q3, Q4 | 20 | `469d983b2b65` |
-| `workbooks/xls/2+wb-multisheet/example_1_finance_budgets/budget_2025.xls` | 5,632 | excel | Q1, Q2, Q3, Q4 | 20 | `30b4092f95ac` |
-| `workbooks/xls/2+wb-multisheet/example_2_regional_sales/region_east.xls` | 9,728 | excel | Sales, Returns | 31 | `86edad940db6` |
-| `workbooks/xls/2+wb-multisheet/example_2_regional_sales/region_west.xls` | 9,728 | excel | Sales, Returns | 31 | `c7867349114e` |
-| `workbooks/xls/2+wb-multisheet/example_3_hr_by_department/dept_engineering.xls` | 9,728 | excel | Employees, Payroll | 30 | `847e1df5f4a4` |
-| `workbooks/xls/2+wb-multisheet/example_3_hr_by_department/dept_sales.xls` | 9,728 | excel | Employees, Payroll | 30 | `2ee868e268d1` |
-| `workbooks/xls/2+wb-multisheet/example_4_product_lines/electronics.xls` | 9,728 | excel | Products, Inventory, Sales | 60 | `a4f8f5a09e7a` |
-| `workbooks/xls/2+wb-multisheet/example_4_product_lines/furniture.xls` | 9,728 | excel | Products, Inventory, Sales | 60 | `580a81d6293f` |
-| `workbooks/xls/2+wb-multisheet/example_4_product_lines/office_supplies.xls` | 9,728 | excel | Products, Inventory, Sales | 60 | `c2808e9d8cb1` |
-| `workbooks/xls/2+wb-multisheet/food_supplier/food supplier 01.xls` | 43,520 | excel | customers, shippers, employees | 103 | `7e3c4902d8ee` |
-| `workbooks/xls/2+wb-multisheet/food_supplier/food supplier 02.xls` | 259,072 | excel | orders, order details, products, categories | 3,070 | `128bb72d58d8` |
-| `workbooks/xlsx/1wb-1sheet/example_1_employees/employees.xlsx` | 6,347 | excel | Employees | 25 | `17b06280cb8d` |
-| `workbooks/xlsx/1wb-1sheet/example_2_products/products.xlsx` | 5,618 | excel | Products | 20 | `e7f334a812cb` |
-| `workbooks/xlsx/1wb-1sheet/example_3_sales_transactions/sales_transactions.xlsx` | 6,837 | excel | Transactions | 40 | `3aa6a3f31807` |
-| `workbooks/xlsx/1wb-1sheet/example_4_weather_observations/weather_observations.xlsx` | 6,045 | excel | Weather | 30 | `4cab432e03c9` |
-| `workbooks/xlsx/1wb-multisheet/crm/CRM_sales_opportunities.xlsx` | 444,878 | excel | data_dictionary, accounts, sales teams, products, sales pipeline | 8,948 | `535f97fec83c` |
-| `workbooks/xlsx/1wb-multisheet/example_1_company_report/company_report.xlsx` | 8,591 | excel | Revenue, Expenses, Employees | 99 | `1b195588675a` |
-| `workbooks/xlsx/1wb-multisheet/example_2_sales_dashboard/sales_dashboard.xlsx` | 8,773 | excel | Sales, Products, Regions | 65 | `bb602b53fd40` |
-| `workbooks/xlsx/1wb-multisheet/example_3_school_records/school_records.xlsx` | 8,457 | excel | Students, Grades, Teachers | 110 | `e2d51fbdb1bf` |
-| `workbooks/xlsx/1wb-multisheet/example_4_inventory_system/inventory_system.xlsx` | 7,402 | excel | Products, Suppliers, Stock | 46 | `c3b7977db382` |
-| `workbooks/xlsx/1wb-multisheet/fastfood/fastfood.xlsx` | 17,411 | excel | bk, mcd | 264 | `c60e77998c94` |
-| `workbooks/xlsx/1wb-multisheet/stores/Dataset-Bhagwati Store.xlsx` | 52,081 | excel | Master Data, Opening Stock, Sales Data | 2,232 | `6514a734b824` |
-| `workbooks/xlsx/2+wb-1sheet/example_1_crm/customers.xlsx` | 6,242 | excel | Customers | 25 | `43811f162759` |
-| `workbooks/xlsx/2+wb-1sheet/example_1_crm/orders.xlsx` | 6,100 | excel | Orders | 35 | `0cfef412ec30` |
-| `workbooks/xlsx/2+wb-1sheet/example_2_hr/departments.xlsx` | 5,256 | excel | Departments | 8 | `27247ee6f8fe` |
-| `workbooks/xlsx/2+wb-1sheet/example_2_hr/employees.xlsx` | 6,081 | excel | Employees | 20 | `cdf4ba8ae823` |
-| `workbooks/xlsx/2+wb-1sheet/example_2_hr/payroll.xlsx` | 5,654 | excel | Payroll | 20 | `e28a3a43f0af` |
-| `workbooks/xlsx/2+wb-1sheet/example_3_retail/inventory.xlsx` | 5,591 | excel | Inventory | 20 | `99fa4701b738` |
-| `workbooks/xlsx/2+wb-1sheet/example_3_retail/products.xlsx` | 5,621 | excel | Products | 20 | `c8bbb294721e` |
-| `workbooks/xlsx/2+wb-1sheet/example_4_school/grades.xlsx` | 6,494 | excel | Grades | 90 | `2a29378adbed` |
-| `workbooks/xlsx/2+wb-1sheet/example_4_school/students.xlsx` | 5,834 | excel | Students | 30 | `62427a9169b9` |
-| `workbooks/xlsx/2+wb-1sheet/example_4_school/teachers.xlsx` | 5,277 | excel | Teachers | 12 | `2104e1757ab0` |
-| `workbooks/xlsx/2+wb-1sheet/restaurant/menu_items.xlsx` | 11,199 | excel | menu_items | 32 | `031c4b2f907e` |
-| `workbooks/xlsx/2+wb-1sheet/restaurant/order_details.xlsx` | 403,113 | excel | order_details | 12,234 | `4e439b14212c` |
-| `workbooks/xlsx/2+wb-1sheet/restaurant/restaurant.xlsx` | 10,479 | excel | 2 multi-single restaurant_db_da | 9 | `bf5b69b2dbe4` |
-| `workbooks/xlsx/2+wb-multisheet/example_1_finance_budgets/budget_2024.xlsx` | 7,185 | excel | Q1, Q2, Q3, Q4 | 20 | `ba28de09ab78` |
-| `workbooks/xlsx/2+wb-multisheet/example_1_finance_budgets/budget_2025.xlsx` | 7,181 | excel | Q1, Q2, Q3, Q4 | 20 | `7459f5d1b568` |
-| `workbooks/xlsx/2+wb-multisheet/example_2_regional_sales/region_east.xlsx` | 6,497 | excel | Sales, Returns | 31 | `9513c060b175` |
-| `workbooks/xlsx/2+wb-multisheet/example_2_regional_sales/region_west.xlsx` | 6,500 | excel | Sales, Returns | 31 | `df7d73074c5b` |
-| `workbooks/xlsx/2+wb-multisheet/example_3_hr_by_department/dept_engineering.xlsx` | 6,943 | excel | Employees, Payroll | 30 | `818eb5aa9c9d` |
-| `workbooks/xlsx/2+wb-multisheet/example_3_hr_by_department/dept_sales.xlsx` | 6,941 | excel | Employees, Payroll | 30 | `c88d88062d1c` |
-| `workbooks/xlsx/2+wb-multisheet/example_4_product_lines/electronics.xlsx` | 7,195 | excel | Products, Inventory, Sales | 60 | `427ca4143310` |
-| `workbooks/xlsx/2+wb-multisheet/example_4_product_lines/furniture.xlsx` | 7,199 | excel | Products, Inventory, Sales | 60 | `235b59115856` |
-| `workbooks/xlsx/2+wb-multisheet/example_4_product_lines/office_supplies.xlsx` | 7,219 | excel | Products, Inventory, Sales | 60 | `cfba61766230` |
-| `workbooks/xlsx/2+wb-multisheet/food_supplier/food supplier 01.xlsx` | 18,081 | excel | customers, shippers, employees | 103 | `2902a4880470` |
-| `workbooks/xlsx/2+wb-multisheet/food_supplier/food supplier 02.xlsx` | 114,252 | excel | orders, order details, products, categories | 3,070 | `0db002bf50ef` |
+**107 files, 12.2 MB** — 13 single-file cases (`extensions/csv|xls|xlsx/`) plus 32
+workbook batches across the 4 matrix cells, in both `.xls` and `.xlsx`. Per-file
+size, sheet names, row counts and sha256 are recorded in `tests/data/baseline.json`
+and regenerated on demand by `python scripts/run_test_plan.py --record`; not
+duplicated here since it drifts from the actual corpus otherwise.
 
 ---
 
@@ -491,102 +380,41 @@ Full run, 2026-08-02:
 
 ### 13.1 Mutation testing — does the suite actually have teeth?
 
-A suite that cannot fail proves nothing, so each key invariant was verified by
-deliberately breaking the code and confirming the right cases went red. Every
-change was reverted afterwards.
+Each key invariant was verified by deliberately breaking the code and confirming
+the right cases went red (every change reverted afterward):
 
 | Mutation | Expected | Result |
 |---|---|---|
-| Remove the header strip at `data_loader.py:60` | Invariant 9 fails | **2 batches red** (`stores`, both formats — the only corpus files with padded headers) |
-| Stop subtracting the header row in `_sheet_entry` | Invariant 3 fails everywhere | **42 batches red** |
-| Remove the `({stem})` disambiguator at `data_loader.py:69` | Invariant 6 fails on duplicate-sheet-name batches | **8 batches red** — exactly the four duplicate-name batches × 2 formats |
-| Make `_extent` count formatting-only cells as data | Invariant 3 fails | **2 cases red** — `extensions/xlsx/format_only_trailing.xlsx` (`probe rows == loaded rows: expected 10, got 4`) and the all-files mixed batch |
-| Make `_probe_xls` trust `sheet.nrows`/`ncols` instead of scanning | Invariant 3 fails | **No failures — see below** |
+| Remove the header strip at `data_loader.py:60` | Invariant 9 fails | 2 batches red (`stores`, both formats) |
+| Stop subtracting the header row in `_sheet_entry` | Invariant 3 fails everywhere | 42 batches red |
+| Remove the `({stem})` disambiguator at `data_loader.py:69` | Invariant 6 fails on duplicate-sheet-name batches | 8 batches red |
+| Make `_extent` count formatting-only cells as data | Invariant 3 fails | 2 cases red |
+| Make `_probe_xls` trust `sheet.nrows`/`ncols` instead of scanning | Invariant 3 fails | No failures (see below) |
 
-#### The `.xlsx` half of this gap is now closed
+**The `.xlsx` path is covered**: `extensions/xlsx/format_only_trailing.xlsx` (4
+data rows under a stored dimension of `A1:C11`) reproduces the exact bug
+`workbook_probe` exists to prevent — Excel's dimension record covers the *used*
+range, so formatting-only trailing rows still count unless the probe scans cells
+itself. `test_corpus_covers_formatting_only_trailing_rows`
+([test_file_loading.py](../tests/test_file_loading.py)) asserts the corpus keeps
+at least one such file, so this can't silently regress.
 
-The fourth mutation reproduces the exact bug `workbook_probe` exists to prevent:
-Excel writes the dimension record over the *used* range, so rows left holding only
-formatting after their data was deleted still count.
+**The `.xls` path cannot be closed with a corpus file.** A mutation confined to
+`_probe_xls` (trusting xlrd's `sheet.nrows`/`ncols` instead of scanning) survives
+the whole suite, even against a faithful hand-saved `.xls` twin of the `.xlsx`
+fixture. The reason is in xlrd, not the corpus: `xlrd.open_workbook(path,
+on_demand=True)` (what `_probe_xls` uses) already discards formatting-only rows
+before `_extent` runs, so stored and scanned extents agree regardless. On this
+path, immunity to the bug comes from xlrd's default parsing, not this project's
+code — `_extent` still matters for empty-string-cell rows, which xlrd does count,
+but no corpus file exhibits that condition either. Closing this would need a unit
+test against a synthetic row sequence, not another corpus file.
 
-On the first run of this plan it caused **zero failures** — no file in the corpus
-had formatting-only trailing rows, so the stored dimension happened to equal the
-true extent everywhere and the suite stayed green through a real regression.
+### 13.2 Known gaps
 
-`extensions/xlsx/format_only_trailing.xlsx` closes it: 4 data rows under a stored
-dimension of `A1:C11`, the extra six rows carrying cell borders and no values.
-Probe and loader both report 4; under the mutation the probe reports 10 and
-invariant 3 goes red by 6 rows.
-
-To stop the gap reopening silently, `test_corpus_covers_formatting_only_trailing_rows`
-([test_file_loading.py](../tests/test_file_loading.py)) asserts the *corpus* still
-contains at least one workbook whose stored dimension overstates its real extent.
-It names no file, so any workbook can satisfy it, and it recomputes the true extent
-locally rather than calling `_extent` — borrowing the function under test would move
-both sides of the comparison together and make a broken `_extent` look like a corpus
-with nothing to find.
-
-#### The `.xls` half cannot be closed with a corpus file
-
-`_extent` is shared, so the mutation above is caught for both formats. A mutation
-confined to `_probe_xls` — taking xlrd's `sheet.nrows`/`ncols` directly instead of
-scanning — **survives the whole suite.** Checked directly: across every `.xls`
-sheet in the corpus, stored `nrows`/`ncols` equals the true extent every time.
-
-The earlier conclusion was that one hand-saved workbook would close this. **That
-was wrong, and building the file is what showed it.**
-`extensions/xls/format_only_trailing.xls` is a faithful hand-saved twin of the
-`.xlsx` — same 4 data rows, same formatting carried down to row 11 — and the
-mutation still survives. The reason is in xlrd, not in the corpus:
-
-| How the file is opened | `sheet.nrows` |
-|---|---|
-| `xlrd.open_workbook(path, formatting_info=True)` | **11** — the formatting-only rows are there |
-| `xlrd.open_workbook(path, on_demand=True)` — what `_probe_xls` does | **5** |
-
-xlrd discards formatting-only rows itself unless asked for formatting, so by the
-time `_extent` runs the condition is already gone. Stored `nrows` (5) and the
-scanned extent (5, being 4 data rows plus the header) agree, and the mutation has
-nothing to trip over.
-
-The consequence is worth stating plainly: on the `.xls` path, immunity to this
-particular bug comes from **xlrd's default parsing, not from this project's code**.
-`_extent` is not redundant there — it still differs from `nrows` for rows holding
-empty-string cells, which xlrd does count — but that is a different condition, and
-no corpus file currently exhibits it either. Adding more `.xls` files will not
-change any of this. Making the `.xls` scan provable would mean testing `_extent`
-directly against a synthetic row sequence rather than through a workbook, which is
-a unit test rather than a corpus file.
-
-This mutation run also caught a flaw in the test code itself: invariant 6
-originally checked that the *predicted* names were distinct, which was a tautology
-— this module generates them from `(sheet, stem)` pairs that are distinct by
-construction, so it could never fail. It now measures the *loaded* table count
-against the number of populated sheets, which is what the third mutation above
-confirms.
-
-### 13.2 What the closing summary found on its first run
-
-Adding the per-invariant counts (§6.1) immediately surfaced two things that 84/84
-green had been hiding.
-
-**Invariant 4's second half is unexercised.** `empty-skipped` — every empty probed
-sheet produces no table — emitted **zero** checks. Confirmed against the run data:
-no sheet anywhere in the corpus is flagged `empty`, so `DataLoader`'s empty-sheet
-skip has never once been observed doing its job. This is the §12 risk in its pure
-form, and it is the reason that item was promoted to the top of §9. Unlike the
-`.xls` case above, one workbook with a blank sheet beside a populated one closes it.
-
-**A hand-edited baseline entry was contradicting its own file.** Making drift fail
-the runner (§6.3) turned up
-`workbooks/xlsx/1wb-multisheet/crm/CRM_sales_opportunities.xlsx`, whose recording
-listed **six** sheets — including a phantom `format_only_trailing` — against
-**five** tables, for a file that has five sheets and whose sha still matched.
-`record_baseline` derives both lists from one `observed` dict and cannot produce
-that pair, so the entry had been edited by hand. Nothing caught it: the workbook
-group has no `test_matches_recorded_baseline` (only Tests 1 and 3 do), and the
-runner was discarding drift. The entry has been corrected.
-
-That second finding leaves a real gap open: **`tests/test_workbook_matrix.py` still
-has no baseline test**, so between runner invocations the workbook group's
-recordings are unguarded by pytest. Worth adding.
+- **Invariant 4's "empty sheet produces no table" half is unexercised** — no
+  corpus file has an empty sheet beside a populated one. Highest-priority item in
+  §9; closable by adding one file.
+- **`tests/test_workbook_matrix.py` has no baseline test** — only Tests 1 and 3
+  do, so the workbook group's recordings aren't drift-checked by pytest between
+  runner invocations.

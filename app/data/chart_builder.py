@@ -193,14 +193,8 @@ def _prepare_categorical(df: pd.DataFrame, x_axis: str, y_axis: str) -> Tuple[Li
 
 
 def _prefers_horizontal(labels: List[str]) -> bool:
-    """True when these category names are too long to sit under a vertical bar.
-
-    A vertical bar chart gives each category a slice of the plot's width, so a long
-    name can only be shown rotated - and rotated names run into each other as soon as
-    the text is wider than the slot. Turning the chart on its side removes the
-    constraint entirely: the names become y-axis ticks with the full plot width to
-    grow into, and they stay horizontal, which is also simply easier to read.
-    """
+    """True when these labels are too long for vertical bar ticks without
+    rotation-induced overlap."""
     return any(len(str(label)) > MAX_VERTICAL_LABEL_CHARS for label in labels)
 
 

@@ -70,7 +70,7 @@ export default function App() {
   // Populated once /api/analyze-full succeeds
   const [sessionId, setSessionId] = useState(null);
   const [recommendations, setRecommendations] = useState(null); // { recommendations: [...] }
-  const [fileProfiles, setFileProfiles] = useState(null);
+  const [fileMetadata, setFileMetadata] = useState(null);
 
   // Generated reports, cached by report type ("A" | "B" | "C"). Held here rather
   // than in the Reports page so switching between them - or comparing all three -
@@ -411,7 +411,7 @@ export default function App() {
             setExpanded={setExpanded}
             setSessionId={setSessionId}
             setRecommendations={setRecommendations}
-            setFileProfiles={setFileProfiles}
+            setFileMetadata={setFileMetadata}
             onStart={startNewSession}
             onDone={() => setActiveTab('analysis')}
           />
@@ -447,7 +447,7 @@ export default function App() {
             /* Only a fallback for a report that names no source files, and a
                replayed report always names its own - the live profiles would be
                the wrong files entirely. */
-            fileProfiles={replay ? null : fileProfiles}
+            fileMetadata={replay ? null : fileMetadata}
             generating={replay ? replay.generating : generating}
             errors={replay ? replay.errors : reportErrors}
             replaySessionId={replay ? replay.sessionId : null}

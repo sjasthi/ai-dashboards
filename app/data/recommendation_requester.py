@@ -16,7 +16,9 @@ def _round_if_numeric(value, ndigits: int = 2):
 
 
 class RecommendationRequester:
-    """Handles request for report recommendations from LLM."""
+    """Builds the LLM prompt for report recommendations. The guidance/output-contract
+    and pattern-description strings below are the literal prompt text sent to the
+    model, not documentation about a prompt defined elsewhere."""
 
     # Report archetypes the LLM is allowed to choose from. Keeping this list
     # explicit (rather than letting the LLM invent chart ideas) is what makes
@@ -38,32 +40,18 @@ class RecommendationRequester:
         "OUTLIER": "flag rows far from the norm on a numeric measure (e.g. via IQR or z-score)."
     }
 
+    # System prompt (build_system_prompt) is the static guidance + output contract,
+    # sent once as a cacheable prefix. User prompts (build_request_prompt,
+    # build_correction_prompt) carry only the per-dataset data, so a validation
+    # retry re-sends just the data plus the error, not the whole prompt again.
+
     def build_system_prompt(self) -> str:
-        """The static instruction half of the prompt: analysis guidance + output
-        contract. It contains no per-dataset data, so it is byte-identical on every
-        request and can serve as a cacheable system prefix (see AI_Engine.send_prompt).
-        """
-        return (
-            f"{self._guidance_section()}\n"
-            f"{self._output_contract()}"
-        )
+        return f"{self._guidance_section()}\n{self._output_contract()}"
 
     def build_request_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
-        """The per-dataset USER message: file profiles, detected relationships, and how
-        to read them. The static guidance + output contract are sent separately via
-        build_system_prompt() so they stay a stable prefix instead of being re-embedded
-        (and re-tokenized fresh) in front of the data every call."""
         return self._data_section(file_profiles, relationships)
 
     def build_correction_prompt(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:
-        """User message for a validation retry: just the data.
-
-        The output contract and analysis guidance both live in the system prompt now,
-        which is resent unchanged (and cached) on every attempt - so a retry only needs
-        to re-present the data before the appended validation error. This is the data-only
-        form; identical to build_request_prompt today, kept separate so the two can
-        diverge without touching callers.
-        """
         return self._data_section(file_profiles, relationships)
 
     def _data_section(self, file_profiles: List[FileProfile], relationships: List[dict] = None) -> str:

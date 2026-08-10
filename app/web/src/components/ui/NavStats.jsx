@@ -1,15 +1,11 @@
 import { compactNumber } from '../../format';
 
 /**
- * The three usage counters, sized to sit inside the nav bar.
+ * The three usage counters, sized to fit the nav's 34px content band
+ * (label-over-value stack, not a card).
  *
- * They used to be StatTile cards on Home only. Here they are on every tab, which
- * means they have to fit the nav's 34px content band rather than set their own
- * height - hence the tight label-over-value stack instead of a card.
- *
- * The visible labels are shortened ("Files", not "Files processed") because the
- * nav has no room for the full wording; the full wording is what a screen reader
- * announces and what a hover reveals, so nothing is actually lost.
+ * Visible labels are shortened ("Files", not "Files processed") for space; the
+ * full wording is what a screen reader announces and what a hover reveals.
  */
 
 const ICON = {

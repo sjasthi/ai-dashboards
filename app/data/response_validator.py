@@ -15,28 +15,17 @@ MIN_JOIN_OVERLAP = 0.05
 
 
 def _canonical_key(filename: str) -> str:
-    """Normalized filename for tolerant matching - case, parentheses, and the
-    difference between spaces, underscores and hyphens, are ignored.
-
-    Worksheet-derived names carry parentheses ("orders (workbook 02).xlsx") and the
-    LLM routinely drops one - typically the closing paren before the extension - so
-    strip them before comparing rather than failing an otherwise-unambiguous match.
-    """
+    """Normalized filename for tolerant matching: case, parentheses, and
+    space/underscore/hyphen differences are ignored (the LLM routinely drops a
+    closing paren from worksheet-derived names like "orders (workbook 02).xlsx")."""
     cleaned = filename.strip().lower().replace("(", "").replace(")", "")
     return re.sub(r"[\s_-]+", " ", cleaned).strip()
 
 
 def _sheet_only_key(filename: str) -> str:
-    """Canonical key of just the sheet/table portion of a name, with any trailing
-    "(workbook stem)" disambiguator and the extension both dropped - so
-    "accounts.xlsx" and "accounts (missing columns).xlsx" produce the same key.
-
-    A workbook that ships its own data_dictionary sheet usually lists bare table
-    names ("accounts", not "accounts (workbook).xlsx"), and the LLM sometimes
-    echoes those bare names into files_involved instead of the fully-qualified
-    name it was actually given. That's a bigger miss than _canonical_key repairs
-    (it drops a whole word, not just punctuation), so it gets its own lookup.
-    """
+    """Canonical key of just the sheet/table portion, dropping any trailing
+    "(workbook stem)" disambiguator and extension - catches the LLM echoing a bare
+    sheet name (e.g. from a data_dictionary sheet) instead of the qualified one."""
     stem = re.sub(r"\.[^.\s)]+$", "", filename.strip())
     stem = re.sub(r"\s*\([^)]*\)\s*$", "", stem)
     return _canonical_key(stem)

@@ -169,11 +169,10 @@ def test_analyze_full_loads_the_same_tables(client, case, stub_llm):
 
 @pytest.mark.parametrize("case", API_CASES, ids=case_ids(API_CASES))
 def test_analyze_full_reports_real_row_counts_per_upload(client, case, stub_llm):
-    """The response's `file_profiles` is per *uploaded file*, not per table (it is
-    really `file_metadata` - see the note at api.py:433). Its rows/columns are
-    backfilled by grouping profiles through `loader.origins`, because a multi-sheet
-    workbook yields tables called "Orders (sales).xlsx" that never equal
-    "sales.xlsx" by name.
+    """The response's `file_metadata` is per *uploaded file*, not per table. Its
+    rows/columns are backfilled by grouping profiles through `loader.origins`,
+    because a multi-sheet workbook yields tables called "Orders (sales).xlsx" that
+    never equal "sales.xlsx" by name.
 
     That grouping is the thing worth testing: get it wrong and every multi-sheet
     upload renders a null row count in the UI.
@@ -185,7 +184,7 @@ def test_analyze_full_reports_real_row_counts_per_upload(client, case, stub_llm)
         _close(files)
 
     assert response.status_code == 200, response.text
-    reported = {f["name"]: f for f in response.json()["file_profiles"]}
+    reported = {f["name"]: f for f in response.json()["file_metadata"]}
 
     direct = loading_checks.run_batch(case)
     for observed in direct["observed"]["files"]:

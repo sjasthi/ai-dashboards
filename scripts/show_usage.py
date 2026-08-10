@@ -3,9 +3,8 @@
 The counters and the raw event log, on the console, with no dependencies and no
 server running. This exists because the alternatives are all worse: the sqlite3
 CLI isn't installed on Windows by default, GET /api/stats only ever returns
-aggregates and needs uvicorn up, and the full-log admin endpoint doesn't arrive
-until Phase 3b - which is the last thing built, long after this is needed for
-checking that instrumentation actually fires.
+aggregates and needs uvicorn up, and the full-log admin endpoint requires
+ADMIN_TOKEN to be configured.
 
     python scripts/show_usage.py                    counters, breakdowns, last 20 events
     python scripts/show_usage.py --events 100       more of the log

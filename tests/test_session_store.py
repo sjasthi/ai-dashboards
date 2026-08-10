@@ -194,7 +194,7 @@ def test_listing_is_newest_first():
 
 def test_a_session_whose_source_was_deleted_lists_as_unreplayable(workbook):
     """The directory is the source of truth. Pruning session_data/ by hand must
-    degrade the listing, never raise - this is D6's failure mode."""
+    degrade the listing, never raise."""
     target = save(file_paths=[str(workbook)])
     for f in (target / "source").iterdir():
         f.unlink()

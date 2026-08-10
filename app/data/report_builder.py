@@ -40,8 +40,7 @@ def _debug_files_enabled() -> bool:
 # them, or a two-column report reports itself as having four.
 METADATA_COLUMNS = ("recommendation_rank", "recommendation_name")
 
-# Tokens that show up in "numeric" columns but really mean "missing" (e.g. the
-# Starbucks dataset uses "-" for unavailable nutrition facts). Compared as
+# Tokens that show up in "numeric" columns but really mean "missing". Compared as
 # whole-cell matches (case-insensitive) so real substrings like "AB-123" are
 # left untouched.
 NULL_PLACEHOLDERS = {"-", "n/a", "na", "null", "none", "?", ""}
@@ -69,7 +68,7 @@ def generate_report(
         report_type: Which recommendation to build ('A' -> recommendations[0],
             'B' -> recommendations[1], 'C' -> recommendations[2], etc.), matching
             the frontend's option cards
-        file_paths: Dict mapping filename -> full filepath (e.g., {"starbucks.csv": "/path/to/file"})
+        file_paths: Dict mapping filename -> full filepath (e.g., {"orders.csv": "/path/to/file"})
         tables: Dict mapping table name -> already-loaded DataFrame (from
             DataLoader.tables()). Preferred over file_paths - uploaded files are
             deleted after analysis, and worksheets have no file of their own.
@@ -731,7 +730,7 @@ def _normalize_join_keys(join_keys: List[Any]) -> List[tuple]:
 
     Supports plain strings (same column name on both sides, e.g. "customer_id")
     and {"left": ..., "right": ...} dicts for foreign/primary keys named
-    differently on each side (e.g. left="theme_id", right="id").
+    differently on each side (e.g. left="customer_id", right="id").
     """
     normalized = []
     for key in join_keys:
@@ -781,6 +780,10 @@ def _normalized_key_series(s: pd.Series) -> Optional[pd.Series]:
     return values.map(mapping)
 
 
+# The four functions below implement join-miss rescue: an inner join silently drops
+# rows with no match on the right (e.g. "GTXPro" vs "GTX Pro" between two files), so
+# `losses`/`rescues` make that visible and, where the mismatch is just spelling/case/
+# punctuation, recover the row instead of dropping it.
 def _execute_join(
     operation: Dict[str, Any],
     file_paths: Optional[Dict[str, str]],
@@ -793,17 +796,8 @@ def _execute_join(
 ) -> pd.DataFrame:
     """Execute a join across two or more files (or the current pipeline result).
 
-    Files already merged into current_df (tracked via merged_filenames) are
-    skipped rather than re-loaded and re-merged - re-merging an already-joined
-    file on a later shared key (e.g. a second join step reusing a file from an
-    earlier step) would fan out rows instead of narrowing them.
-
-    `losses` collects rows an inner join dropped for having no match on the right.
-    That loss is invisible in the result and is not the scope the user asked for -
-    a spelling difference between two files ("GTXPro" vs "GTX Pro") silently
-    removes every affected row and the report's totals come out short with nothing
-    on screen saying so. Counted by joining left and discarding the misses, which
-    is the same result an inner join produces, so the report itself is unchanged.
+    Files already merged into current_df are skipped rather than re-merged, since
+    re-merging on a later shared key would fan out rows instead of narrowing them.
     """
     files_involved = operation.get("files_involved", [])
     join_keys = operation.get("join_keys", [])
@@ -875,15 +869,11 @@ def _inner_join_counting_misses(
 ) -> pd.DataFrame:
     """Inner-join `left` to `right`, recording the left rows that matched nothing.
 
-    A left join with an indicator, then dropping the misses, produces exactly the
-    rows an inner join would - including the row multiplication a one-to-many match
-    causes - while making the dropped rows countable. Counting instead by comparing
-    row totals before and after would be wrong in both directions: a one-to-many
-    join can grow the row count while still dropping unmatched rows.
-
-    When `rescues` is provided, rows that missed get a second chance against keys
-    compared without case, spacing or punctuation - see _rescue_by_spelling. Rows
-    that matched exactly are never touched by it.
+    Implemented as a left join with an indicator, then dropping the misses -
+    produces the same rows (and row multiplication) an inner join would, while
+    making the dropped rows countable (comparing row totals before/after would be
+    wrong, since a one-to-many match can grow the count while still losing rows).
+    When `rescues` is given, missed rows get a second chance via _rescue_by_spelling.
     """
     taken = set(left.columns) | set(right.columns)
     indicator = _unique_temp_name("_join_match", taken)
@@ -955,14 +945,10 @@ def _unambiguous_key_map(
 ) -> Optional[Dict[tuple, tuple]]:
     """Map each normalized key tuple to the single raw key tuple it stands for.
 
-    Tuples whose normalization is shared by two or more *distinct raw values* are
-    left out: that is the case where matching would be a guess, and a guess that
-    merges two real categories is worse than the dropped rows it would fix.
-
-    Distinct values, not rows - a lookup file holding three "GTX Pro" rows is one
-    value and must still match, fanning out exactly as an exact join would.
-
-    Returns None when any key column can't be normalized (numeric, boolean, dates).
+    Tuples whose normalization is shared by two or more distinct raw values are
+    left out - matching would be a guess, and a wrong guess merges two real
+    categories, which is worse than the dropped rows it would fix. Returns None
+    when any key column can't be normalized (numeric, boolean, dates).
     """
     normalized = []
     for col in raw_cols:
@@ -998,11 +984,9 @@ def _rescue_by_spelling(
 ) -> Tuple[Optional[pd.DataFrame], List[Dict[str, str]]]:
     """Re-match rows an exact join missed, ignoring case, spacing and punctuation.
 
-    The rescued rows take the *right* side's spelling before being merged, for two
-    reasons. It makes this a second exact merge, so the resulting columns, suffixes
-    and dtypes are identical to the first by construction rather than by inspection.
-    And it means a later group-by on the key produces one bar rather than two - the
-    file being joined to is treated as holding the reference spelling.
+    Rescued rows take the right side's spelling before merging, so the result is a
+    second exact merge (identical columns/dtypes) and a later group-by on the key
+    produces one bar rather than two.
     """
     right_map = _unambiguous_key_map(right, right_on)
     if not right_map:
@@ -1129,9 +1113,9 @@ def resolve_plotly_axes(
     """Resolve plotly_config's x_axis/y_axis to the actual output column names.
 
     The LLM writes plotly_config against expected_output_schema, which doesn't
-    account for _execute_join's collision suffixing (e.g. both "sets.csv" and
-    "themes.csv" having a "name" column makes the real output column
-    "name_themes"). Reuses _resolve_column with every file named across the
+    account for _execute_join's collision suffixing (e.g. both "orders.csv" and
+    "customers.csv" having a "name" column makes the real output column
+    "name_customers"). Reuses _resolve_column with every file named across the
     pipeline's operations, since we don't know upfront which operation's
     files_involved is the relevant hint for a given axis.
     """

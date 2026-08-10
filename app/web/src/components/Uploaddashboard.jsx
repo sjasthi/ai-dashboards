@@ -21,7 +21,7 @@ export default function UploadDashboard({
   inspections, setInspections,
   selections, setSelections,
   expanded, setExpanded,
-  setSessionId, setRecommendations, setFileProfiles, onStart, onDone,
+  setSessionId, setRecommendations, setFileMetadata, onStart, onDone,
 }) {
   const [status, setStatus] = useState('idle'); // idle | uploading | error | done
   const [errorMsg, setErrorMsg] = useState(null);
@@ -221,7 +221,7 @@ export default function UploadDashboard({
 
       setSessionId(data.session_id);
       setRecommendations(data.recommendations);
-      setFileProfiles(data.file_profiles);
+      setFileMetadata(data.file_metadata);
       setStatus('done');
 
       // Only now does this browser session count as a user rather than a visitor.

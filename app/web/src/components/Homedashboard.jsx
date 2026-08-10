@@ -1,11 +1,8 @@
 import Card from './ui/Card';
 
 /**
- * The landing tab: what the app does.
- *
- * The usage counters used to live here as a row of cards. They are in the nav bar
- * now (NavStats), where they are visible from every tab and cost no vertical
- * space, so this page is purely the explanation.
+ * The landing tab: what the app does. Usage counters live in the nav bar
+ * (NavStats), visible from every tab, so this page is purely the explanation.
  */
 
 const STEPS = [

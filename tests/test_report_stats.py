@@ -32,7 +32,7 @@ def cfg(chart_type="line", x="order_date", y="order_id_count", **kw):
 
 
 def daily_report(values, start="2023-01-01"):
-    """A TREND-shaped report: datetime x, count y - the screenshot's shape."""
+    """A TREND-shaped report: datetime x, count y."""
     dates = pd.date_range(start, periods=len(values), freq="D")
     return pd.DataFrame({"order_date": dates, "order_id_count": values})
 
