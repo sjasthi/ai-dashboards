@@ -159,7 +159,7 @@ export default function UploadDashboard({
     const key = fileKey(file);
     const info = inspections[key];
     if (!info) return { key, pending: true, included: true };
-    if (info.error) return { key, error: info.error, included: true };
+    if (info.error) return { key, error: info.error, included: !info.empty };
 
     const sheets = info.sheets || [];
     if (!sheets.length) {

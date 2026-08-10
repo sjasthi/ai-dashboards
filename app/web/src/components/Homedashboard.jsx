@@ -78,10 +78,7 @@ export default function HomeDashboard({ onStart }) {
       {/* Secondary by design - scope for someone who goes looking, not something
           that competes with the steps above. */}
       <p className="home-capabilities">
-        Supports .csv, .xls and .xlsx with per-sheet selection · six report
-        patterns (ranking, distribution, composition, trend, comparison, outlier)
-        · six chart types (bar, line, scatter, pie, histogram, box) · automatic
-        KPIs, outlier detection and data-quality warnings · relationship detection
+        Supports .csv, .xls and .xlsx with per-sheet selection · outlier detection and data-quality warnings · relationship detection
         across files · PDF, HTML and email export.
       </p>
     </div>

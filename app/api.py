@@ -463,7 +463,7 @@ async def inspect_uploaded_files(
                 results.append({
                     "name": file.filename, "size": 0, "kind": "unknown",
                     "sheets": [], "rows": None, "columns": None,
-                    "error": "This file is empty.",
+                    "error": "This file is empty.", "empty": True,
                 })
                 continue
 
@@ -597,10 +597,13 @@ def analyze_files_full(
             # so it can run off the event loop, and the underlying spooled file
             # reads the same bytes without one.
             content = file.file.read()
-            
+
+            # Skipped, not fatal: an empty file shouldn't block analysis of the
+            # rest of the batch. The upload screen already excludes these from
+            # what it submits - this is the backstop for anything that slips through.
             if len(content) == 0:
-                raise HTTPException(status_code=400, detail=f"File {file.filename} is empty")
-            
+                continue
+
             with open(filepath, 'wb') as f:
                 f.write(content)
             
