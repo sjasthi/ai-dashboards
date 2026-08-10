@@ -276,7 +276,12 @@ def test_categorical_axis_report_serializes(client, monkeypatch):
 
 
 def test_ranking_report_gets_concentration_stats(client, monkeypatch):
-    df = pd.DataFrame({"region": ["N", "S", "E", "W"], "revenue_sum": [500, 300, 150, 50]})
+    # 6 categories - the block requires the excluded tail to be at least as large
+    # as the shown top-3 (n_cat >= 2 * top N), or "top 3" isn't a real subset.
+    df = pd.DataFrame({
+        "region": ["N", "S", "E", "W", "C", "X"],
+        "revenue_sum": [500, 300, 100, 50, 30, 20],
+    })
     rec = recommendation(pattern_used="RANKING", plotly_config={
         "chart_type": "bar", "x_axis": "region", "y_axis": "revenue_sum", "title": "t",
     })

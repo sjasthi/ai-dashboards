@@ -474,14 +474,22 @@ def run_batch(case):
                   sheet["columns"] == len(df.columns),
                   sheet["columns"], len(df.columns), invariant="row-agreement")
 
-        # 4. Empty sheets are skipped by DataLoader, so they must not appear.
-        for sheet in sheets:
-            if not sheet.get("empty") or info.get("kind") == CSV_KIND:
-                continue
-            name = _expected_table_name(sheet["name"], filename, multi)
-            check(f"{filename}: empty sheet {sheet['name']!r} skipped",
-                  name not in tables, "not loaded",
-                  "loaded" if name in tables else "not loaded",
+        # 4. Empty sheets are skipped by DataLoader, so they contribute no table.
+        #
+        #    Checked by count rather than by guessing each empty sheet's name: when
+        #    a workbook has exactly one populated sheet, that sheet's guessed name
+        #    collapses to the bare filename (multi=False) - the same name an empty
+        #    sheet in the same workbook would guess to, since _expected_table_name
+        #    only looks at multi, not at which sheet is asking. Comparing names
+        #    per-sheet would then flag the populated sheet's own table as if it
+        #    were the empty sheet, loaded. Counting how many tables trace back to
+        #    this file sidesteps the collision entirely.
+        empty_sheets = [s for s in sheets if s.get("empty")]
+        if empty_sheets and info.get("kind") != CSV_KIND:
+            tables_from_file = sum(1 for o in origins.values() if o == filename)
+            names = ", ".join(repr(s["name"]) for s in empty_sheets)
+            check(f"{filename}: empty sheet(s) {names} skipped",
+                  tables_from_file == len(populated), len(populated), tables_from_file,
                   invariant="empty-skipped")
 
         per_file.append({

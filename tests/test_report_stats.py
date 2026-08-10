@@ -488,16 +488,18 @@ def test_mad_threshold_boundary():
 # ---------------------------------------------------------------------------
 
 def test_concentration_shares():
-    df = category_report(["A", "B", "C", "D"], [50, 30, 15, 5])
+    # 6 categories - the block requires the excluded tail to be at least as large
+    # as the shown top-3 (n_cat >= 2 * top N), or "top 3" isn't a real subset.
+    df = category_report(["A", "B", "C", "D", "E", "F"], [50, 30, 10, 5, 3, 2])
     stats = build_report_stats(
         df, cfg(chart_type="bar", x="region", y="revenue_sum"), pattern="RANKING"
     )
     assert "concentration" in stats["blocks"]
     assert stats["total"] == 100
     assert stats["top1_share"] == pytest.approx(50.0)
-    assert stats["top3_share"] == pytest.approx(95.0)
+    assert stats["top3_share"] == pytest.approx(90.0)
     assert stats["top_labels"] == ["A", "B", "C"]
-    assert stats["n_categories"] == 4
+    assert stats["n_categories"] == 6
 
 
 def test_long_tail_counted():
