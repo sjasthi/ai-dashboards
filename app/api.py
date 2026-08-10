@@ -1676,9 +1676,9 @@ def email_reports(
         lines += ["", request.message]
     lines += [
         "",
-        "Statistics in the attachment are labelled with where they came from: "
-        "'computed' means calculated from the report's own rows, 'AI note' means "
-        "the model's own words, which were not checked against the data.",
+        "The 'AI notes' section in the attachment is the model's own words, written "
+        "before any data was aggregated - not a finding, and not checked against "
+        "the data. Everything else is calculated from the report's own rows.",
     ]
 
     try:

@@ -7,6 +7,11 @@ the parts that cost time to rediscover.
 Covers course brief requirement 3: *"users can download those reports as PDF or HTML
 or send those reports to themselves or to others through email."*
 
+**If you're here because a download doesn't match what the app shows on screen**,
+that's a different doc: [`EXPORT_LIVE_SYNC.md`](EXPORT_LIVE_SYNC.md) covers why that
+happens (two independent implementations of the same report) and the fast
+no-LLM/no-browser loop for fixing it.
+
 ---
 
 ## What it does
@@ -71,6 +76,7 @@ because the figure-object form is version-fragile and ignores container sizing.
 | [app/web/src/api.js](../app/web/src/api.js) | `postForBinary`, `exportReports`, `emailReports`, `fetchExportStatus` |
 | [app/web/src/components/Reportsdashboard.jsx](../app/web/src/components/Reportsdashboard.jsx) | `ExportPanel` at :549, mounted at :131 |
 | [tests/test_export_api.py](../tests/test_export_api.py) | 35 integration tests |
+| [scripts/preview_export.py](../scripts/preview_export.py) | Renders a saved session straight to `.html`/`.pdf` — no LLM, no browser. See `EXPORT_LIVE_SYNC.md`. |
 
 Both template shells `{% import '_macros.html' as m %}` and call the same macros in the
 same order. That is the only thing stopping the PDF and HTML from drifting apart — and
@@ -170,33 +176,58 @@ Not the big `DATA_MODULES_AVAILABLE` try/except — a broken xhtml2pdf must not 
 
 ## Document design (and why)
 
-**Every claim carries its origin.** Computed statistics get a `computed` chip; the
-model's pre-execution text is quarantined as `AI note` / `AI question`. This is the
-dashboard's central design rule (see the header comment in `Reportsdashboard.jsx`) and
-the export needs it *more* than the screen does, because the file gets forwarded to
-someone who never saw the app. The combined document's cover carries a legend
-explaining the three chips.
+**Only one chip survives anywhere in the document: the outlier chip on the KPI
+tiles.** Until 2026-08-10 every computed statistic carried a `computed` chip and
+every pre-execution question or note carried `AI question` / `AI note`, mirroring
+the dashboard's chip convention (see the header comment in `Reportsdashboard.jsx`).
+A user-requested declutter pass removed all of that, first down to just `AI note`
+on the "Why the model proposed this report" block, then — in a second pass the same
+day — removed that last chip too, replacing it with a plain `Note:` label inside a
+section renamed "AI notes". See the provenance comment at the top of `_macros.html`
+and `docs/EXPORT_LIVE_SYNC.md`'s 2026-08-10 note for the full history. The cover no
+longer carries a chip legend — there's nothing left in body text to explain, and the
+"AI notes" section explains itself inline ("Written by the model *before* any data
+was aggregated. Not a finding.").
 
 > A previous, deleted implementation (commit `993e0fa`) rendered `rationale_bullets`
 > under a heading reading **"Key Insights"**. Those are written by the model *before a
-> single row is aggregated*. Do not reintroduce that. They now sit under "Why the model
-> proposed this report" with an `AI note` chip and an explicit disclaimer.
+> single row is aggregated*. Do not reintroduce that. They now sit under "AI notes"
+> with a plain `Note:` label and an explicit disclaimer.
 
 ### Single report
-1. **Overview** — eyebrow, title, `AI question` chip, provenance strip (identical bits
-   to the on-screen `Provenance`), optional warning banner, 4-up KPI table, chart.
-2. **Findings** (page break) — the four `InsightRail` blocks, each `computed`; amber
-   *only* when something was detected; distribution strip; AI rationale.
-3. **Appendix** — data table, 200 rows / 8 columns, with a truncation footnote.
+1. **Brand header** — the nav bar's logo mark plus "AI-Dashboard" wordmark
+   (`brand_header()`), once per document above the title.
+2. **Overview** — title, generated date, "Question asked:" (plain text, not
+   a chip), optional warning banner, 4-up KPI table, chart.
+3. **Distribution** — numeric-only in the PDF (`distribution_table()`); in the web
+   export, also the Range/Center/Spread graphics ported from the live dashboard
+   (box plot, skew bell-curve, variance meter — `distribution_card()`), since
+   xhtml2pdf can't render the inline SVG the skew curve needs. In the PDF this
+   stays on the same page as the KPI tiles and chart it explains — the page break
+   sits immediately before Findings, not before Distribution.
+4. **Findings, then AI notes** (page break, PDF) — the shape of the data comes
+   first, then the claims about it. Findings is the three `InsightRail` blocks (Key
+   finding, Outliers, Data quality), each amber *only* when something was detected;
+   AI notes is the model's pre-execution rationale, kept visually distinct with a
+   dotted border and the `Note:` label.
+5. **How this report was built** — source files, row count, and the pipeline steps as
+   plain-language bullets, not raw tokens run together. This is
+   `report_method_block()`, the same macro the combined document's Method & Provenance
+   section uses per report.
+6. **Appendix** — data table, 200 rows / 8 columns, with a truncation footnote.
 
 Footer on every page: `AI-Dashboard · session {sid} · page N of M`.
 
 ### Combined (2+)
-Cover + legend → **comparison matrix** → executive summary → method & provenance →
-each report in full → recommendations → appendices.
+Cover (report list + one generated timestamp, no legend) → **comparison matrix** →
+Key findings per report → How these reports were built → each report in full →
+appendices.
 
-The matrix is placed **before** the executive summary: it is the reason several reports
-were exported together, and the summary is derived from the same numbers.
+The matrix is placed **before** Key findings per report: it is the reason several
+reports were exported together, and the summary is derived from the same numbers.
+There is no "what to check next" list at the combined-summary level and no
+Recommendations section — both were judged redundant with what's already on each
+report's own page, and were removed in the same pass.
 
 **Two rules in the matrix matter more than its row list:**
 
@@ -211,9 +242,9 @@ were exported together, and the summary is derived from the same numbers.
    **above** the table. It was originally below, where it got orphaned onto the next
    page — i.e. read only after the reader had already made the mistake.
 
-The executive summary contains **no synthesised cross-report prose**. Nothing in this
-codebase can honestly compute "Report B contradicts Report A", and inventing it is
-exactly the failure the provenance labelling exists to prevent.
+Key findings per report contains **no synthesised cross-report prose**. Nothing in
+this codebase can honestly compute "Report B contradicts Report A", and inventing it
+is exactly the failure the provenance labelling exists to prevent.
 
 ---
 
@@ -324,14 +355,18 @@ They reuse `make_session` / `orders_frame` / `recommendation` from
 - garbage `chart_images["A"]` → still **200** (guards constraint 4)
 - A-then-B → both `SESSIONS[sid]["reports"]` keys live (guards constraint 1)
 - HTML export contains no `http://`, `https://` or `<script` (self-containment)
-- export HTML contains `computed`, `AI question`, `AI note`, and **not** `"Key Insights"`
+- export HTML contains `Question asked`, `AI notes`, `Note:`, and **not** `"Key Insights"`
 - combined export: caption appears *before* `Chart type`; `not measured` present
 - appendix cells: no `nan`, no `00:00:00` (guards constraint 7)
 
 **Iterating on template layout:** do it against `render_export_pdf` / `render_export_html`
-directly in a script, not through the browser — seconds per cycle. `scripts/replay_report.py`
-rebuilds a real report from `session_data/<id>/cleaned_response.json` at zero LLM cost
-(needs `SAVE_DEBUG_FILES=true` on a prior run).
+directly in a script, not through the browser — seconds per cycle.
+`scripts/preview_export.py <session_id>` does exactly this — rehydrates a saved
+session and renders both formats straight to disk, no LLM call, no browser. See
+`EXPORT_LIVE_SYNC.md` for the full workflow, including how to visually check the
+output without Puppeteer. (`scripts/replay_report.py` is the older, narrower tool:
+chart-only, opens a Plotly preview in a browser tab, needs `SAVE_DEBUG_FILES=true`
+on a prior run rather than `SAVE_REPORT_HISTORY=true`.)
 
 **Running the app:** prefer uvicorn **without** `--reload` when testing export by hand —
 a reload wipes the in-memory `SESSIONS` and every export depends on live session state.

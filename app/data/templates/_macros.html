@@ -11,32 +11,45 @@
   never the U+26A0 warning triangle - it has no glyph in the built-in fonts and
   substitutes to a black box. The word "Warning" instead.
 
-  PROVENANCE CONSTRAINT: a computed statistic carries a `computed` chip; the
-  model's pre-execution text carries `AI note` or `AI question`. Same rule as the
-  dashboard - see the header comment in Reportsdashboard.jsx. The export is the
-  copy that leaves the app and gets forwarded, so it needs the labels more than
-  the screen does, not less.
+  PROVENANCE CONSTRAINT: as of the 2026-08-10 declutter passes, the export no
+  longer labels every computed statistic with a "computed" chip, or every
+  pre-execution question or note with an "AI question" / "AI note" chip - the
+  reader is trusted to tell a stated fact from a finding by context, plain-text
+  labels ("Question asked:", "Note:") where a claim's origin still needs a name.
+  The Outlier chip on a KPI tile is a different thing entirely - a data-quality
+  flag, not a provenance label - and is unaffected by any of this. It is the only
+  chip left in the document.
 #}
 
 
 {# ------------------------------------------------------------------- chips #}
 
-{% macro chip(text, kind='') -%}
-<span class="chip{% if kind %} chip--{{ kind }}{% endif %}">{{ text }}</span>
+{% macro chip(text, kind='', title=None) -%}
+<span class="chip{% if kind %} chip--{{ kind }}{% endif %}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
 {%- endmacro %}
 
 
-{% macro label_legend() -%}
-<table class="legend" width="100%">
-  <tr>
-    <td width="33%">{{ chip('computed', 'computed') }}
-      <span class="legend__text">Calculated from the report's own rows by the app.</span></td>
-    <td width="33%">{{ chip('AI question', 'ai') }}
-      <span class="legend__text">The question the model proposed, before any data was read.</span></td>
-    <td width="34%">{{ chip('AI note', 'ai') }}
-      <span class="legend__text">The model's own words. Not checked against the data.</span></td>
-  </tr>
-</table>
+{# ---------------------------------------------------------------- brand mark #}
+
+{#
+  App.jsx's nav brand, reproduced at the top of the document: once on the cover
+  for a combined export, once at the top of the page for a single-report one -
+  never once per report inside a combined document, where it would just repeat.
+  The icon is a baked PNG (brand_icon_data_url, a Jinja global export_builder.py
+  registers) rather than inline SVG, because it has to render identically in the
+  PDF shell too and xhtml2pdf has no SVG support.
+
+  A <table>, not an inline img+span: margin-left on the span next to the img was
+  inconsistently honoured in the PDF (confirmed by rendering - the gap it should
+  have produced came out as none), where a <td>'s padding is reliable - the same
+  reasoning as every other "two things side by side" in this file that reaches for
+  a table rather than inline elements in the PDF target.
+#}
+{% macro brand_header() -%}
+<table class="brand"><tr>
+  <td class="brand__icon-cell"><img src="{{ brand_icon_data_url }}" alt="" class="brand__icon" /></td>
+  <td class="brand__word-cell"><span class="brand__word">AI-Dashboard</span></td>
+</tr></table>
 {%- endmacro %}
 
 
@@ -50,47 +63,9 @@
 
 {% macro ai_question(r) -%}
 {% if r.question_answered %}
-<p class="ai-question">{{ chip('AI question', 'ai') }}
+<p class="ai-question"><strong>Question asked:</strong>
   <em>&ldquo;{{ r.question_answered }}&rdquo;</em></p>
 {% endif %}
-{%- endmacro %}
-
-
-{#
-  Which rows the report is about, next to its title - same placement and same
-  wording as the dashboard. A definition, not a warning: the filter is what the
-  report means, so it takes no chip and no amber.
-#}
-{% macro scope_line(r) -%}
-{% set s = r.stats or {} %}
-{% if s.scope_text %}
-<p class="scope">{{ s.scope_text }}</p>
-{% endif %}
-{%- endmacro %}
-
-
-{#
-  The same bits, in the same order, as the Provenance strip on screen. A reader
-  who checked the numbers in the app has to be able to confirm this is the same
-  run - which means the file list, the row count and the timestamp, not a
-  paraphrase of them.
-#}
-{#
-  Joined with a literal U+00B7, not `&middot;`. The bits hold user data (file names),
-  so the string can't be marked safe - and an HTML entity inside a Jinja expression
-  gets escaped to visible "&middot;" text on its way out.
-#}
-{% macro provenance_strip(r) -%}
-<p class="provenance">
-  {%- set bits = [] -%}
-  {%- if r.source_files %}{% set _ = bits.append(r.source_files | join(', ')) %}{% endif -%}
-  {%- if r.report_rows is not none %}{% set _ = bits.append('{:,} data points'.format(r.report_rows)) %}{% endif -%}
-  {%- if r.data_columns %}{% set _ = bits.append(r.data_columns | length ~ ' columns') %}{% endif -%}
-  {%- if r.chart_type %}{% set _ = bits.append(r.chart_type ~ ' chart') %}{% endif -%}
-  {%- if r.generated_at %}{% set _ = bits.append('generated ' ~ (r.generated_at | clock)) %}{% endif -%}
-  {{ bits | join(' · ') }}
-  {%- for op in r.operations or [] %} <code>{{ op }}</code>{% endfor -%}
-</p>
 {%- endmacro %}
 
 
@@ -104,47 +79,70 @@
 {# ---------------------------------------------------------------- KPI tiles #}
 
 {#
-  Four tiles, mirroring KpiRow. The fourth is conditional on the same keys the
-  dashboard branches on, so the export never shows a statistic the screen
-  wouldn't have shown for this report.
+  Four tiles, mirroring KpiRow / StatTile.jsx. The fourth is conditional on the
+  same keys the dashboard branches on, so the export never shows a statistic the
+  screen wouldn't have shown for this report.
+
+  `name` + `delta` (Highest/Lowest) and `note` (all four) are separate slots, not
+  one merged sublabel string, because StatTile treats them as separate claims -
+  "GTX ▲ +120% vs avg" is which-one-and-how-extreme, and the outlier chip is a
+  verdict about the number itself. A flattened sublabel can't carry that distinction.
 #}
 {% macro kpi_table(r) -%}
 {% set s = r.stats or {} %}
+{% set is_currency = s.measure_is_currency %}
 <table class="kpi" width="100%">
   <tr>
   {% if s.available %}
     {% set measure = s.measure_label or 'value' %}
-    {{ kpi_cell(s.headline_label or measure, s.headline_value | compact, s.headline_sublabel) }}
-    {{ kpi_cell('Highest', s.peak_value | compact, s.peak_label or ('highest ' ~ measure)) }}
-    {{ kpi_cell('Lowest', s.trough_value | compact, s.trough_label or ('lowest ' ~ measure)) }}
+    {{ kpi_cell(s.headline_label or measure, s.headline_value | measure(is_currency),
+                note=s.headline_sublabel) }}
+    {{ kpi_cell('Highest', s.peak_value | measure(is_currency), name=s.peak_label,
+                delta=delta_vs_average(s.peak_value, s.mean), warn=s.peak_is_outlier) }}
+    {{ kpi_cell('Lowest', s.trough_value | measure(is_currency), name=s.trough_label,
+                delta=delta_vs_average(s.trough_value, s.mean), warn=s.trough_is_outlier) }}
     {% if 'trend' in (s.blocks or []) %}
+      {# R² rides in the note's tooltip rather than the visible text - the same move
+         the on-screen tile makes, and the same pattern the Spread cell below already
+         uses in this export for its std-dev/IQR tooltips. #}
+      {% set trend_title = ('R² ' ~ s.trend_r2 ~ ' — how well a straight line fits this trend') if s.trend_r2 is not none else None %}
+      {% set trend_words = 'steady' if s.trend_direction == 'flat' else ((s.trend_strength or '') ~ ' trend').strip() %}
       {{ kpi_cell('Trend', s.trend_pct_change | signed_pct,
-                  (s.trend_strength ~ ' · R² ' ~ s.trend_r2) if s.trend_strength else None) }}
+                  note=(s.trend_direction | direction_glyph) ~ ' ' ~ trend_words,
+                  note_title=trend_title) }}
     {% elif 'concentration' in (s.blocks or []) %}
-      {{ kpi_cell('Concentration', (s.top3_share ~ '%') if s.top3_share is not none else '—',
-                  'top ' ~ [3, s.n_categories or 3] | min ~ ' of ' ~ s.n_categories ~ ' categories') }}
+      {{ kpi_cell('Top categories', (s.top3_share ~ '%') if s.top3_share is not none else '—',
+                  note=(s.top_labels or []) | join(', ')) }}
     {% else %}
       {{ kpi_cell('Spread', (s.cv ~ '%') if s.cv is not none else '—',
-                  'variation around a mean of ' ~ (s.mean | compact)) }}
+                  note=s.variance_tier_label) }}
     {% endif %}
   {% else %}
     {# No numeric measure to compute from. Same four fallback facts the screen shows. #}
-    {{ kpi_cell('Rows', '{:,}'.format(r.report_rows or 0), None, computed=False) }}
-    {{ kpi_cell('Columns', (r.data_columns or []) | length, None, computed=False) }}
-    {{ kpi_cell('Pattern', r.pattern_used or '—', None, computed=False) }}
-    {{ kpi_cell('Chart', r.chart_type or '—', None, computed=False) }}
+    {{ kpi_cell('Rows', '{:,}'.format(r.report_rows or 0)) }}
+    {{ kpi_cell('Columns', (r.data_columns or []) | length) }}
+    {{ kpi_cell('Pattern', r.pattern_used or '—') }}
+    {{ kpi_cell('Chart', r.chart_type or '—') }}
   {% endif %}
   </tr>
 </table>
 {%- endmacro %}
 
 
-{% macro kpi_cell(label, value, sublabel, computed=True) -%}
+{% macro kpi_cell(label, value, note=None, note_title=None, name=None, delta=None, warn=False) -%}
 <td width="25%" class="kpi__cell">
-  <div class="kpi__label">{{ label }}</div>
+  <div class="kpi__label-row">
+    <span class="kpi__label">{{ label }}</span>
+    {% if warn %}{{ chip('Outlier', 'warn', title='Flagged as a statistical outlier — see Distribution below') }}{% endif %}
+  </div>
   <div class="kpi__value">{{ value if value is not none else '—' }}</div>
-  {% if sublabel %}<div class="kpi__sub">{{ sublabel }}</div>{% endif %}
-  {% if computed %}<div class="kpi__chip">{{ chip('computed', 'computed') }}</div>{% endif %}
+  {% if name or delta %}
+  <div class="kpi__name-row">
+    {% if name %}<span class="kpi__name">{{ name }}</span>{% endif %}
+    {% if delta %}<span class="kpi__delta">{{ delta.direction | direction_glyph }} {{ delta.text }}</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if note %}<div class="kpi__sub{% if note_title %} kpi__sub--tip{% endif %}"{% if note_title %} title="{{ note_title }}"{% endif %}>{{ note }}</div>{% endif %}
 </td>
 {%- endmacro %}
 
@@ -177,8 +175,7 @@
 
 {% if not s.available %}
   {{ finding_block('No statistics available',
-      s.unavailable_reason or 'This report has no numeric measure to compute statistics from.',
-      computed=False) }}
+      s.unavailable_reason or 'This report has no numeric measure to compute statistics from.') }}
   {% if s.llm_caveat %}{{ ai_note(s.llm_caveat) }}{% endif %}
 {% else %}
 
@@ -214,8 +211,6 @@
                        'warn' if (s.null_count or s.join_loss_rows or r.schema_warning) else '') %}
     <p>{{ s.quality_text or 'No issues found.' }}</p>
   {% endcall %}
-
-  {{ finding_block('What to check next', s.recommendation_text, variant='good') }}
 {% endif %}
 {%- endmacro %}
 
@@ -228,18 +223,16 @@
 <div class="finding{% if variant %} finding--{{ variant }}{% endif %}">
   <div class="finding__head">
     <span class="finding__title">{{ title }}</span>
-    {{ chip('computed', 'computed') }}
   </div>
   <div class="finding__body">{{ caller() }}</div>
 </div>
 {%- endmacro %}
 
 
-{% macro finding_block(title, text, variant='', computed=True) -%}
+{% macro finding_block(title, text, variant='') -%}
 <div class="finding{% if variant %} finding--{{ variant }}{% endif %}">
   <div class="finding__head">
     <span class="finding__title">{{ title }}</span>
-    {% if computed %}{{ chip('computed', 'computed') }}{% endif %}
   </div>
   <div class="finding__body"><p>{{ text }}</p></div>
 </div>
@@ -247,7 +240,7 @@
 
 
 {% macro ai_note(text) -%}
-<div class="ai-note">{{ chip('AI note', 'ai') }} {{ text }}</div>
+<div class="ai-note">{{ text }}</div>
 {%- endmacro %}
 
 
@@ -268,13 +261,24 @@
 {% macro distribution_card(r) -%}
 {% set s = r.stats or {} %}
 {% if s.available %}
-<h2 class="h2">Distribution <span class="h2__chip">{{ chip('computed', 'computed') }}</span></h2>
+{% set iqr_title = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.' %}
+{% set std_title = 'Standard deviation (σ) — about ' ~ s.pct_within_1sd ~ '% of values fall within this distance of the average.' if s.pct_within_1sd is not none else 'Standard deviation (σ) — the typical distance of a value from the average.' %}
+{% set mean_title = 'Mean — the sum of all values divided by how many there are. Sensitive to outliers.' %}
+{% set median_title = 'Median — the middle value when all values are sorted. Unaffected by outliers.' %}
+<h2 class="h2">Distribution</h2>
 <table class="dist" width="100%">
   <tr>
     <td class="dist__cell" width="50%">
       <div class="dist__label">Range</div>
       {% set span = s.max - s.min %}
       {% if span > 0 %}
+      {# Plain-language headline above the box plot, mirroring RangeSummary.jsx's
+         .range-summary__lead exactly - the reader gets the answer in words before
+         the chart, with the IQR definition moved to the hover title. #}
+      <p class="dist__lead" title="{{ iqr_title }}">
+        <span class="dist__pair-label">Most values fall between</span>
+        <span class="dist__pair-value">{{ s.p25 | compact }} &rarr; {{ s.p75 | compact }}</span>.
+      </p>
       <div class="bp">
         <div class="bp__track">
           <div class="bp__whisker"></div>
@@ -304,12 +308,16 @@
           <span>min {{ s.min | compact }}</span>
           <span>max {{ s.max | compact }}</span>
         </div>
-        {# No median value on the bar: the Centre cell prints it at full precision, and
-           compact() would state the same number a second time at a coarser rounding. #}
-        <div class="bp__quartiles">p25 {{ s.p25 | compact }} &middot; p75 {{ s.p75 | compact }}</div>
       </div>
       {% else %}
-      <div class="bp__quartiles">every value is {{ s.median | compact }} &mdash; no spread to plot</div>
+      {# Every value identical: no shape to draw, matching RangeSummary.jsx's own
+         early return - a flat track with just a centred median tick. #}
+      <div class="bp">
+        <div class="bp__track">
+          <div class="bp__median" style="left: 50%"></div>
+        </div>
+        <div class="bp__quartiles">every value is {{ s.median | compact }} &mdash; no spread to plot</div>
+      </div>
       {% endif %}
     </td>
 
@@ -318,10 +326,41 @@
         <div class="dist__label">Centre</div>
         {% if s.skew_label %}<div class="dist__badge">{{ s.skew_label }}</div>{% endif %}
       </div>
+      {# The stylised silhouette from SkewGlyph.jsx, ported: a fixed curve per
+         skew direction (illustration only, carries no value of its own) with the
+         median (solid) and mean (dashed) plotted on it as ticks. The gap between
+         the ticks comes straight from skew_ratio - the same number behind the
+         badge above - so a bigger gap on the page always means a bigger computed
+         skew, never just a bigger drawing. #}
+      {% if s.skew_level and s.skew_ratio is not none %}
+        {% set skew_shapes = {
+          'right': {'peak_x': 70, 'd': 'M2,30 C30,30 40,4 70,4 C100,4 105,26 140,29 C165,31 185,31 198,31'},
+          'left': {'peak_x': 130, 'd': 'M198,30 C170,30 160,4 130,4 C100,4 95,26 60,29 C35,31 15,31 2,31'},
+          'symmetric': {'peak_x': 100, 'd': 'M2,30 C40,30 55,4 100,4 C145,4 160,30 198,30'},
+        } %}
+        {% set shape = skew_shapes.get(s.skew_level, skew_shapes['symmetric']) %}
+        {% set median_x = shape.peak_x %}
+        {% set mean_delta = [[s.skew_ratio * 40, 60] | min, -60] | max %}
+        {% set mean_x = [[shape.peak_x + mean_delta, 190] | min, 10] | max %}
+        <svg class="skew-glyph" width="100%" height="34" viewBox="0 0 200 34"
+             preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="{{ shape.d }}" class="skew-glyph__curve" fill="none"></path>
+          <line x1="{{ median_x }}" y1="2" x2="{{ median_x }}" y2="32"
+                class="skew-glyph__tick skew-glyph__tick--median"><title>{{ median_title }}</title></line>
+          <line x1="{{ mean_x }}" y1="2" x2="{{ mean_x }}" y2="32"
+                class="skew-glyph__tick skew-glyph__tick--mean"><title>{{ mean_title }}</title></line>
+        </svg>
+      {% endif %}
       {# exact, not compact: this cell exists to show the gap between the two, and
-         compact() closes it - 1,046,332 and 1,032,891 both render as "1M". #}
-      <div class="dist__pair"><span>mean</span> <strong>{{ s.mean | exact }}</strong></div>
-      <div class="dist__pair"><span>median</span> <strong>{{ s.median | exact }}</strong></div>
+         compact() closes it - 1,046,332 and 1,032,891 both render as "1M". Average /
+         Midpoint, not mean / median: the plain-language names the live tile uses -
+         "median" stays the technical name in the statistics strip below. #}
+      <div class="dist__pair-grid">
+        <span class="dist__pair-label" title="{{ mean_title }}">Average</span>
+        <span class="dist__pair-value" title="{{ mean_title }}">{{ s.mean | exact }}</span>
+        <span class="dist__pair-label" title="{{ median_title }}">Midpoint</span>
+        <span class="dist__pair-value" title="{{ median_title }}">{{ s.median | exact }}</span>
+      </div>
     </td>
 
     <td class="dist__cell dist__cell--last" width="25%">
@@ -338,13 +377,11 @@
         <div class="meter__fill" style="width: {{ [s.cv, 100] | min | round(2) }}%"></div>
       </div>
       {% endif %}
-      {% set std_title = 'Standard deviation (σ) — about ' ~ s.pct_within_1sd ~ '% of values fall within this distance of the average.' if s.pct_within_1sd is not none else 'Standard deviation (σ) — the typical distance of a value from the average.' %}
-      {% set iqr_title = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.' %}
-      <div class="dist__pair dist__pair--spread" title="{{ std_title }}">
-        <span>Average variation</span> <strong>{{ s.std | compact }}</strong>
-      </div>
-      <div class="dist__pair dist__pair--spread" title="{{ iqr_title }}">
-        <span>Range of middle 50%</span> <strong>{{ s.iqr | compact }}</strong>
+      <div class="dist__pair-grid dist__pair-grid--spread">
+        <span class="dist__pair-label" title="{{ std_title }}">Average variation</span>
+        <span class="dist__pair-value" title="{{ std_title }}">{{ s.std | compact }}</span>
+        <span class="dist__pair-label" title="{{ iqr_title }}">Range of middle 50%</span>
+        <span class="dist__pair-value" title="{{ iqr_title }}">{{ s.iqr | compact }}</span>
       </div>
     </td>
   </tr>
@@ -359,7 +396,7 @@
 {% macro distribution_table(r) -%}
 {% set s = r.stats or {} %}
 {% if s.available %}
-<h2 class="h2">Distribution <span class="h2__chip">{{ chip('computed', 'computed') }}</span></h2>
+<h2 class="h2">Distribution</h2>
 {{ distribution_strip(s) }}
 {% if s.skew_label or s.variance_label %}
 <p class="dist__prose">
@@ -403,18 +440,29 @@
   The model's rationale, kept but never dressed up as a measurement. The version
   of this export that shipped before rendered these bullets under a heading
   reading "Key Insights" - which is precisely the confusion the dashboard rework
-  removed, since they are written before a single row has been aggregated.
+  removed, since they are written before a single row has been aggregated. As of
+  the second 2026-08-10 pass this no longer carries a chip either (see the
+  file-header comment) - "Note:" is plain text, same treatment as "Question asked:"
+  on the report header.
+
+  A <table>, not a <div>: xhtml2pdf treats a bordered div containing a <ul> as
+  splittable at a page boundary and redraws the border around each fragment
+  separately (page-break-inside: avoid does not prevent this - confirmed by
+  rendering, not assumed). A single-cell table is the one block xhtml2pdf keeps
+  atomic, which is the same reason every "row of tiles" elsewhere in this file is
+  a table rather than a styled div.
 #}
 {% macro ai_rationale(r) -%}
 {% if r.rationale_bullets %}
-<h2 class="h2">Why the model proposed this report</h2>
-<div class="ai-note">
-  {{ chip('AI note', 'ai') }}
-  Written by the model <em>before</em> any data was aggregated. Not a finding.
-  <ul class="bullets">
-    {% for b in r.rationale_bullets %}<li>{{ b }}</li>{% endfor %}
-  </ul>
-</div>
+<h2 class="h2">AI notes</h2>
+<table class="ai-note" width="100%">
+  <tr><td>
+    <strong>Note:</strong> Written by the model <em>before</em> any data was aggregated. Not a finding.
+    <ul class="bullets">
+      {% for b in r.rationale_bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+  </td></tr>
+</table>
 {% endif %}
 {%- endmacro %}
 
@@ -451,17 +499,15 @@
 {#
   Reports across, metrics down.
 
-  Two rules matter more than the row list itself:
+  Absent is not zero. A report with no ordered axis prints "not measured", never
+  a blank and never a 0 - a blank cell in a comparison table reads as "we
+  measured this and found nothing", which would be a lie. _comparison_rows in
+  export_builder.py is where that text comes from.
 
-  1. Absent is not zero. A report with no ordered axis prints "not measured", never
-     a blank and never a 0 - a blank cell in a comparison table reads as "we
-     measured this and found nothing", which would be a lie. _comparison_rows in
-     export_builder.py is where that text comes from.
-
-  2. A/B/C almost always measure different quantities, and a matrix invites reading
-     down a column comparing numbers that aren't the same thing. Hence the Measure
-     row up top and the caption underneath. This is the easiest thing here to get
-     wrong, and the consequence is a confidently wrong comparison.
+  A/B/C almost always measure different quantities, and a matrix invites reading
+  down a column comparing numbers that aren't the same thing. Hence the Measure
+  row up top and the caption underneath. This is the easiest thing here to get
+  wrong, and the consequence is a confidently wrong comparison.
 #}
 {% macro comparison_matrix(ctx) -%}
 <h2 class="h2">Comparison</h2>
@@ -484,10 +530,7 @@
   <tbody>
     {% for row in ctx.comparison_rows %}
     <tr{% if row.emphasis %} class="matrix__row--emphasis"{% endif %}>
-      <td class="matrix__rowhead">
-        {{ row.label }}
-        {% if row.chip %}<br />{{ chip(row.chip, 'computed' if row.chip == 'computed' else 'ai') }}{% endif %}
-      </td>
+      <td class="matrix__rowhead">{{ row.label }}</td>
       {% for cell in row.cells %}
       <td{% if cell.absent %} class="matrix__absent"{% endif %}>{{ cell.text }}</td>
       {% endfor %}
@@ -502,10 +545,9 @@
 
 {% macro cover(ctx) -%}
 <div class="cover">
-  <div class="eyebrow">AI-Dashboard</div>
+  {{ brand_header() }}
   <h1 class="cover__title">Comparative Report</h1>
-  <p class="cover__sub">{{ ctx.reports | length }} reports generated from
-    {{ ctx.all_source_files | join(', ') if ctx.all_source_files else 'the uploaded data' }}</p>
+  <p class="cover__sub">{{ ctx.reports | length }} report{{ 's' if ctx.reports | length != 1 }} in this export</p>
 
   <table class="cover__list" width="100%">
     {% for r in ctx.reports %}
@@ -513,7 +555,7 @@
       <td class="cover__letter">{{ r.letter }}</td>
       <td>
         <div class="cover__name">{{ r.report_name or 'Report ' ~ r.letter }}</div>
-        <div class="cover__meta">{{ r.pattern_used or 'report' }} &middot;
+        <div class="cover__meta">
           {{ '{:,}'.format(r.report_rows or 0) }} data points &middot;
           {{ r.chart_type or 'no' }} chart</div>
       </td>
@@ -521,109 +563,99 @@
     {% endfor %}
   </table>
 
-  <p class="cover__meta">Session {{ ctx.session_id }}
-    {%- if ctx.generated_at %} &middot; generated {{ ctx.generated_at | clock }}{% endif %}</p>
-
-  <h2 class="h2">How to read the labels</h2>
-  {{ label_legend() }}
+  {% if ctx.generated_at %}
+  <p class="cover__meta">Generated {{ ctx.generated_at | clock }}</p>
+  {% endif %}
 </div>
 {%- endmacro %}
 
 
 {#
-  One computed sentence per report, then the merged next-steps list.
-
-  Deliberately no synthesised cross-report prose. Nothing in this codebase can
-  honestly compute "Report B contradicts Report A", and writing it anyway is the
-  exact failure the provenance labelling exists to prevent.
+  One computed sentence per report - the same text as the report's own "Key
+  finding". Deliberately no synthesised cross-report prose: nothing in this
+  codebase can honestly compute "Report B contradicts Report A", and writing it
+  anyway is the exact failure the provenance labelling exists to prevent.
 #}
 {% macro executive_summary(ctx) -%}
-<h2 class="h2">Executive summary</h2>
-<div class="finding">
-  <div class="finding__head">
-    <span class="finding__title">Key finding per report</span>
-    {{ chip('computed', 'computed') }}
-  </div>
-  <div class="finding__body">
-    <table class="exec" width="100%">
-      {% for r in ctx.reports %}
-      <tr>
-        <td class="exec__letter">{{ r.letter }}</td>
-        <td>{{ (r.stats or {}).top_insight_text
-                or (r.stats or {}).unavailable_reason
-                or 'No statistics could be computed for this report.' }}</td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
-</div>
+<h2 class="h2">Key findings per report</h2>
+<table class="exec" width="100%">
+  {% for r in ctx.reports %}
+  <tr>
+    <td class="exec__letter">{{ r.letter }}</td>
+    <td>{{ (r.stats or {}).top_insight_text
+            or (r.stats or {}).unavailable_reason
+            or 'No statistics could be computed for this report.' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{%- endmacro %}
 
-<div class="finding finding--good">
-  <div class="finding__head">
-    <span class="finding__title">What to check next</span>
-    {{ chip('computed', 'computed') }}
-  </div>
-  <div class="finding__body">
-    <ul class="bullets">
-      {% for r in ctx.reports %}
-        {% if (r.stats or {}).recommendation_text %}
-        <li><strong>{{ r.letter }}</strong> &middot; {{ r.stats.recommendation_text }}</li>
-        {% endif %}
-      {% endfor %}
-    </ul>
-  </div>
+
+{#
+  How a report was built, in plain language rather than raw pipeline tokens run
+  together - "Built from X · N data points" plus each step as its own bullet,
+  instead of one squeezed line of <code> fragments with no room to breathe. The
+  generated timestamp is deliberately not here: it has exactly one home now (the
+  cover, or the single-report header), not one per report per section.
+#}
+{% macro report_method_block(r, show_head=true) -%}
+<div class="method">
+  {% if show_head %}<div class="method__head">{{ r.letter }} &middot; {{ r.report_name }}</div>{% endif %}
+  {% if r.source_files %}
+  <p class="method__sources">Built from {{ r.source_files | join(', ') }}{% if r.report_rows is not none %} &middot; {{ '{:,}'.format(r.report_rows) }} data points{% endif %}.</p>
+  {% endif %}
+  {% if r.operations %}
+  <ul class="method__steps">
+    {% for op in r.operations %}<li>{{ op }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {{ warning_banner(r.schema_warning) }}
 </div>
 {%- endmacro %}
 
 
 {% macro method_section(ctx) -%}
-<h2 class="h2">Method &amp; provenance</h2>
+<h2 class="h2">How these reports were built</h2>
 {% for r in ctx.reports %}
-<div class="method">
-  <div class="method__head">{{ r.letter }} &middot; {{ r.report_name }}</div>
-  {{ provenance_strip(r) }}
-  {{ warning_banner(r.schema_warning) }}
-</div>
-{% endfor %}
-{%- endmacro %}
-
-
-{% macro recommendations_section(ctx) -%}
-<h2 class="h2">Recommendations</h2>
-{% for r in ctx.reports %}
-<div class="method">
-  <div class="method__head">{{ r.letter }} &middot; {{ r.report_name }}</div>
-  {% if (r.stats or {}).recommendation_text %}
-  <p>{{ chip('computed', 'computed') }} {{ r.stats.recommendation_text }}</p>
-  {% endif %}
-  {% if r.rationale_bullets %}
-  <div class="ai-note">
-    {{ chip('AI note', 'ai') }} The model&rsquo;s reasoning, written before the data was read.
-    <ul class="bullets">{% for b in r.rationale_bullets %}<li>{{ b }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-</div>
+{{ report_method_block(r) }}
 {% endfor %}
 {%- endmacro %}
 
 
 {# ---------------------------------------------------- one full report body #}
 
-{% macro report_overview(r) -%}
+{#
+  `generated_at` is only passed in single-report mode - a combined document already
+  states it once, on the cover, and repeating it per report would be exactly the
+  kind of clutter this pass removed everywhere else.
+#}
+{% macro report_overview(r, generated_at=None) -%}
 {{ page_header(r) }}
+{% if generated_at %}<p class="scope">Generated {{ generated_at | clock }}</p>{% endif %}
 {{ ai_question(r) }}
-{{ scope_line(r) }}
-{{ provenance_strip(r) }}
 {{ warning_banner(r.schema_warning) }}
 {{ kpi_table(r) }}
 {{ chart_block(r) }}
 {%- endmacro %}
 
 
-{# `rich` is the HTML target saying it can lay out positioned marks. The PDF cannot,
-   so it takes the numeric table - see distribution_card. #}
+{#
+  `rich` is the HTML target saying it can lay out positioned marks. The PDF cannot,
+  so it takes the numeric table - see distribution_card. Distribution comes before
+  Findings: the shape of the data is the context the findings below it refer to.
+
+  The `.break` around Findings+AI notes is deliberate, not incidental: Distribution
+  needs to land on the same page as the KPI tiles and chart above it (that's the
+  point of the numbers - a reader shouldn't have to flip a page to connect "high
+  variance" to the chart it describes), so it stays right where report_overview
+  left off. Findings and AI notes are a different kind of reading - conclusions
+  rather than the data itself - and get a page of their own rather than crowding
+  onto whatever room is left under the chart.
+#}
 {% macro report_analysis(r, rich=false) -%}
-{{ findings(r) }}
 {{ distribution_card(r) if rich else distribution_table(r) }}
+<div class="break">
+{{ findings(r) }}
 {{ ai_rationale(r) }}
+</div>
 {%- endmacro %}

@@ -26,6 +26,9 @@ build/
 # Session data
 session_data/
 
+# scripts/preview_export.py output - rendered export files, regenerate anytime
+scripts/_export_previews/
+
 # Test output
 test_results/
 

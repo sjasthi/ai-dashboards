@@ -39,8 +39,6 @@
         padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   .h2:first-child { margin-top: 0; }
   p { margin: 0 0 10px; }
-  code { font-family: var(--mono); font-size: 12px; background: var(--bg);
-         color: var(--ink-2); padding: 2px 5px; border-radius: 4px; }
   .footnote, .caption { font-size: 13px; color: var(--ink-2); }
   .caption--lead { border-left: 3px solid var(--warn); background: var(--warn-bg);
                    color: #92400E; padding: 10px 14px; border-radius: 0 8px 8px 0;
@@ -54,15 +52,11 @@
           border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
   .chip--computed { color: var(--good); border-color: var(--good); }
   .chip--ai { color: var(--accent); border-color: var(--accent); }
+  .chip--warn { color: var(--warn); border-color: var(--warn); }
 
-  .legend { border-collapse: collapse; }
-  .legend td { vertical-align: top; padding: 0 16px 0 0; font-size: 13px; }
-  .legend__text { display: block; margin-top: 4px; color: var(--ink-2); }
-
-  /* ---------- provenance / banners ---------- */
-  .provenance { font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap;
-                gap: 6px; align-items: center; margin-bottom: 16px; }
-  /* Scope qualifies the numbers; it is not a warning, so it stays grey. */
+  /* ---------- meta / banners ---------- */
+  /* Shared by the single-report "Generated ..." line and (historically) the scope
+     line - small grey text under a title, not a warning, so it stays grey. */
   .scope { font-size: 13px; color: var(--ink-2); margin: 0 0 12px; }
   .banner { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 16px;
             border: 1px solid var(--border); }
@@ -72,11 +66,22 @@
   .kpi { border-collapse: separate; border-spacing: 10px 0; margin: 8px -10px 20px; width: 100%; }
   .kpi__cell { vertical-align: top; padding: 14px 16px; border: 1px solid var(--border);
                border-radius: 10px; background: var(--surface); }
+  /* Label and the outlier chip (Highest/Lowest only) ride the same row, chip
+     right-aligned - mirrors .stat-tile__label-row on screen. */
+  .kpi__label-row { display: flex; align-items: flex-start; justify-content: space-between;
+                     gap: 8px; }
   .kpi__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
                 color: var(--ink-2); font-weight: 600; }
   .kpi__value { font-size: 26px; font-weight: 700; line-height: 1.15; padding: 4px 0; }
+  /* Category name and its vs-average delta share one row, packed to the left -
+     mirrors .stat-tile__name-row. The delta stays in secondary ink: sitting above
+     or below average isn't a verdict here the way the Trend tile's own direction is. */
+  .kpi__name-row { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+  .kpi__name { font-size: 12px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+  .kpi__delta { font-size: 12px; font-weight: 600; color: var(--ink-2);
+                font-variant-numeric: tabular-nums; white-space: nowrap; }
   .kpi__sub { font-size: 12px; color: var(--ink-2); }
-  .kpi__chip { padding-top: 8px; }
+  .kpi__sub--tip { cursor: help; }
 
   /* ---------- chart ---------- */
   .chart { margin: 8px 0 20px; }
@@ -102,8 +107,15 @@
   .mini__value { text-align: right; font-weight: 600; }
   .mini__z { color: var(--ink-2); font-weight: 400; margin-left: 6px; }
 
+  /* Two elements share this look: a plain div (ai_note()) and a single-cell table
+     (ai_rationale - a table so xhtml2pdf keeps it whole across a page break, see
+     the macro comment). Padding is qualified by element so a table doesn't get it
+     twice (once from .ai-note, once from .ai-note td). */
   .ai-note { border: 1px dashed var(--accent); background: var(--accent-muted);
-             border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 10px; }
+             border-radius: 8px; font-size: 13px; margin-top: 10px; }
+  div.ai-note { padding: 10px 14px; }
+  table.ai-note { border-collapse: collapse; }
+  table.ai-note td { padding: 10px 14px; }
 
   /* ---------- distribution ---------- */
 
@@ -127,8 +139,6 @@
   .dist__label-row { display: flex; align-items: center; justify-content: space-between;
                       gap: 8px; margin-bottom: 10px; }
   .dist__label-row .dist__label { margin-bottom: 0; }
-  .dist__pair { font-size: 13px; color: var(--ink-2); margin-bottom: 2px; }
-  .dist__pair strong { color: var(--ink); float: right; }
   .dist__badge { display: inline-block; margin-top: 10px; padding: 2px 8px;
                  border: 1px solid var(--border); border-radius: 999px; font-size: 10px;
                  font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
@@ -136,10 +146,30 @@
   .dist__label-row .dist__badge { margin-top: 0; }
   .dist__badge--low { color: var(--good); background: #F0FDF4; border-color: #BBF7D0; }
   .dist__badge--high { color: var(--warn); background: var(--warn-bg); border-color: #FDE68A; }
-  .dist__pair--spread { cursor: help; }
-  .meter + .dist__pair--spread,
-  .dist__label-row + .dist__pair--spread { margin-top: 8px; }
   .dist__prose { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+
+  /* Range's plain-language headline and the Center/Spread label+value pairs all
+     share this look, matching RangeSummary.jsx's reuse of the same two classes for
+     its own lead sentence - "Most values fall between X → Y" reads as the same kind
+     of claim as "Average 3.3M", not a different kind of text. */
+  .dist__pair-label { font-size: 12px; color: var(--ink-2); cursor: help; }
+  .dist__pair-value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+                       color: var(--ink); }
+  .dist__lead { margin: 0 0 8px; line-height: 1.45; cursor: help; }
+  /* grid-auto-flow: column places label→value→label→value filling one column
+     before the next, so DOM order label,value,label,value renders as a labels row
+     over a values row - mirrors .dist-card__pair in dashboard.css exactly. */
+  .dist__pair-grid { display: grid; grid-template-rows: auto auto; grid-auto-flow: column;
+                      justify-content: start; column-gap: 28px; row-gap: 2px;
+                      margin-bottom: 10px; }
+  .dist__pair-grid--spread { margin-top: 8px; margin-bottom: 0; }
+
+  /* ---------- skew glyph (center cell) ---------- */
+  .skew-glyph { display: block; margin: 2px 0 10px; width: 100%; height: 34px; }
+  .skew-glyph__curve { stroke: var(--ink-3); stroke-width: 1.5; opacity: 0.35; }
+  .skew-glyph__tick { stroke-width: 2; cursor: help; }
+  .skew-glyph__tick--median { stroke: #0072B2; }
+  .skew-glyph__tick--mean { stroke: #0072B2; stroke-dasharray: 3 2; opacity: 0.6; }
 
   .bp__track { position: relative; height: 24px; margin: 2px 0; }
   .bp__whisker { position: absolute; top: 50%; left: 0; right: 0; height: 1px;
@@ -188,6 +218,17 @@
   .matrix__row--emphasis td { font-weight: 700; background: var(--accent-muted); }
   .matrix__absent { color: var(--ink-3); font-style: italic; }
 
+  /* ---------- brand ---------- */
+  /* Matches App.jsx's .app-nav__brand exactly (34px #2563eb rounded square, 18px
+     white three-bar icon, 1.25rem/700 wordmark in the nav's own #1e293b, not this
+     document's --ink) - the icon is a baked PNG, not inline SVG, because the same
+     markup has to render in the PDF shell too and xhtml2pdf has no SVG support. */
+  .brand { border-collapse: collapse; margin-bottom: 6px; }
+  .brand td { vertical-align: middle; padding: 0; }
+  .brand__icon-cell { padding-right: 10px; }
+  .brand__icon { width: 34px; height: 34px; display: block; }
+  .brand__word { font-size: 1.25rem; font-weight: 700; color: #1e293b; }
+
   /* ---------- cover / sections ---------- */
   .cover__title { font-size: 38px; font-weight: 700; margin: 6px 0; letter-spacing: -0.02em; }
   .cover__sub { font-size: 16px; color: var(--ink-2); margin-bottom: 24px; }
@@ -198,12 +239,17 @@
   .cover__name { font-weight: 600; }
   .cover__meta { font-size: 13px; color: var(--ink-2); }
 
-  .exec { width: 100%; border-collapse: collapse; }
-  .exec td { padding: 6px 0; vertical-align: top; font-size: 14px; }
+  .exec { width: 100%; border-collapse: collapse; border: 1px solid var(--border);
+          border-radius: 8px; overflow: hidden; font-size: 14px; }
+  .exec td { padding: 12px 14px; vertical-align: top; border-bottom: 1px solid var(--rule); }
+  .exec tr:last-child td { border-bottom: none; }
   .exec__letter { font-weight: 700; color: var(--accent); width: 32px; }
 
   .method { margin-bottom: 18px; }
   .method__head { font-weight: 600; margin-bottom: 4px; }
+  .method__sources { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+  .method__steps { margin: 4px 0 0 18px; padding: 0; font-size: 13px; color: var(--ink-2); }
+  .method__steps li { margin-bottom: 4px; }
 
   /* Printing this file from the browser gets the same pagination discipline as the
      PDF export, so a reader who chooses Ctrl+P instead of downloading the PDF
@@ -251,10 +297,6 @@
   </div>
   {% endfor %}
 
-  <div class="doc break">
-    {{ m.recommendations_section({'reports': reports}) }}
-  </div>
-
   {% if include_appendix %}
     {% for r in reports %}
       {% if r.appendix %}
@@ -267,10 +309,11 @@
   {% set r = reports[0] %}
 
   <div class="doc">
-    {{ m.report_overview(r) }}
+    {{ m.brand_header() }}
+    {{ m.report_overview(r, generated_at=r.generated_at) }}
     {{ m.report_analysis(r, rich=true) }}
-    <h2 class="h2">How to read the labels</h2>
-    {{ m.label_legend() }}
+    <h2 class="h2">How this report was built</h2>
+    {{ m.report_method_block(r, show_head=false) }}
   </div>
 
   {% if r.appendix %}
