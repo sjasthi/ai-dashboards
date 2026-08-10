@@ -446,12 +446,19 @@ def _report_context(
     letter: str,
     *,
     chart_images: Optional[Dict[str, str]],
+    dist_images: Optional[Dict[str, str]],
     include_appendix: bool,
     appendix_row_limit: int,
 ) -> Dict[str, Any]:
     """One report, flattened for the templates."""
     report = ((session.get("reports") or {}).get(letter)) or {}
     image = _sanitize_data_url((chart_images or {}).get(letter))
+    # Same idea as chart_image, same sanitizer, but for the Distribution card's
+    # Center-cell skew curve: xhtml2pdf cannot draw the inline SVG SkewGlyph.jsx
+    # uses, so the browser rasterises it (export.js's skewGlyphPngDataUrl) and
+    # POSTs it up like the chart. Only ever consumed by the PDF shell - the HTML
+    # export draws the real SVG itself, see distribution_card() in _macros.html.
+    dist_image = _sanitize_data_url((dist_images or {}).get(letter))
 
     return {
         "letter": letter,
@@ -461,6 +468,7 @@ def _report_context(
         "rationale_bullets": report.get("rationale_bullets") or [],
         "chart_type": report.get("chart_type"),
         "chart_image": image,
+        "dist_image": dist_image,
         "report_rows": report.get("report_rows"),
         "data_columns": report.get("data_columns") or [],
         "stats": report.get("stats") or {},
@@ -574,6 +582,7 @@ def build_export_context(
     report_types: Sequence[str],
     *,
     chart_images: Optional[Dict[str, str]] = None,
+    dist_images: Optional[Dict[str, str]] = None,
     include_appendix: bool = True,
     appendix_row_limit: int = MAX_APPENDIX_ROWS,
 ) -> Dict[str, Any]:
@@ -583,6 +592,7 @@ def build_export_context(
         _report_context(
             session, letter,
             chart_images=chart_images,
+            dist_images=dist_images,
             include_appendix=include_appendix,
             appendix_row_limit=appendix_row_limit,
         )

@@ -424,31 +424,36 @@
 
 .report-header__question em { font-style: italic; }
 
-/* Provenance: what produced these numbers, and when. Stacks under the section title
-   (see .section__title-group) so it reads as the methods note for the section. */
-.provenance {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+/* Build info: how the report was made, in plain sentences and steps rather than
+   a dense line of code fragments - a sentence naming what it was built from, then
+   each pipeline step as its own bullet. Mirrors report_method_block in the
+   exported document's _macros.html, so the web view and the export read the same
+   way. */
+.build-info__scope {
+  margin: 0 0 8px;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.build-info__sources {
+  margin: 0 0 6px;
   font-size: var(--size-xs);
   color: var(--color-text-muted);
 }
 
-.provenance__sep { color: var(--color-border); }
-
-.provenance code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 1px 5px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+.build-info__steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--size-xs);
   color: var(--color-text-secondary);
 }
 
-/* "Report data - Specifications": the toggle sits beside the eyebrow in
-   .report-data-card__head and opens the provenance line in the cell below it. */
+.build-info__steps li { margin-bottom: 4px; }
+.build-info__steps li:last-child { margin-bottom: 0; }
+
+/* "Report data - Build info": the toggle sits beside the eyebrow in
+   .report-data-card__head and opens the build-info cell below it. */
 .build-details__toggle {
   display: inline-flex;
   align-items: center;

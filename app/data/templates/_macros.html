@@ -397,6 +397,7 @@
 {% set s = r.stats or {} %}
 {% if s.available %}
 <h2 class="h2">Distribution</h2>
+{{ distribution_graphics_pdf(r) }}
 {{ distribution_strip(s) }}
 {% if s.skew_label or s.variance_label %}
 <p class="dist__prose">
@@ -406,6 +407,78 @@
 </p>
 {% endif %}
 {% endif %}
+{%- endmacro %}
+
+
+{#
+  The PDF's version of the Range/Centre/Spread graphics distribution_card() draws
+  in the HTML target. Range and Spread need no image: a box-and-whisker or a fill
+  bar is just adjacent table cells at computed widths, and xhtml2pdf lays those
+  out fine without `position` (see .bp-native / .meter-native in export_pdf.html).
+  Centre is different - SkewGlyph.jsx's curve is inline SVG, which xhtml2pdf
+  cannot draw at any fidelity - so its image is rasterised in the browser
+  (export.js's skewGlyphPngDataUrl, POSTed up as r.dist_image the same way the
+  chart PNG travels as r.chart_image) and just embedded here as an <img>. Absent
+  entirely from distribution_card() because that target draws the real SVG.
+#}
+{% macro distribution_graphics_pdf(r) -%}
+{% set s = r.stats or {} %}
+<table class="dist-graphics" width="100%">
+  <tr>
+    <td class="dist__cell" width="42%">
+      <div class="dist__label">Range</div>
+      {% set span = s.max - s.min %}
+      {% if span > 0 %}
+      <p class="dist__lead"><strong>Most values fall between {{ s.p25 | compact }} &rarr; {{ s.p75 | compact }}.</strong></p>
+      <table class="bp-native" width="100%" cellspacing="0" cellpadding="0">
+        <tr>
+          <td class="bp-native__whisker" style="width: {{ ((s.p25 - s.min) / span * 100) | round(2) }}%;"><div class="bp-native__line"></div></td>
+          <td class="bp-native__box" style="width: {{ ((s.median - s.p25) / span * 100) | round(2) }}%;"></td>
+          <td class="bp-native__tick"></td>
+          <td class="bp-native__box" style="width: {{ ((s.p75 - s.median) / span * 100) | round(2) }}%;"></td>
+          <td class="bp-native__whisker" style="width: {{ ((s.max - s.p75) / span * 100) | round(2) }}%;"><div class="bp-native__line"></div></td>
+        </tr>
+      </table>
+      <p class="dist__ends">min {{ s.min | compact }} &middot; max {{ s.max | compact }}</p>
+      {% else %}
+      <p class="dist__ends">every value is {{ s.median | compact }} &mdash; no spread to plot</p>
+      {% endif %}
+    </td>
+
+    <td class="dist__cell" width="30%">
+      <div class="dist__label-row">
+        <span class="dist__label">Centre</span>
+        {% if s.skew_label %}<span class="dist__badge">{{ s.skew_label }}</span>{% endif %}
+      </div>
+      {% if r.dist_image %}
+      <img src="{{ r.dist_image }}" class="skew-glyph-img" alt="" />
+      {% endif %}
+      <table class="dist__pair-grid-pdf" width="100%">
+        <tr><td class="dist__pair-label">Average</td><td class="dist__pair-label">Midpoint</td></tr>
+        <tr><td class="dist__pair-value">{{ s.mean | exact }}</td><td class="dist__pair-value">{{ s.median | exact }}</td></tr>
+      </table>
+    </td>
+
+    <td class="dist__cell dist__cell--last" width="28%">
+      <div class="dist__label-row">
+        <span class="dist__label">Spread</span>
+        {% if s.variance_level %}<span class="dist__badge">{{ s.variance_label }}</span>{% endif %}
+      </div>
+      {% if s.variance_level %}
+      <table class="meter-native meter-native--{{ s.variance_level }}" width="100%" cellspacing="0" cellpadding="0">
+        <tr>
+          <td class="meter-native__fill" style="width: {{ [s.cv, 100] | min | round(2) }}%;"></td>
+          <td class="meter-native__rest"></td>
+        </tr>
+      </table>
+      {% endif %}
+      <table class="dist__pair-grid-pdf" width="100%">
+        <tr><td class="dist__pair-label">Average variation</td><td class="dist__pair-label">Range of middle 50%</td></tr>
+        <tr><td class="dist__pair-value">{{ s.std | compact }}</td><td class="dist__pair-value">{{ s.iqr | compact }}</td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
 {%- endmacro %}
 
 

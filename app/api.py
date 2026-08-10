@@ -128,10 +128,17 @@ class ExportRequest(BaseModel):
     the frontend's chartLayout.js - rendering server-side would produce a chart
     that doesn't match the one the user just looked at. Anything unusable here is
     dropped and the document says the chart is missing; it is never fatal.
+
+    dist_images is the same idea for the Distribution card's skew curve: it is
+    inline SVG, which the PDF renderer cannot draw at all (unlike the chart, which
+    just has theming it can't match - this one it can't render at any fidelity),
+    so the browser rasterises it too. Only the PDF export uses it; the HTML export
+    draws the real SVG itself.
     """
     report_types: list[str] = Field(..., min_length=1, max_length=8)
     format: Literal["pdf", "html"] = "pdf"
     chart_images: dict[str, str] = Field(default_factory=dict)
+    dist_images: dict[str, str] = Field(default_factory=dict)
     include_appendix: bool = True
     appendix_row_limit: int = Field(MAX_APPENDIX_ROWS, ge=0, le=MAX_STORED_ROWS)
 
@@ -1543,9 +1550,12 @@ def _render_export(session, letters, request: ExportRequest):
     # otherwise ride along into the template context.
     images = {k.upper(): v for k, v in (request.chart_images or {}).items()
               if k.upper() in letters}
+    dist_images = {k.upper(): v for k, v in (request.dist_images or {}).items()
+                   if k.upper() in letters}
 
     kwargs = dict(
         chart_images=images,
+        dist_images=dist_images,
         include_appendix=request.include_appendix,
         appendix_row_limit=request.appendix_row_limit,
     )
@@ -1622,6 +1632,7 @@ def export_reports(
         # image for. Short of letter_count means charts are silently missing from
         # the document the user just downloaded.
         chart_images=len({k.upper() for k in (request.chart_images or {})} & set(letters)),
+        dist_images=len({k.upper() for k in (request.dist_images or {})} & set(letters)),
         bytes_out=len(body),
         duration_ms=_elapsed_ms(started),
     )

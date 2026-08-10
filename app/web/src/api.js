@@ -69,11 +69,12 @@ async function postForBinary(path, body) {
   };
 }
 
-function exportBody({ reportTypes, format, chartImages }) {
+function exportBody({ reportTypes, format, chartImages, distImages }) {
   return {
     report_types: reportTypes,
     format,
     chart_images: chartImages || {},
+    dist_images: distImages || {},
   };
 }
 
