@@ -2,12 +2,31 @@
 
 ## Description
 
-An AI-powered dashboard system that ingests one or more CSV or Excel files,
-analyzes them, and produces visualizations, reports, summaries, and recommendations.
+Upload your spreadsheets and let AI do the rest! 
 
-The app is two processes: a **FastAPI backend** (`app/api.py`) that runs the data
-pipeline and talks to the LLM, and a **React + Vite frontend** (`app/web/`) that
-renders the dashboard. Both must be running to use the app.
+This AI-powered dashboard accepts
+one or more CSV or Excel files, generates a summary of your data, and sends it to
+the AI for analysis. The AI identifies what matters most in your data and determines
+the best way to build your reports. 
+
+Using these recommendations, it then creates
+both the reports and visualizations, ready for you to download or share as a PDF or HTML file.
+
+This dashboard is designed to help anyone who isn't familiar with data analysis or
+report building. If that's not your strong suit, don't worry—the AI will surface
+ideas for what can be built from your data.
+
+It's just as useful for experienced analysts. By generating a quick analysis and
+surfacing report ideas automatically, it saves you the time of starting from scratch.
+
+> **Under the hood:** built on a deterministic data pipeline with AI-guided
+> insights — reliable analysis, not just AI guesswork.
+
+**What You Get**
+- 📊 Auto-generated charts & reports
+- 🧠 AI-driven insights, no manual analysis
+- 📁 CSV & Excel support
+- 📤 Export to PDF or HTML
 
 ---
 
@@ -75,9 +94,9 @@ cp .env.example .env
 
 | Variable | Purpose |
 |---|---|
-| `AI_BACKEND` | `groq` or `ollama` (default) for a fully local run |
+| `AI_BACKEND` | `gemini`, `groq` or `ollama` (default) for a fully local run |
 | `GROQ_API_KEY` | Free key at [console.groq.com/keys](https://console.groq.com/keys) |
-| `GEMINI_API_KEY` | Optional, tried first. Free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GEMINI_API_KEY` | Free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `LLM_MAX_RETRIES` | Validation-failure retries. Default `0` — each retry costs quota |
 
 Emailing a report additionally needs `SMTP_HOST`, `SMTP_USER` and `SMTP_PASSWORD`
@@ -124,6 +143,14 @@ below for API details, debugging tools, and the rest of the documentation set.
 ---
 
 # For Developers
+
+## Developer Report Browser
+
+Refer to the [dev_report_browser.md](docs/DEV_REPORT_BROWSER.md) file in docs for information on enabling the developer report browser.
+
+## Viewing the Metadata Database
+
+Refer to the [usage_db_browsing.md](docs/usage_db_browsing.md) file in docs for information on viewing the metadata database.
 
 ## API Reference
 
