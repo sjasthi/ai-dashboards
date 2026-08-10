@@ -15,7 +15,6 @@ xlrd==2.0.2                  # pandas engine for .xls
 
 # Charts
 plotly==6.8.0
-matplotlib==3.10.0
 
 # LLM providers
 groq==1.5.0

@@ -128,7 +128,7 @@ def _comparable_value_sets(series_a: pd.Series, series_b: pd.Series) -> tuple:
 
 
 def _fk_entity_stem(col_name: str) -> Optional[str]:
-    """Extract the entity name from a foreign-key-style column, e.g. "theme_id" -> "theme"."""
+    """Extract the entity name from a foreign-key-style column, e.g. "customer_id" -> "customer"."""
     name = col_name.strip().lower()
     for suffix in ("_id", "_key"):
         if name.endswith(suffix) and len(name) > len(suffix):
@@ -178,9 +178,9 @@ def _temporal_summary(series: pd.Series) -> tuple:
 
 
 def _fk_target_matches(entity: str, file_stem: str) -> bool:
-    """Does a foreign-key entity name (e.g. "theme") plausibly refer to a target
-    file (e.g. "themes")? Small surrogate-int ID columns (theme_id, color_id,
-    part_cat_id, ...) commonly have overlapping value ranges purely by chance,
+    """Does a foreign-key entity name (e.g. "customer") plausibly refer to a target
+    file (e.g. "customers")? Small surrogate-int ID columns (customer_id, order_id,
+    product_id, ...) commonly have overlapping value ranges purely by chance,
     so value overlap alone isn't a reliable enough signal - this requires the FK
     name to actually resemble the target file name too (tolerating simple
     pluralization via a shared-prefix check rather than exact match)."""
@@ -219,7 +219,7 @@ class SummaryGenerator:
         Two passes:
         1. Identical column names (case/whitespace insensitive) across every pair
            of files - e.g. both files have "customer_id".
-        2. Foreign-key style matches where the names differ - e.g. "theme_id" in
+        2. Foreign-key style matches where the names differ - e.g. "customer_id" in
            one file referencing the primary key "id" in another. This is the
            normalized-schema pattern (child FK column named "<entity>_id", parent
            PK column just named "id") that pass 1 can never catch.
@@ -338,7 +338,7 @@ class SummaryGenerator:
                     matched_pairs.add((file_a.filename, col_a.name.lower(), file_b.filename, col_b.name.lower()))
 
         # ---- Pass 2: foreign-key style matches with differing names ----
-        # e.g. file_a."theme_id" -> file_b."id"
+        # e.g. file_a."customer_id" -> file_b."id"
         for i in range(len(profiles)):
             for j in range(len(profiles)):
                 if i == j:
@@ -354,11 +354,11 @@ class SummaryGenerator:
                     if entity is None:
                         continue
 
-                    # Small surrogate-int ID columns (theme_id, color_id, ...)
+                    # Small surrogate-int ID columns (customer_id, order_id, ...)
                     # commonly have overlapping value ranges by pure chance, so
                     # also require the FK's name to actually resemble the target
-                    # file's name (e.g. "theme" -> "themes.csv") before trusting
-                    # value overlap as confirmation.
+                    # file's name (e.g. "customer" -> "customers.csv") before
+                    # trusting value overlap as confirmation.
                     if not _fk_target_matches(entity, file_b_stem):
                         continue
 

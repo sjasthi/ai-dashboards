@@ -368,8 +368,8 @@ def _recent(table, limit, where=None, params=()):
 def recent_events(limit=100, event=None):
     """Most recent events, newest first, optionally filtered to one event name.
 
-    Used by the tests, by scripts/show_usage.py, and by the token-gated admin
-    endpoint in Phase 3b. `props` comes back as a parsed dict rather than the JSON
+    Used by the tests, by scripts/show_usage.py, and the token-gated admin
+    endpoint. `props` comes back as a parsed dict rather than the JSON
     text actually stored - a caller reading raw SQL gets an opaque blob, which is
     exactly the thing that makes the sqlite CLI unpleasant for this table.
 

@@ -1,11 +1,8 @@
 import Card from './ui/Card';
 
 /**
- * The landing tab: what the app does.
- *
- * The usage counters used to live here as a row of cards. They are in the nav bar
- * now (NavStats), where they are visible from every tab and cost no vertical
- * space, so this page is purely the explanation.
+ * The landing tab: what the app does. Usage counters live in the nav bar
+ * (NavStats), visible from every tab, so this page is purely the explanation.
  */
 
 const STEPS = [
@@ -81,10 +78,7 @@ export default function HomeDashboard({ onStart }) {
       {/* Secondary by design - scope for someone who goes looking, not something
           that competes with the steps above. */}
       <p className="home-capabilities">
-        Supports .csv, .xls and .xlsx with per-sheet selection · six report
-        patterns (ranking, distribution, composition, trend, comparison, outlier)
-        · six chart types (bar, line, scatter, pie, histogram, box) · automatic
-        KPIs, outlier detection and data-quality warnings · relationship detection
+        Supports .csv, .xls and .xlsx with per-sheet selection · outlier detection and data-quality warnings · relationship detection
         across files · PDF, HTML and email export.
       </p>
     </div>

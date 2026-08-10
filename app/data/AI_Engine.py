@@ -39,8 +39,7 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
 # Gemini is tried FIRST, ahead of Groq: its free-tier quota is a separate account
 # entirely, so spending it first preserves the shared Groq daily/hourly limit for
-# when Gemini is exhausted or fails. Chosen over other free tiers because our prompts
-# run 8k-30k input tokens, which Cerebras' free 8k context window can't hold at all.
+# when Gemini is exhausted or fails.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
@@ -89,23 +88,11 @@ def send_prompt(prompt, session_id=None, system_prompt=None, meta=None):
             prefix across requests - identical every call, it is what providers
             can prefix-cache, and it keeps the "how to think" text out of the
             per-dataset user message.
-        meta: Optional dict, filled in with which provider actually answered.
-
-            This function used to return only the text, so a caller wanting to
-            record the provider had nothing to read and could only log AI_BACKEND
-            - which is the provider that was *configured*, not the one that
-            answered, and is therefore silently wrong every time the ladder below
-            falls through. That made the most useful thing about the fallback
-            chain (how often the primary is failing) invisible in normal operation.
-
-            An out-param rather than a changed return value so every existing
-            caller is unaffected, and rather than a module-level global because
-            /api/analyze-full is a sync def that Starlette runs in its threadpool:
-            two concurrent analyses genuinely execute at once and would race a
-            global, attributing one request's provider to the other. A dict the
-            caller allocates per request cannot race.
-
-            Keys set: provider, model, provider_failures, used_fallback.
+        meta: Optional dict; filled in with which provider actually answered
+            (provider, model, provider_failures, used_fallback). An out-param
+            rather than a return value so callers are unaffected, and rather than
+            a module-level global so concurrent requests in the threadpool can't
+            race a shared value.
 
     Returns:
         Cleaned & parsed JSON object as dict
@@ -368,9 +355,7 @@ def _extract_and_clean_json(text: str) -> dict:
         print(f"[AI_Engine] Failed to parse JSON: {str(e)}")
         raise ValueError(f"Failed to parse JSON: {str(e)}")
 
-# ===================
-# raw and cleaned json files for testing - move/remove later
-# ===================
+# ---- Debug artifact writers (see SAVE_DEBUG_FILES above) ----
 def _save_debug_files(raw_response: str, cleaned_response: dict, session_id=None) -> None:
     try:
         session = SessionManager(session_id=session_id)

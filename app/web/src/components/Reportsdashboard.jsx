@@ -30,7 +30,7 @@ export default function ReportsDashboard({
   activeType = 'A',
   onSelectType,
   recommendations,
-  fileProfiles,
+  fileMetadata,
   generating,
   errors = {},
   sessionId,
@@ -139,7 +139,7 @@ export default function ReportsDashboard({
 
           <ReportDataCard
             report={report}
-            fileProfiles={fileProfiles}
+            fileMetadata={fileMetadata}
             scopeText={stats?.scope_text}
             showBuildInfo={showBuildInfo}
             onToggleBuildInfo={() => setShowBuildInfo((s) => !s)}
@@ -274,12 +274,12 @@ function ReportHeader({
  * leads the block for the same reason it used to lead the provenance line: it is
  * what stops someone reading the headline number as a total for the whole file.
  */
-function BuildInfo({ report, fileProfiles, scopeText }) {
+function BuildInfo({ report, fileMetadata, scopeText }) {
   if (!report) return null;
 
   const files = report.source_files?.length
     ? report.source_files
-    : (fileProfiles || []).map((f) => f.name);
+    : (fileMetadata || []).map((f) => f.name);
 
   return (
     <div className="build-info">
@@ -311,7 +311,7 @@ function BuildInfo({ report, fileProfiles, scopeText }) {
  * the head row's own height never changes.
  */
 function ReportDataCard({
-  report, fileProfiles, scopeText, showBuildInfo, onToggleBuildInfo, showTable, onToggleTable,
+  report, fileMetadata, scopeText, showBuildInfo, onToggleBuildInfo, showTable, onToggleTable,
 }) {
   const rows = report.report_rows || 0;
   const columns = (report.data_columns || []).length;
@@ -344,7 +344,7 @@ function ReportDataCard({
 
       {showBuildInfo && (
         <div className="report-data-card__cell">
-          <BuildInfo report={report} fileProfiles={fileProfiles} scopeText={scopeText} />
+          <BuildInfo report={report} fileMetadata={fileMetadata} scopeText={scopeText} />
         </div>
       )}
 
@@ -538,15 +538,11 @@ function AiInsightsCard({ bullets }) {
 }
 
 /**
- * One finding: a ruled row inside the rail, no longer a card of its own.
+ * One finding: a ruled row inside the rail. What marks model-authored text is the
+ * AI note inside the row, not a chip.
  *
- * Every one of these used to carry a "computed" chip. When all four say the same
- * thing the chip stops distinguishing anything - what marks model-authored text is
- * the AI note inside the row, which is where the distinction is actually load-bearing.
- *
- * The amber variant survives the merge as a tinted row rather than a tinted card. It
- * still has to be able to shout: it is the only thing on the page that says a number
- * above it is standing on a hole in the data.
+ * The amber variant still has to be able to shout: it is the only thing on the page
+ * that says a number above it is standing on a hole in the data.
  */
 function InsightCard({ title, icon, variant, children }) {
   return (
@@ -696,14 +692,10 @@ function DistributionCard({ stats, report }) {
 const VARIANCE_CHIP = { low: 'good', moderate: 'neutral', high: 'warn' };
 
 /**
- * The ten raw figures, plus outliers and data quality. No longer the page's
- * distribution summary - it is what DistributionCard's disclosure opens - but
- * still the place every exact value lives, and still what the PDF export renders.
- *
- * Outliers and data quality used to be their own cards beside the chart. They
- * moved here because they're both measurements about the same numbers this strip
- * already lays out, not a separate reading of the report - and putting them
- * behind the same disclosure keeps the default view to what most readers need.
+ * The ten raw figures, plus outliers and data quality - what DistributionCard's
+ * disclosure opens, and what the PDF export renders. Outliers/quality live here
+ * (not separate cards) since they're measurements about the same numbers this
+ * strip already lays out, keeping the default view to what most readers need.
  */
 function DistributionStrip({ stats, report }) {
   const items = [

@@ -5,7 +5,7 @@ AI-generated analysis reports.
 
 > This app is only half the system. It calls a FastAPI backend on
 > `http://localhost:8000`, which must be running for anything beyond the static UI to
-> work. See [RUNNING_APP.md](../../RUNNING_APP.md) for the full two-terminal setup.
+> work. See the root [README.MD](../../README.MD) for the full two-terminal setup.
 
 ---
 
@@ -35,7 +35,7 @@ npm --prefix app/web run build
 npm --prefix app/web run preview
 ```
 
-Remember to start the backend in a second terminal, or every upload will fail:
+Start the backend in a second terminal first — uploads fail otherwise:
 
 ```bash
 uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
@@ -166,6 +166,5 @@ top of what the backend sends.
 
 ## History
 
-This app was migrated from vanilla JS to React on 2026-07-17. The dead vanilla files
-(`main.js`, `src/js/*`, `template.html`, and seven stylesheets) were removed on
-2026-07-28. See [docs/REACT_MIGRATION_SUMMARY.md](../../docs/REACT_MIGRATION_SUMMARY.md).
+This app was migrated from vanilla JS to React on 2026-07-17; the dead vanilla
+files were removed shortly after.

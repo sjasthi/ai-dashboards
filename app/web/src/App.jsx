@@ -48,6 +48,17 @@ export default function App() {
   const [selections, setSelections] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
 
+  // Re-reads the nav bar's counters. Called on arrival and again after anything that
+  // actually moves one of them server-side (an upload's analysis, a report finishing
+  // its build) - otherwise the numbers shown are frozen at whatever they were on
+  // page load until the next full refresh.
+  const refreshStats = useCallback(() => {
+    return fetchStats()
+      .then(data => setStats(data))
+      // A missing counter is not worth an error message in the nav bar.
+      .catch(() => setStats(null));
+  }, []);
+
   // Read once, on arrival. The visit is reported before the counters are read, so
   // the person arriving is included in the number they are about to see rather
   // than showing up on someone else's next page load.
@@ -58,19 +69,15 @@ export default function App() {
       ? sendEvents([{ event: 'visit_started' }])
       : Promise.resolve(null);
 
-    arrival
-      .then(() => fetchStats())
-      .then(data => { if (!cancelled) setStats(data); })
-      // A missing counter is not worth an error message in the nav bar.
-      .catch(() => { if (!cancelled) setStats(null); });
+    arrival.then(() => { if (!cancelled) refreshStats(); });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshStats]);
 
   // Populated once /api/analyze-full succeeds
   const [sessionId, setSessionId] = useState(null);
   const [recommendations, setRecommendations] = useState(null); // { recommendations: [...] }
-  const [fileProfiles, setFileProfiles] = useState(null);
+  const [fileMetadata, setFileMetadata] = useState(null);
 
   // Generated reports, cached by report type ("A" | "B" | "C"). Held here rather
   // than in the Reports page so switching between them - or comparing all three -
@@ -154,6 +161,7 @@ export default function App() {
         if (generation.current !== gen) return null;
         reportsRef.current = { ...reportsRef.current, [letter]: data };
         setReports(reportsRef.current);
+        refreshStats();
         setReportErrors((prev) => {
           if (!(letter in prev)) return prev;
           const next = { ...prev };
@@ -185,7 +193,7 @@ export default function App() {
 
     inFlight.current.set(letter, entry);
     return entry.promise;
-  }, []);
+  }, [refreshStats]);
 
   const requestReport = useCallback((letter) => {
     setActiveReportType(letter);
@@ -411,9 +419,9 @@ export default function App() {
             setExpanded={setExpanded}
             setSessionId={setSessionId}
             setRecommendations={setRecommendations}
-            setFileProfiles={setFileProfiles}
+            setFileMetadata={setFileMetadata}
             onStart={startNewSession}
-            onDone={() => setActiveTab('analysis')}
+            onDone={() => { setActiveTab('analysis'); refreshStats(); }}
           />
         )}
         {activeTab === 'analysis' && (
@@ -447,7 +455,7 @@ export default function App() {
             /* Only a fallback for a report that names no source files, and a
                replayed report always names its own - the live profiles would be
                the wrong files entirely. */
-            fileProfiles={replay ? null : fileProfiles}
+            fileMetadata={replay ? null : fileMetadata}
             generating={replay ? replay.generating : generating}
             errors={replay ? replay.errors : reportErrors}
             replaySessionId={replay ? replay.sessionId : null}

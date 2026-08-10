@@ -4,9 +4,8 @@ import { PLOT_CONFIG, buildLayout } from '../../chartLayout';
 /**
  * Renders a server-built Plotly figure.
  *
- * Plotly is loaded once as a global by index.html. There is no dynamic loader here:
- * the page previously carried one pinned to a *different* version than the tag in
- * index.html, so it could only ever be dead code hiding a version mismatch.
+ * Plotly is loaded once as a global by index.html; do not add a second dynamic
+ * loader here (risks a version mismatch).
  */
 export default function Plot({ chart, stats, compact = false, className }) {
   const ref = useRef(null);

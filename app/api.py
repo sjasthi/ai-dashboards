@@ -191,18 +191,10 @@ SESSIONS = {}  # Store uploaded file metadata by session_id
 
 
 def generate_session_id():
-    """Generate a unique session ID.
-
-    The random suffix is not decoration. This used to be the timestamp alone, at
-    second resolution, and `SESSIONS[session_id] = ...` below overwrites without
-    checking - so two users starting an upload in the same second shared a key and
-    the second one silently replaced the first. The first user's browser kept the
-    id it was given and then built every report from the other user's data.
-
-    The timestamp prefix stays because the id doubles as the session_data/<id>/
-    directory name and as part of the export filename, and sorting by name is how
-    you find a run. Nothing parses it back into a datetime.
-    """
+    """Generate a unique session ID: timestamp prefix (for sortable session_data/
+    dirs and export filenames) + a random suffix, since `SESSIONS[session_id] = ...`
+    overwrites without checking and two uploads in the same second would collide
+    on the timestamp alone."""
     return f"{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:6]}"
 
 
@@ -226,22 +218,11 @@ def client_id(x_client_id: Optional[str] = Header(None)):
 
 
 def track_props(event, client, session, props):
-    """Log one event whose props are already a dict.
-
-    The dict-taking form exists for POST /api/events, whose props come from the
-    browser. Routing those through track()'s **kwargs would let a prop named
-    "client" or "session" collide with the parameter of the same name and raise
-    TypeError at the call site - before telemetry's own swallowing guard, so it
-    would 500 the request. Untrusted keys never become keyword arguments.
-
-    The try/except is deliberately a *second* guard: telemetry.log_event already
-    swallows everything internally. One guard is not enough for a rule as absolute
-    as "telemetry must never fail a user request" - it makes every upload in the
-    app depend on a try/except in another module staying correct forever. This one
-    holds even if that one is broken, and the argument-evaluation that happens at
-    the call sites below (dict comprehensions over probe results, sums over
-    profiles) is only covered here.
-    """
+    """Log one event whose props are already a dict (used by POST /api/events,
+    whose props come from the browser) rather than via track()'s **kwargs, so an
+    untrusted prop key like "client" can't collide with this function's own
+    parameter names. Wrapped in try/except as a second guard on top of
+    telemetry.log_event's own - telemetry must never fail a user request."""
     if not TELEMETRY_AVAILABLE:
         return
     try:
@@ -482,7 +463,7 @@ async def inspect_uploaded_files(
                 results.append({
                     "name": file.filename, "size": 0, "kind": "unknown",
                     "sheets": [], "rows": None, "columns": None,
-                    "error": "This file is empty.",
+                    "error": "This file is empty.", "empty": True,
                 })
                 continue
 
@@ -561,7 +542,7 @@ def analyze_files_full(
         {
             "session_id": "20260704_120530",
             "status": "complete",
-            "file_profiles": [...],
+            "file_metadata": [...],
             "prompt": "...",
             "recommendations": {...},
             "analysis": {...}
@@ -616,10 +597,13 @@ def analyze_files_full(
             # so it can run off the event loop, and the underlying spooled file
             # reads the same bytes without one.
             content = file.file.read()
-            
+
+            # Skipped, not fatal: an empty file shouldn't block analysis of the
+            # rest of the batch. The upload screen already excludes these from
+            # what it submits - this is the backstop for anything that slips through.
             if len(content) == 0:
-                raise HTTPException(status_code=400, detail=f"File {file.filename} is empty")
-            
+                continue
+
             with open(filepath, 'wb') as f:
                 f.write(content)
             
@@ -826,13 +810,12 @@ def analyze_files_full(
             file_metadata=file_metadata,
         )
 
-        # NOTE: this "file_profiles" response field is actually `file_metadata`
-        # (name/size/rows/columns). The full per-column `file_profiles` computed above
-        # stays in SESSIONS; the report endpoint reads temporal granularity out of it.
+        # The full per-column FileProfile objects stay server-side in SESSIONS; the
+        # response carries only the lighter file_metadata (name/size/rows/columns).
         return {
             "session_id": session_id,
             "status": "complete",
-            "file_profiles": file_metadata,
+            "file_metadata": file_metadata,
             "prompt": prompt,
             "recommendations": recommendations,
             "analysis": recommendations
@@ -927,23 +910,15 @@ def _describe_operations(operations):
 def _build_report(session, session_id, report_type):
     """Everything after the cache check: generate_report → chart → stats → payload.
 
-    Lifted verbatim out of /api/generate-report so that a replay of a saved session
-    goes down the *same* code path a live request does. A second render path would
-    drift from this one within a release, and then the developer report browser
-    would be showing something the app never produces.
+    Lifted out of /api/generate-report so a replay of a saved session goes down the
+    same code path a live request does. `session` is the SESSIONS entry (or one
+    rehydrated from disk by `rehydrate_session`) - only "recommendations", "tables"
+    and "file_profiles" are read from it, which is what makes replay possible.
 
-    `session` is the SESSIONS entry (or one rehydrated from disk by
-    `rehydrate_session`) - this function only reads "recommendations", "tables" and
-    "file_profiles" from it, which is exactly what makes replay possible.
-
-    Returns (stored, diagnostics):
-        stored       the response payload plus a "data" key holding up to
-                     MAX_STORED_ROWS raw rows for the export appendix. The
-                     response is `stored` minus that key.
-        diagnostics  chart/stats failure class names, for telemetry only. They are
-                     returned alongside rather than folded into the payload because
-                     they are observations about the build, not part of the
-                     response contract the frontend renders.
+    Returns (stored, diagnostics): `stored` is the response payload plus a "data"
+    key of up to MAX_STORED_ROWS raw rows for the export appendix (the response is
+    `stored` minus that key); `diagnostics` is chart/stats failure info for
+    telemetry only, not part of the response contract.
 
     Raises HTTPException(422) when the report itself could not be built.
     """
@@ -1205,7 +1180,7 @@ def generate_report_endpoint(
 
 
 # ============================================================================
-# ADMIN — the developer report browser (Phase 3b)
+# ADMIN — the developer report browser (internal/dev-only, not user-facing)
 # ============================================================================
 # Token-gated, developer-only routes for inspecting and re-opening past sessions.
 # Nothing here is reachable from the user-facing app: there is no nav entry and the
@@ -1260,17 +1235,11 @@ def _require_session_store():
 def rehydrate_session(session_id):
     """Rebuild a SESSIONS entry from disk. No LLM call.
 
-    Only three things are needed to make a session real again: the recommendations
-    (stored verbatim in the manifest), the tables (rebuilt by re-reading the saved
-    workbooks through DataLoader), and the file profiles.
-
-    Profiles are *re-derived* rather than read back from the manifest, even though
-    the manifest holds a copy. The manifest's are plain JSON, and the one consumer
-    on this path - _axis_granularity - walks `profile.columns[].temporal_granularity`
-    as attributes, so dicts would silently yield no granularity and every date axis
-    would replay at day resolution. Re-profiling is deterministic and involves no
-    model call, so the honest fix is to recompute rather than to half-restore. The
-    manifest copy stays for inspection.
+    Needs three things: recommendations (stored verbatim in the manifest), tables
+    (rebuilt by re-reading the saved workbooks through DataLoader), and file
+    profiles. Profiles are re-derived rather than read from the manifest's plain-JSON
+    copy, since `_axis_granularity` needs them as real objects with attribute access
+    - re-profiling is deterministic and costs no LLM call.
 
     Raises:
         HTTPException: 404 if the session was never saved, 410 if its source files
@@ -1411,8 +1380,8 @@ def admin_replay_report(session_id: str, letter: str, _token: str = Depends(admi
         return _response_of(cached)
 
     # HTTPException (a 422 from a recommendation that no longer executes) is left to
-    # propagate untouched - D6's whole point is that a replay failing where the live
-    # run succeeded is a finding, and the viewer must show it rather than a blank.
+    # propagate untouched: a replay failing where the live run succeeded is itself a
+    # finding the viewer must show, not hide behind a blank page.
     stored, _diagnostics = _build_report(session, session_id, letter)
     session.setdefault("reports", {})[letter] = stored
     return _response_of(stored)

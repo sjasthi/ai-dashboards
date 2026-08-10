@@ -17,12 +17,9 @@ class DeriveColumn(BaseModel):
     bins: List[float] = []
     bin_labels: List[str] = []
     quantiles: List[float] = []
-    # For method="compute": arithmetic on source_column (the left operand) against
-    # either another column (right_column) or a constant (right_value). operator is a
-    # closed enum so the whole response stays expressible as a JSON Schema for
-    # provider-side structured decoding (same reason Aggregation.func is closed).
-    # This exists so "line_total = unitPrice * quantity" has a real home - without it
-    # the model abused regex_extract for arithmetic and produced garbage columns.
+    # For method="compute": arithmetic on source_column (left operand) against
+    # right_column or right_value. Closed enum so the response stays expressible
+    # as a JSON Schema for provider-side structured decoding.
     operator: Optional[Literal["+", "-", "*", "/"]] = None
     right_column: Optional[str] = None
     right_value: Optional[float] = None
@@ -32,12 +29,9 @@ class JoinKeyPair(BaseModel):
     right: str
 
 class Aggregation(BaseModel):
-    # A single "aggregate this column with this function" instruction. Replaces the
-    # former open-ended {"column": "func"} dict so the whole response is expressible
-    # as a closed JSON Schema (a requirement for provider-side structured decoding -
-    # an arbitrary-key object has no schema). func is a closed enum for the same
-    # reason, and it matches chart_builder.AGG_SUFFIXES so "{column}_{func}" outputs
-    # still humanize correctly.
+    # "Aggregate this column with this function." Closed enum (not an open-ended
+    # dict) so the response is expressible as a JSON Schema; func matches
+    # chart_builder.AGG_SUFFIXES so "{column}_{func}" outputs humanize correctly.
     column: str
     func: Literal["sum", "mean", "count", "min", "max", "median", "std", "nunique"]
 
@@ -51,7 +45,7 @@ class Operation(BaseModel):
     sort_by: Optional[str] = None
     ascending: bool = True
     limit: Optional[int] = None
-    join_keys: List[JoinKeyPair] = []  # [{"left": "theme_id", "right": "id"}]
+    join_keys: List[JoinKeyPair] = []  # [{"left": "customer_id", "right": "id"}]
     join_type: Optional[str] = None
 
     @field_validator("aggregations", mode="before")
