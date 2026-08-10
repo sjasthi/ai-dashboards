@@ -1,9 +1,47 @@
+import math
+import re
+import unicodedata
 import warnings
 
 import pandas as pd
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from dataclasses import dataclass
 import os
+
+
+# Everything a person would call "the same spelling" collapses to the same key: case,
+# spacing, punctuation, hyphens and accents. Deliberately NOT edit distance - "GTXPro"
+# and "GTX Pro" are the same product, "GTX Pro" and "GTX Plus Pro" are not, and no
+# distance threshold separates those two cases reliably.
+#
+# Lives here, beside _comparable_value_sets, because this module is the leaf of
+# app.data - report_builder and response_validator both depend on it, and both need
+# this. Moving it the other way would point a dependency away from the leaf.
+# \W rather than [^a-z0-9], so scripts without a Latin lowercase form survive. The
+# ASCII form would strip Japanese, Greek and Cyrillic keys to nothing, which is the
+# very trap _slugify falls into below.
+_KEY_NOISE_RE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _normalize_key_value(value: Any) -> Optional[str]:
+    """A join key value reduced to its letters and digits, or None if none are left.
+
+    None rather than "" for empties is load-bearing: it is what stops "-", "  " and
+    "??" from all normalizing to the same key and matching each other.
+
+    Not shared with export_builder._slugify, which looks similar but is wrong for
+    keys three times over: it drops non-Latin scripts entirely (so two different
+    Japanese names would both become "" and collide), it inserts "-" separators when
+    the whole point here is removing them, and it truncates at 48 characters, which
+    would merge two long names sharing a prefix.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    decomposed = unicodedata.normalize("NFKD", str(value))
+    folded = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return _KEY_NOISE_RE.sub("", folded.casefold()) or None
 
 @dataclass
 class ColumnProfile:
@@ -163,6 +201,12 @@ class SummaryGenerator:
         for file_path, df in data_loader.files:
             filename = os.path.basename(file_path)
             profile = self.profile_df_with_ydata(filename, df)
+            # Structural repairs DataLoader made while loading this table (a
+            # shifted header row, a relabeled unnamed column) go through the
+            # same quality_flags channel as every other data-quality note, so
+            # the LLM sees them instead of silently working from a repaired
+            # schema it has no idea was repaired.
+            profile.quality_flags = profile.quality_flags + data_loader.load_warnings.get(filename, [])
             profiles.append(profile)
         return profiles
 
@@ -205,6 +249,38 @@ class SummaryGenerator:
                 return None
             return None
 
+        def spelling_overlap(file_a_name, col_a_name, file_b_name, col_b_name):
+            """Overlap once case, spacing and punctuation are ignored.
+
+            Two files that spell a shared key differently ("GTXPro" against "GTX
+            Pro") overlap by nothing, so the discard below drops the relationship
+            and the model is never told the files relate - it then never proposes
+            the join, and a whole cross-file report is lost rather than merely
+            degraded. report_builder can join these, so detection should see them.
+
+            Only meaningful on the string branch: _comparable_value_sets returns
+            floats when both columns parse as numeric, and normalizing a float is
+            meaningless.
+            """
+            df_a = dfs_by_filename.get(file_a_name)
+            df_b = dfs_by_filename.get(file_b_name)
+            if df_a is None or df_b is None:
+                return None
+            try:
+                values_a, values_b = _comparable_value_sets(df_a[col_a_name], df_b[col_b_name])
+                if not values_a or not values_b:
+                    return None
+                if not (isinstance(next(iter(values_a)), str)
+                        and isinstance(next(iter(values_b)), str)):
+                    return None
+                norm_a = {n for n in map(_normalize_key_value, values_a) if n}
+                norm_b = {n for n in map(_normalize_key_value, values_b) if n}
+                if not norm_a or not norm_b:
+                    return None
+                return len(norm_a & norm_b) / min(len(norm_a), len(norm_b))
+            except Exception:
+                return None
+
         # ---- Pass 1: identical column names ----
         for i in range(len(profiles)):
             for j in range(i + 1, len(profiles)):
@@ -224,26 +300,41 @@ class SummaryGenerator:
                     overlap_ratio = value_overlap(file_a.filename, col_a.name, file_b.filename, col_b.name)
 
                     # A name match with verified near-zero overlap is almost
-                    # certainly a coincidence (e.g. two unrelated "id" columns).
+                    # certainly a coincidence (e.g. two unrelated "id" columns) -
+                    # unless the values do correspond and are merely spelled
+                    # differently, which is a real relationship the join can honour.
+                    normalized_ratio = None
                     if overlap_ratio is not None and overlap_ratio < 0.05:
-                        continue
+                        normalized_ratio = spelling_overlap(
+                            file_a.filename, col_a.name, file_b.filename, col_b.name
+                        )
+                        if normalized_ratio is None or normalized_ratio < 0.05:
+                            continue
 
                     is_key_like = col_a.role == "primary_key" or col_b.role == "primary_key"
-                    if overlap_ratio is not None and overlap_ratio > 0.5:
+                    if normalized_ratio is not None:
+                        # The values correspond, but not literally. Capped at medium
+                        # so the model weighs it as the softer evidence it is.
+                        confidence = "medium"
+                    elif overlap_ratio is not None and overlap_ratio > 0.5:
                         confidence = "high"
                     elif is_key_like or overlap_ratio is not None:
                         confidence = "medium"
                     else:
                         confidence = "low"  # name matched but overlap unverified
 
-                    relationships.append({
+                    record = {
                         "file_a": file_a.filename,
                         "column_a": col_a.name,
                         "file_b": file_b.filename,
                         "column_b": col_b.name,
                         "value_overlap_ratio": round(overlap_ratio, 3) if overlap_ratio is not None else None,
                         "confidence": confidence
-                    })
+                    }
+                    if normalized_ratio is not None:
+                        record["normalized_overlap_ratio"] = round(normalized_ratio, 3)
+                        record["spelling_variants"] = True
+                    relationships.append(record)
                     matched_pairs.add((file_a.filename, col_a.name.lower(), file_b.filename, col_b.name.lower()))
 
         # ---- Pass 2: foreign-key style matches with differing names ----
@@ -307,8 +398,11 @@ class SummaryGenerator:
             null_count = int(series.isnull().sum())
             null_percent = (null_count / len(df)) * 100 if len(df) else 0.0
 
-            # Detect role
-            role = detect_column_role(col_name, dtype, unique_count, len(df))
+            # Detect role. Excel headers can be numeric, a date, or blank (see
+            # data_loader.py's deliberate "strip only string headers" comment) -
+            # str() here is what makes ColumnProfile.name reliably a str for every
+            # downstream .lower()/.strip() call, matching its type hint.
+            role = detect_column_role(str(col_name), dtype, unique_count, len(df))
 
             # Numeric stats if available
             min_val = max_val = mean_val = None
@@ -343,7 +437,7 @@ class SummaryGenerator:
                 ]
 
             col_profiles.append(ColumnProfile(
-                name=col_name,
+                name=str(col_name),
                 dtype=dtype,
                 unique_values=unique_count,
                 null_count=null_count,

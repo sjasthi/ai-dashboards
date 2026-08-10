@@ -1,71 +1,52 @@
-import { useEffect, useState } from 'react';
 import Card from './ui/Card';
-import StatTile from './ui/StatTile';
-import { fetchStats, sendEvents } from '../api';
-import { isNewVisit } from '../clientId';
 
 /**
- * The landing tab: what the app does, and how much it has been used.
+ * The landing tab: what the app does.
  *
- * Counters come from GET /api/stats, which is aggregate-only and needs no session.
- * When the backend is down the fetch fails quietly, `stats` stays null, and
- * StatTile renders an em-dash - the description below it is static and still
- * renders, so the page never goes blank because a counter was unavailable.
+ * The usage counters used to live here as a row of cards. They are in the nav bar
+ * now (NavStats), where they are visible from every tab and cost no vertical
+ * space, so this page is purely the explanation.
  */
 
 const STEPS = [
   {
     title: 'Upload',
-    body: 'Add CSV or Excel files. Multi-sheet workbooks are read sheet by sheet, so you choose which worksheets to include before anything runs.',
+    subtitle: 'Drop in your files.',
+    body: "Upload your CSV or Excel spreadsheets and choose the worksheets you want to use. We'll take it from there.",
   },
   {
-    title: 'Analyse',
-    body: 'Each file is profiled - column types, ranges, and relationships across files - and an AI model proposes the reports worth building from it.',
+    title: 'Let AI do the thinking',
+    subtitle: "We'll find what matters.",
+    body: 'Your data is analyzed automatically, and AI figures out which insights, charts, and reports are most useful.',
   },
   {
-    title: 'Report',
-    body: 'Each report is built from your actual rows, with a chart, computed KPIs, and any data-quality warnings. Export to PDF or HTML, or send it by email.',
+    title: 'Get your reports',
+    subtitle: 'Ready to use.',
+    body: [
+      'Your reports are built from your data with useful charts, key numbers, and a variety of other metrics.',
+      "Once you're done download them as a PDF or HTML. You can even share them by email!",
+    ]
   },
 ];
 
 export default function HomeDashboard({ onStart }) {
-  const [stats, setStats] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // The visit is reported before the counters are read, so the person arriving
-    // is included in the number they are about to see rather than showing up on
-    // someone else's next page load.
-    const arrival = isNewVisit()
-      ? sendEvents([{ event: 'visit_started' }])
-      : Promise.resolve(null);
-
-    arrival
-      .then(() => fetchStats())
-      .then(data => { if (!cancelled) setStats(data); })
-      // A missing counter is not worth an error message on a landing page.
-      .catch(() => { if (!cancelled) setStats(null); });
-
-    return () => { cancelled = true; };
-  }, []);
-
   return (
     <div className="home-page">
-      <div className="eyebrow eyebrow--accent">AI-DASHBOARD</div>
+      <div className="home-intro">
+        <div className="eyebrow eyebrow--accent">AI-DASHBOARD</div>
 
-      <p className="home-hero">
-        Turn a spreadsheet into a set of reports. Upload your data, and the app
-        profiles it, decides what is worth showing, and builds the charts and
-        figures to show it.
-      </p>
-
-      <div className="kpi-row kpi-row--three">
-        {/* Counted on a browser session's first successful analysis, not on
-            arrival - someone who reads this page and leaves is a visitor. */}
-        <StatTile label="Users" value={stats?.users} />
-        <StatTile label="Files processed" value={stats?.files_processed} />
-        <StatTile label="Reports built" value={stats?.reports_built} />
+        <div className="home-hero">
+          <h1 className="home-hero__title">
+            Just upload it. We'll take it from here.
+          </h1>
+          <p className="home-hero__body">
+            Simply upload your spreadsheet and let AI do the rest.
+            Your data is analyzed, the most useful insights are identified, and a set of reports is built for you.
+          </p>
+          <p className="home-hero__emphasis">
+            We'll figure out what matters. No additional steps. Just upload and go.
+          </p>
+        </div>
       </div>
 
       <Card className="home-steps">
@@ -74,9 +55,19 @@ export default function HomeDashboard({ onStart }) {
           {STEPS.map((step, i) => (
             <li key={step.title} className="home-step">
               <span className="home-step__num">{i + 1}</span>
-              <div>
+              <div className="home-step__content">
                 <div className="home-step__title">{step.title}</div>
-                <p className="home-step__body">{step.body}</p>
+                <p className="home-step__subtitle">{step.subtitle}</p>
+                <p className="home-step__body">
+                  {Array.isArray(step.body)
+                    ? step.body.map((line, idx) => (
+                        <span key={idx}>
+                          {idx > 0 && <br />}
+                          {line}
+                        </span>
+                      ))
+                    : step.body}
+                </p>
               </div>
             </li>
           ))}

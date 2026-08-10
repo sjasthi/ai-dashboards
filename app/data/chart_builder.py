@@ -75,10 +75,19 @@ COLORWAY = [
 
 def humanize_column(column: str) -> str:
     """Turn a raw/derived column name into a readable axis label, e.g.
-    "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group"."""
+    "lifetime_value_mean" -> "Lifetime Value (avg)", "age_group" -> "Age Group",
+    "categoryName" -> "Category Name"."""
     base, qualifier = split_agg_suffix(column)
-    label = base.replace("_", " ").strip().title()
+    spaced = _CAMEL_BOUNDARY.sub(" ", base.replace("_", " "))
+    label = spaced.strip().title()
     return f"{label} ({AGG_SUFFIXES[qualifier]})" if qualifier else label
+
+
+# Inserted before a camelCase/PascalCase word boundary so "categoryName" and
+# "ID" runs split into words before .title() runs - .title() only capitalizes
+# the first letter of each whitespace-delimited run, so "CategoryName" with no
+# separator otherwise collapses to "Categoryname".
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def split_agg_suffix(column: str) -> Tuple[str, Optional[str]]:
@@ -278,7 +287,15 @@ def build_chart_figure(df: pd.DataFrame, plotly_config: Dict[str, Any]) -> Optio
         labels, values = _prepare_categorical(df, x_axis, y_axis)
         if trace_type == "pie":
             labels, values = _cap_pie(labels, values)
-            fig = go.Figure(go.Pie(labels=labels, values=values))
+            # Percent is the in-wedge label (a name doesn't fit inside a 7.5% slice);
+            # the category name lives in the legend instead - see chartLayout.js,
+            # which is where showlegend actually gets turned on for pie.
+            fig = go.Figure(go.Pie(
+                labels=labels,
+                values=values,
+                textinfo="percent",
+                hovertemplate="%{label}: %{value} (%{percent})<extra></extra>",
+            ))
         elif _prefers_horizontal(labels):
             # Plotly fills a categorical y-axis from the bottom up, so the arrays are
             # reversed to put the first row (the largest value, or the first ordinal

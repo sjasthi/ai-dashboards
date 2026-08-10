@@ -37,8 +37,9 @@
 
 .eyebrow--accent { color: var(--color-accent); }
 
-/* A quiet marker of where a claim came from. Every computed card carries one, so
-   the model's text is never mistaken for a measurement. */
+/* A quiet marker of where a claim came from, so the model's text is never mistaken
+   for a measurement. Only model-authored content is marked now: the "computed"
+   variant sat on all four insight cards at once and distinguished nothing. */
 .chip {
   display: inline-block;
   padding: 2px 8px;
@@ -53,40 +54,121 @@
   white-space: nowrap;
 }
 
-.chip--computed {
-  color: var(--color-accent);
-  background: var(--color-accent-muted);
-  border-color: #BFDBFE;
-}
-
 .chip--ai {
   color: #7C3AED;
   background: #F5F3FF;
   border-color: #DDD6FE;
 }
 
+/* Bands for a measured property of the data, not a verdict on it. Amber is the top of
+   the scale rather than red: red in this app means something went wrong, and a widely
+   spread series has not gone wrong. */
+.chip--good { color: var(--color-success); background: #F0FDF4; border-color: #BBF7D0; }
+.chip--warn { color: var(--color-warning); background: #FFFBEB; border-color: #FDE68A; }
+.chip--neutral { color: var(--color-text-secondary); }
+
 /* ---------- app shell ---------- */
 
 /* The nav's two groups (brand, tabs) each shrink before they wrap. Left to itself
    flexbox squeezed the brand until "AI-Dashboard" broke mid-phrase, which reads as
    a layout bug rather than as a narrow screen. */
-.app-nav { padding: 14px 32px; gap: 16px; }
+.app-nav { padding: 14px 32px; }
+
+/* The bar itself (.app-nav) stays full-bleed for its background/border; this is
+   the flex row that used to live on .app-nav directly, now capped to the same
+   width as the page content so the brand and stats land above the content
+   column's edges instead of the viewport's on wide screens. */
+.app-nav__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
 .app-nav__brand { gap: 10px; flex-shrink: 0; }
 .app-nav__brand span { white-space: nowrap; }
 .app-nav__tabs { gap: 32px; }
 
 .app-main { padding: 32px 40px; }
 
+/* ---------- usage counters in the nav ---------- */
+
+/* These sit in the nav's third slot, which the brand/tabs split left to right.
+   The label-over-value stack is sized to land at 34px - the height of the brand
+   logo beside it - so the counters fit the nav band that already exists instead
+   of making the bar taller. Change --nav-height or these font sizes together. */
+.app-nav__stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.nav-stat { display: flex; align-items: center; gap: 8px; }
+
+/* The hairline between groups is a border on the later sibling, so there are no
+   divider elements to keep in sync with the number of counters. */
+.nav-stat + .nav-stat {
+  border-left: 1px solid var(--color-border);
+  padding-left: 16px;
+}
+
+.nav-stat__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.nav-stat__text { display: flex; flex-direction: column; }
+
+.nav-stat__label {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Tabular figures so the three values keep the same width as they tick up and
+   the dividers don't shuffle sideways. */
+.nav-stat__value {
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The full wording, for screen readers only - the visible label is abbreviated
+   to fit the nav. */
+.nav-stat__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 900px) {
   .app-nav { padding: 12px 20px; }
   .app-nav__tabs { gap: 20px; }
   .app-main { padding: 24px 20px; }
+  .app-nav__stats { gap: 12px; }
+  .nav-stat + .nav-stat { padding-left: 12px; }
 }
 
 /* Below this the brand and tabs genuinely don't fit on one line, so the tabs get their
    own full-width row instead of being crushed against the brand. */
 @media (max-width: 640px) {
-  .app-nav { flex-wrap: wrap; padding: 12px 16px; }
+  .app-nav { padding: 12px 16px; }
+  .app-nav__inner { flex-wrap: wrap; }
   .app-nav__tabs {
     order: 3;
     width: 100%;
@@ -96,6 +178,20 @@
   }
   .app-nav__tabs::-webkit-scrollbar { display: none; }
   .app-main { padding: 20px 16px; }
+
+  /* The tabs have taken their own row, so the counters stay on the first one
+     opposite the brand. Only the number survives - the icon says which is which,
+     and the title/screen-reader label still carries the full wording. */
+  .app-nav__stats { gap: 10px; }
+  .nav-stat + .nav-stat { padding-left: 10px; }
+  .nav-stat { gap: 6px; }
+  .nav-stat__label { display: none; }
+  .nav-stat__value { font-size: 16px; }
+}
+
+/* Brand plus three counters genuinely does not fit here, and the brand wins. */
+@media (max-width: 400px) {
+  .app-nav__stats { display: none; }
 }
 
 /* ---------- page + header ---------- */
@@ -119,13 +215,45 @@
    horizontal scrolling, which the other three pages have no equivalent of. */
 .reports-page { max-width: 1280px; }
 
+/* Developer tool: same cap as Reports, whose flow it borrows (session cards, prune
+   panel) - unconstrained, it stretched edge to edge of .app-main with no ceiling. */
+.dev-browser { max-width: 1280px; margin: 0 auto; font-family: var(--font-ui); }
+
 /* ---------- home ---------- */
 
+/* No side padding: the eyebrow and hero text should reach the same left/right
+   edges as the "How it works" card's outer border below it, not stop 28px
+   short to match the card's internal (padded) text. */
+.home-intro {
+  padding: 0;
+}
+
 .home-hero {
-  margin: 12px 0 24px;
+  margin: 16px 0 20px;
+}
+
+.home-hero__title {
+  margin: 0 0 16px;
+  font-size: var(--size-3xl);
+  line-height: 1.25;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.home-hero__body {
+  margin: 0 0 16px;
   font-size: var(--size-lg);
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--color-text-secondary);
+}
+
+.home-hero__emphasis {
+  margin: 0;
+  font-size: var(--size-lg);
+  line-height: 1.6;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .home-steps {
@@ -148,7 +276,7 @@
 .home-step {
   display: flex;
   gap: 14px;
-  padding: 14px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -169,16 +297,34 @@
   justify-content: center;
 }
 
+/* Stretches to the row's full width so the body copy below can use the
+   card's actual measure instead of shrink-wrapping to its own content. */
+.home-step__content {
+  flex: 1;
+  min-width: 0;
+}
+
 .home-step__title {
+  font-size: var(--size-lg);
   font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* The "hook" line - wears the accent colour so it reads as the takeaway,
+   distinct from both the heading above and the explanatory copy below. */
+.home-step__subtitle {
+  margin: 3px 0 0;
+  font-size: var(--size-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-accent);
 }
 
 .home-step__body {
-  margin: 2px 0 0;
-  max-width: 62ch;
+  margin: 4px 0 0;
+  max-width: none;
   font-size: var(--size-sm);
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--color-text-secondary);
 }
 
@@ -255,8 +401,10 @@
   flex-wrap: wrap;
 }
 
+/* No top margin: the 6px here used to clear the pattern eyebrow above the title, and
+   with that gone it was just a stray offset at the top of the page. */
 .report-header__title {
-  margin: 6px 0 0 0;
+  margin: 0;
   font-size: var(--size-2xl);
   font-weight: var(--weight-bold);
   line-height: 1.25;
@@ -299,12 +447,77 @@
   color: var(--color-text-secondary);
 }
 
+/* "Report data - Specifications": the toggle sits beside the eyebrow in
+   .report-data-card__head and opens the provenance line in the cell below it. */
+.build-details__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: text-decoration-color 120ms ease, color 120ms ease;
+}
+
+.build-details__toggle:hover {
+  color: var(--color-accent-hover);
+  text-decoration-color: var(--color-accent-hover);
+}
+
+/* Report data: same cell/hairline language as .dist-card - a head row of controls
+   whose height never changes, then a stack of full-width disclosure cells below
+   it, each divided by a 1px shadow rather than a margin so corners stay clean. */
+.report-data-card { margin-bottom: 20px; overflow: hidden; }
+
+.report-data-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.report-data-card__head .link-btn { padding: 4px 10px; }
+
+.report-data-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-data-card__cell {
+  padding: 14px 18px 16px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.report-data-card__cell:last-child { box-shadow: none; }
+
+/* Un-padded here, unlike the empty state's usual centred block - this cell already
+   carries its own padding. Still centred, though: a single sentence naming the
+   control that opens the table reads as a caption for the whole card, not a
+   quadrant's left-aligned data. */
+.report-data-card__cell .empty-state { padding: 0; }
+
+/* Bold only, same muted gray as the sentence around it - enough to draw the eye to
+   the control being named without competing with the actual button above. */
+.report-data-card__cta { font-weight: var(--weight-semibold); }
+
 /* ---------- segmented control (report A / B / C) ---------- */
 
 .segmented {
   display: inline-flex;
   padding: 3px;
-  gap: 2px;
+  gap: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg);
@@ -323,6 +536,13 @@
   white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease;
 }
+
+/* Feint hairline between the letters, same mechanism as the divider between the
+   distribution card's cells - a rule between neighbours, not a border on every
+   tile, so it disappears where a tile is pressed instead of boxing it in. */
+.segmented__btn + .segmented__btn { box-shadow: -1px 0 0 var(--color-border); }
+.segmented__btn[aria-pressed='true'] + .segmented__btn,
+.segmented__btn:has(+ .segmented__btn[aria-pressed='true']) { box-shadow: none; }
 
 .segmented__btn:hover:not(:disabled) { color: var(--color-text-primary); }
 
@@ -348,16 +568,26 @@
   margin-bottom: 20px;
 }
 
-/* The home page shows three counters, not four. Without this they would stretch
-   across three quarters of the row and leave a gap where a fourth tile isn't. */
-.kpi-row--three { grid-template-columns: repeat(3, 1fr); }
-
 .stat-tile {
-  padding: 18px 20px;
+  padding: 20px 20px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 4px 10px rgba(17, 24, 39, 0.05);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.stat-tile:hover {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05), 0 6px 16px rgba(17, 24, 39, 0.08);
+}
+
+.stat-tile__label-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .stat-tile__label {
@@ -367,13 +597,40 @@
   color: var(--color-text-secondary);
 }
 
+/* Name (e.g. "GTK") and its vs-average delta share one row, packed tight on the
+   left rather than pushed to the tile's edges - one claim, not two. The delta stays
+   in secondary ink rather than the success/danger used for a trend's own direction:
+   sitting above or below average isn't a verdict here the way an upward revenue
+   trend is on the 4th tile. */
+.stat-tile__name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.stat-tile__name {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.stat-tile__delta-inline {
+  font-size: var(--size-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Proportional figures deliberately: tabular-nums gives every digit the width of a
    zero, which makes a value like 121 look loose at this size. */
 .stat-tile__value {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: var(--weight-semibold);
   line-height: 1.1;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
 }
@@ -425,9 +682,13 @@
 
 /* Height is a floor, not a cap: the plot needs room for its own x-axis band, and a
    fixed height that excludes it leaves the card with a tiny nested scrollbar. */
+/* Sized against the insight rail beside it: the grid is as tall as its taller column,
+   so a plot floor above the rail's height buys nothing but scroll. 320 + the card's own
+   chrome lands the chart card just under the merged rail. Still a floor, not a cap - a
+   sideways bar chart computes its own height in chartLayout.js and ignores this. */
 .chart-card__plot {
   width: 100%;
-  min-height: 420px;
+  min-height: 320px;
 }
 
 .chart-card__placeholder {
@@ -442,14 +703,20 @@
   line-height: 1.6;
 }
 
+/* One card, four ruled rows - not four cards. Four surfaces spent three 16px gaps and
+   eight paddings saying what one surface and three hairlines say, and the rail is the
+   taller column in the results grid, so that stack was setting the height of the whole
+   band. Same mechanism as the distribution card: a hairline, not a gap. */
 .insight-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   min-width: 0;
+  overflow: hidden;
 }
 
-.insight-card { padding: 16px 18px; }
+.insight-row { padding: 13px 18px; }
+
+/* On the row, not between the rows, so the tinted warn background below runs the full
+   width of its own row and stops cleanly at the rule. */
+.insight-row + .insight-row { border-top: 1px solid var(--color-border); }
 
 .insight-card__head {
   display: flex;
@@ -476,13 +743,49 @@
   line-height: 1.55;
 }
 
-/* Amber is reserved for a warning that was actually detected. A card that always
-   renders amber teaches the reader to ignore it. */
-.insight-card--warn { border-color: #FDE68A; background: #FFFBEB; }
-.insight-card--warn .insight-card__title { color: var(--color-warning); }
-.insight-card--warn .insight-card__body { color: #78350F; }
+/* Amber is reserved for a warning that was actually detected. A row that always renders
+   amber teaches the reader to ignore it.
+   As a row rather than a card it can no longer be marked by a border colour, so the
+   tint carries it - plus a solid amber edge on the leading side, which is what still
+   reads as "this one" when the row is stacked flush against its neighbours. */
+.insight-row--warn {
+  background: #FFFBEB;
+  box-shadow: inset 3px 0 0 #FDE68A;
+}
 
-.insight-card--good .insight-card__title { color: var(--color-success); }
+/* Outliers and Data quality can both fire at once. A grey rule laid across the join
+   between two amber rows reads as a seam in the tint rather than as a divider. */
+.insight-row--warn + .insight-row--warn { border-top-color: #FDE68A; }
+
+.insight-row--warn .insight-card__title { color: var(--color-warning); }
+.insight-row--warn .insight-card__body { color: #78350F; }
+
+.insight-row--good .insight-card__title { color: var(--color-success); }
+
+.ai-insights-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-insights-list li {
+  position: relative;
+  padding-left: 14px;
+}
+
+.ai-insights-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7C3AED;
+}
 
 .outlier-list {
   margin: 12px 0 0 0;
@@ -530,6 +833,309 @@
   font-weight: var(--weight-bold);
   color: #7C3AED;
 }
+
+/* ---------- distribution card ---------- */
+
+/* Three zones, one per statistical job: the five-number summary as a shape, the two
+   measures of centre with the skew between them, and the three measures of spread
+   under one meter. The flat ten-cell strip this replaced gave equal weight to ten
+   numbers that do three different jobs, and named none of them.
+   The strip itself is still below - it is what the disclosure opens. */
+.dist-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 1fr 1fr;
+  margin-bottom: 20px;
+  /* Trims the per-cell dividers at the container's edge; see .dist-card__cell. */
+  overflow: hidden;
+}
+
+.dist-card__head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* Tight vertically: the row carries a label and a button, and the card is competing
+     for the same screen as the chart above it. */
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.dist-card__head .link-btn { padding: 4px 10px; }
+
+/* The same right + bottom hairline mechanism as .stat-strip__item, for the same
+   reason - a tinted backdrop would show through an empty trailing cell. */
+.dist-card__cell {
+  padding: 14px 18px 16px;
+  min-width: 0;
+  box-shadow:
+    1px 0 0 var(--color-border),
+    0 1px 0 var(--color-border);
+}
+
+.dist-card__cell-label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+/* Center's label carries the skew chip beside it, so the two need their own row
+   rather than the plain label's bottom margin. */
+.dist-card__cell-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dist-card__cell-label-row .dist-card__cell-label { margin-bottom: 0; }
+
+/* mean and median as two side-by-side label/value stacks (grid-auto-flow: column
+   fills each column - label then value - before starting the next), so the pair
+   reads as one compact row instead of spanning two. */
+.dist-card__pair {
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  justify-content: start;
+  column-gap: 28px;
+  row-gap: 2px;
+  margin-bottom: 10px;
+}
+
+.dist-card__pair-label {
+  font-size: var(--size-xs);
+  color: var(--color-text-secondary);
+  cursor: help;
+}
+
+.dist-card__pair-value {
+  font-size: var(--size-base);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* The Spread cell's two supporting rows, following the badge that states the
+   verdict - same label/value grid as Centre's mean/median, so the two numbers
+   backing "High variance" read as evidence rather than a caption. */
+.dist-card__pair--spread {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+/* The disclosure body: the .stat-strip grid, spanning all three zones inside the same
+   card rather than as a second surface below it. Its own bottom margin is the strip's
+   from when it was a standalone card, and would open a gap inside this one. */
+.dist-card__all {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+/* Outliers + data quality, folded into the disclosure below the stat strip they
+   describe. Two compact columns rather than the two full cards these used to be -
+   this is the detail view, so it can assume the reader already has the headline
+   from "Key finding" and just wants the numbers behind it. */
+.dist-card__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--color-border);
+}
+
+.dist-card__meta-col {
+  padding: 14px 18px 16px;
+  min-width: 0;
+  box-shadow: 1px 0 0 var(--color-border);
+}
+
+.dist-card__meta-col:last-child { box-shadow: none; }
+
+.dist-card__meta-col--warn {
+  background: #FFFBEB;
+  box-shadow: inset 3px 0 0 #FDE68A;
+}
+
+.dist-card__meta-col--warn + .dist-card__meta-col--warn { box-shadow: inset -3px 0 0 #FDE68A; }
+
+.dist-card__meta-label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.dist-card__meta-col--warn .dist-card__meta-label { color: var(--color-warning); }
+
+.dist-card__meta-body {
+  font-size: var(--size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.dist-card__meta-col--warn .dist-card__meta-body { color: #78350F; }
+
+.dist-card__meta-body .outlier-list { margin-top: 10px; }
+
+/* ---------- range summary (headline + box plot bar) ---------- */
+
+/* Plain-language headline above the chart. Reuses .dist-card__pair-label/-value
+   verbatim - the same label/value styling Center's mean/median already carry - so
+   "Most values fall between" and the "497.11 → 2,741.37" figure match their
+   treatment exactly rather than approximating it. The definition lives in the hover
+   title, not on the page. */
+.range-summary__lead {
+  margin: 0 0 8px;
+  line-height: 1.45;
+  cursor: help;
+}
+
+.range-summary--flat .range-summary__caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.boxplot__track {
+  position: relative;
+  height: 24px;
+  margin: 2px 0;
+}
+
+.boxplot__whisker {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--color-text-muted);
+  opacity: 0.55;
+}
+
+.boxplot__cap {
+  position: absolute;
+  top: 5px;
+  width: 2px;
+  height: 14px;
+  background: var(--color-text-muted);
+  opacity: 0.55;
+}
+
+.boxplot__box {
+  position: absolute;
+  top: 2px;
+  height: 20px;
+  min-width: 2px;
+  border-radius: 4px;
+  background: var(--color-series-1);
+  opacity: 0.24;
+}
+
+.boxplot__median {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 24px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--color-series-1);
+}
+
+.boxplot__fence {
+  position: absolute;
+  top: 4px;
+  width: 1px;
+  height: 16px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-text-muted) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/* The 2px ring is the surface colour, so overlapping flags stay countable where a
+   cluster of outliers lands on the same part of the range. */
+.boxplot__anomaly {
+  position: absolute;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  opacity: 0.75;
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+
+.boxplot__labels-bottom {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.boxplot__label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- skew glyph (center cell) ---------- */
+
+/* Sits where the Meter sits in the Spread cell: between the label row and the
+   mean/median readout. The curve is a fixed silhouette per skew direction and stays
+   recessive; the two ticks are the real marks, one hue two shades per the dumbbell
+   convention - median solid (matches .boxplot__median next door), mean dashed. */
+.skew-glyph { display: block; margin: 2px 0 10px; }
+
+.skew-glyph__curve {
+  stroke: var(--color-text-muted);
+  stroke-width: 1.5;
+  opacity: 0.35;
+}
+
+.skew-glyph__tick { stroke-width: 2; cursor: help; }
+
+.skew-glyph__tick--median { stroke: var(--color-series-1); }
+
+.skew-glyph__tick--mean {
+  stroke: var(--color-series-1);
+  stroke-dasharray: 3 2;
+  opacity: 0.6;
+}
+
+/* ---------- meter ---------- */
+
+/* The track is a wash of the fill's own hue, not grey: at a small fill a grey track
+   leaves almost none of the bar carrying the state. */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--color-accent-muted);
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+}
+
+.meter--low { background: #DCFCE7; }
+.meter--low .meter__fill { background: var(--color-success); }
+
+.meter--moderate { background: var(--color-accent-muted); }
+.meter--moderate .meter__fill { background: var(--color-accent); }
+
+.meter--high { background: #FEF3C7; }
+.meter--high .meter__fill { background: var(--color-warning); }
 
 /* ---------- distribution strip ---------- */
 
@@ -608,11 +1214,11 @@
   font-family: inherit;
   font-size: var(--size-xs);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
+  color: var(--color-accent);
   cursor: pointer;
 }
 
-.table-toggle:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
+.table-toggle:hover { border-color: var(--color-border-focus); background: var(--color-accent-muted); color: var(--color-accent-hover); }
 
 .table-wrap {
   overflow: auto;
@@ -717,6 +1323,8 @@
   font-weight: var(--weight-semibold);
   color: var(--color-accent);
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .link-btn:hover:not(:disabled) { background: var(--color-accent-muted); }
@@ -724,7 +1332,18 @@
 
 /* ---------- export ---------- */
 
-.export-panel {
+.export-panel { overflow: hidden; }
+
+.export-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.export-panel__body {
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -1032,10 +1651,13 @@
 @media (max-width: 1080px) {
   .results-grid { grid-template-columns: minmax(0, 1fr); }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  /* Four tiles fold to 2x2 cleanly; three fold to 2+1 and leave a visible hole
-     next to the last one. These hold a label and a number, so they stay abreast
-     until the 640px rule below drops every KPI row to a single column. */
-  .kpi-row--three { grid-template-columns: repeat(3, 1fr); }
+  /* The box plot needs the width more than the three zones need to be side by side:
+     squeezed into a third of a narrow page its labels start colliding with its own
+     end caps. Stacking gives it the full card. */
+  .dist-card { grid-template-columns: minmax(0, 1fr); }
+  .dist-card__meta { grid-template-columns: minmax(0, 1fr); }
+  .dist-card__meta-col { box-shadow: none !important; border-top: 1px solid var(--color-border); }
+  .dist-card__meta-col:first-child { border-top: none; }
 }
 
 @media (max-width: 860px) {

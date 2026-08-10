@@ -1003,6 +1003,7 @@ def _build_report(session, session_id, report_type):
             ),
             llm_caveat=(selected_rec or {}).get("data_quality_warning"),
             schema_warning=schema_warning,
+            row_ledger=report_df.attrs.get("row_ledger"),
         )
     except Exception as e:
         # A stats failure must not cost the user their report or their chart.

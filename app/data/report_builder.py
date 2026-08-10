@@ -14,9 +14,10 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Iterable, List, Optional, Tuple
 
 from .chart_builder import split_agg_suffix
+from .summary_builder import _normalize_key_value
 
 def _debug_files_enabled() -> bool:
     """Whether to write report-generation traces to session_data/.
@@ -129,11 +130,18 @@ def generate_report(
             debug_lines.append(f"SCHEMA WARNING: {schema_warning}")
             final_df.attrs["schema_warning"] = schema_warning
 
+        # Held across the drops below: drop() returns a new frame, and .attrs only
+        # survives that by pandas' own propagation rules rather than by guarantee.
+        row_ledger = final_df.attrs.get("row_ledger")
+
         for col in METADATA_COLUMNS:
             # Defensive: a pipeline that produced a column of the same name would
             # otherwise make insert() raise on a duplicate.
             if col in final_df.columns:
                 final_df = final_df.drop(columns=col)
+
+        if row_ledger is not None:
+            final_df.attrs["row_ledger"] = row_ledger
         final_df.insert(0, "recommendation_rank", rec.get("rank", 0))
         final_df.insert(1, "recommendation_name", rec.get("report_name", "Untitled"))
 
@@ -224,12 +232,22 @@ def _execute_pipeline(
     loaded_files: Dict[str, pd.DataFrame] = {}
     merged_filenames: set = set()  # files whose columns are already part of `df`
 
+    # Two different kinds of row loss, kept apart on purpose. A filter is the
+    # report's definition - "revenue from won deals" means the lost rows were never
+    # in scope, and reporting them as missing would read as a fault. A join miss is
+    # the opposite: those rows were in scope and vanished anyway.
+    scope: List[Dict[str, Any]] = []
+    join_losses: List[Dict[str, Any]] = []
+    join_rescues: List[Dict[str, Any]] = []
+    source_rows: Optional[int] = None
+
     for op_idx, operation in enumerate(operations):
         operation_type = (operation.get("operation_type") or "").lower()
         files_involved = operation.get("files_involved", [])
 
         if operation_type == "join":
-            df = _execute_join(operation, file_paths, loaded_files, df, merged_filenames, tables)
+            df = _execute_join(operation, file_paths, loaded_files, df, merged_filenames,
+                               tables, join_losses, join_rescues)
             continue
 
         # Lazily load the primary file the first time a step needs data.
@@ -240,9 +258,20 @@ def _execute_pipeline(
             df = _resolve_table(filename, file_paths, tables)
             loaded_files[filename] = df
             merged_filenames.add(filename)
+            source_rows = len(df)
 
         if operation_type == "filter":
+            rows_before = len(df)
             df = _execute_filter(df, operation)
+            scope.append({
+                "rows_before": rows_before,
+                "rows_after": len(df),
+                "conditions": [
+                    {"column": c.get("column"), "condition": c.get("condition")}
+                    for c in operation.get("filter_conditions", [])
+                    if c.get("column")
+                ],
+            })
         elif operation_type == "derive":
             df = _execute_derive(df, operation)
         elif operation_type == "groupby":
@@ -257,6 +286,12 @@ def _execute_pipeline(
     if df is None:
         raise ValueError("Pipeline produced no data (no operation loaded a file)")
 
+    df.attrs["row_ledger"] = {
+        "source_rows": source_rows,
+        "scope": scope,
+        "join_losses": join_losses,
+        "join_rescues": join_rescues,
+    }
     return df
 
 
@@ -710,13 +745,51 @@ def _normalize_join_keys(join_keys: List[Any]) -> List[tuple]:
     return normalized
 
 
+def _unique_temp_name(base: str, taken: Iterable[str]) -> str:
+    """A working column name guaranteed absent from both sides of a merge.
+
+    pandas' own suffixing can only ever append to an existing name, so a name absent
+    from both frames cannot be produced by the merge either.
+    """
+    taken = set(taken)
+    name = base
+    while name in taken:
+        name += "_"
+    return name
+
+
+def _normalized_key_series(s: pd.Series) -> Optional[pd.Series]:
+    """Normalized keys for a text column, or None when normalization doesn't apply.
+
+    Numeric, boolean and datetime keys are skipped on purpose. They have no spelling
+    variants, and stringifying them first invents collisions that have nothing to do
+    with how anyone spelled anything: a float column formats as "101.0" -> "1010" and
+    "1e+05" -> "1e05".
+    """
+    if (pd.api.types.is_numeric_dtype(s)
+            or pd.api.types.is_bool_dtype(s)
+            or pd.api.types.is_datetime64_any_dtype(s)
+            or pd.api.types.is_timedelta64_dtype(s)):
+        return None
+
+    # object first, so a Categorical doesn't come back Categorical and break the
+    # merge against a plain object column.
+    values = s.astype(object)
+    # Mapped over distinct values: a 200k-row lookup with 300 products would
+    # otherwise pay 200k Python-level normalizations.
+    mapping = {v: _normalize_key_value(v) for v in pd.unique(values)}
+    return values.map(mapping)
+
+
 def _execute_join(
     operation: Dict[str, Any],
     file_paths: Optional[Dict[str, str]],
     loaded_files: Dict[str, pd.DataFrame],
     current_df: Optional[pd.DataFrame],
     merged_filenames: set,
-    tables: Optional[Dict[str, pd.DataFrame]] = None
+    tables: Optional[Dict[str, pd.DataFrame]] = None,
+    losses: Optional[List[Dict[str, Any]]] = None,
+    rescues: Optional[List[Dict[str, Any]]] = None
 ) -> pd.DataFrame:
     """Execute a join across two or more files (or the current pipeline result).
 
@@ -724,6 +797,13 @@ def _execute_join(
     skipped rather than re-loaded and re-merged - re-merging an already-joined
     file on a later shared key (e.g. a second join step reusing a file from an
     earlier step) would fan out rows instead of narrowing them.
+
+    `losses` collects rows an inner join dropped for having no match on the right.
+    That loss is invisible in the result and is not the scope the user asked for -
+    a spelling difference between two files ("GTXPro" vs "GTX Pro") silently
+    removes every affected row and the report's totals come out short with nothing
+    on screen saying so. Counted by joining left and discarding the misses, which
+    is the same result an inner join produces, so the report itself is unchanged.
     """
     files_involved = operation.get("files_involved", [])
     join_keys = operation.get("join_keys", [])
@@ -767,10 +847,212 @@ def _execute_join(
         # steps referencing a bare column name that collided across files (e.g.
         # both sides having "name") can be resolved back via _resolve_column.
         right_suffix = f"_{_file_stem(right_filename)}" if right_filename else "_right"
-        result = result.merge(right, left_on=left_on, right_on=right_on, how=join_type,
-                               suffixes=("", right_suffix))
+
+        if join_type == "inner" and losses is not None:
+            # Rescue only applies to inner joins. An outer join drops nothing, so
+            # there is nothing to recover, and re-matching there would change which
+            # right row attaches to a left row - a behaviour change, not a repair.
+            result = _inner_join_counting_misses(
+                result, right, left_on, right_on, right_suffix, right_filename,
+                losses, rescues,
+            )
+        else:
+            result = result.merge(right, left_on=left_on, right_on=right_on, how=join_type,
+                                   suffixes=("", right_suffix))
 
     return result
+
+
+def _inner_join_counting_misses(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    left_on: List[str],
+    right_on: List[str],
+    right_suffix: str,
+    right_filename: Optional[str],
+    losses: List[Dict[str, Any]],
+    rescues: Optional[List[Dict[str, Any]]] = None,
+) -> pd.DataFrame:
+    """Inner-join `left` to `right`, recording the left rows that matched nothing.
+
+    A left join with an indicator, then dropping the misses, produces exactly the
+    rows an inner join would - including the row multiplication a one-to-many match
+    causes - while making the dropped rows countable. Counting instead by comparing
+    row totals before and after would be wrong in both directions: a one-to-many
+    join can grow the row count while still dropping unmatched rows.
+
+    When `rescues` is provided, rows that missed get a second chance against keys
+    compared without case, spacing or punctuation - see _rescue_by_spelling. Rows
+    that matched exactly are never touched by it.
+    """
+    taken = set(left.columns) | set(right.columns)
+    indicator = _unique_temp_name("_join_match", taken)
+    # A positional tag, not the index: an earlier step may leave a duplicated or
+    # non-range index, and a one-to-many match fans one left row into several merged
+    # rows, so neither the index nor the merged row number addresses left rows.
+    row_id = _unique_temp_name("_join_left_row", taken)
+
+    left_tagged = left.assign(**{row_id: np.arange(len(left), dtype="int64")})
+    merged = left_tagged.merge(
+        right, left_on=left_on, right_on=right_on, how="left",
+        suffixes=("", right_suffix), indicator=indicator,
+    )
+
+    missed = merged[indicator] == "left_only"
+    matched = merged.loc[~missed].drop(columns=[indicator])
+    missed_ids = merged.loc[missed, row_id].to_numpy()
+
+    rescued = None
+    rescued_ids: set = set()
+    if rescues is not None and len(missed_ids):
+        rescued, pairs = _rescue_by_spelling(
+            left_tagged, missed_ids, right, left_on, right_on,
+            right_suffix, list(matched.columns),
+        )
+        if rescued is not None and not rescued.empty:
+            rescued_ids = set(rescued[row_id].tolist())
+            rescues.append({
+                "file": right_filename,
+                # Left rows, counted before any one-to-many fanout: this answers
+                # "how many rows did the report nearly lose", which is what the
+                # sentence built from it says.
+                "rows": len(rescued_ids),
+                "key": left_on[0],
+                "pairs": pairs[:3],
+            })
+
+    if rescued is not None and not rescued.empty:
+        result = pd.concat([matched, rescued], ignore_index=True)
+        # Stable sort on the positional tag puts rescued rows back where their left
+        # row was rather than in a block at the end, and keeps the relative order of
+        # a fanned-out row's matches.
+        result = result.sort_values(row_id, kind="stable")
+    else:
+        result = matched
+
+    still_missed = [int(i) for i in missed_ids if int(i) not in rescued_ids]
+    if still_missed:
+        # The key values themselves, because the fix is almost always visible in
+        # them - a stray space, a case difference, a trailing code. Drawn from the
+        # rows that are *still* missing, so a rescued value is never listed as lost.
+        examples = (
+            left[left_on[0]].iloc[still_missed].dropna().astype(str).unique()[:3].tolist()
+        )
+        losses.append({
+            "file": right_filename,
+            "rows": len(still_missed),
+            "key": left_on[0],
+            "examples": examples,
+        })
+
+    return result.drop(columns=[row_id]).reset_index(drop=True)
+
+
+def _unambiguous_key_map(
+    frame: pd.DataFrame,
+    raw_cols: List[str],
+    ignore_raw: Optional[set] = None,
+) -> Optional[Dict[tuple, tuple]]:
+    """Map each normalized key tuple to the single raw key tuple it stands for.
+
+    Tuples whose normalization is shared by two or more *distinct raw values* are
+    left out: that is the case where matching would be a guess, and a guess that
+    merges two real categories is worse than the dropped rows it would fix.
+
+    Distinct values, not rows - a lookup file holding three "GTX Pro" rows is one
+    value and must still match, fanning out exactly as an exact join would.
+
+    Returns None when any key column can't be normalized (numeric, boolean, dates).
+    """
+    normalized = []
+    for col in raw_cols:
+        norm = _normalized_key_series(frame[col])
+        if norm is None:
+            return None
+        normalized.append(norm)
+
+    buckets: Dict[tuple, set] = {}
+    raw_values = [frame[col].astype(object) for col in raw_cols]
+    for pos in range(len(frame)):
+        norm_key = tuple(n.iat[pos] for n in normalized)
+        # One unnormalizable component makes the whole tuple unusable. This is also
+        # what stops a null key on one side matching a null key on the other.
+        if any(part is None for part in norm_key):
+            continue
+        raw_key = tuple(r.iat[pos] for r in raw_values)
+        if ignore_raw is not None and raw_key in ignore_raw:
+            continue
+        buckets.setdefault(norm_key, set()).add(raw_key)
+
+    return {norm: next(iter(raws)) for norm, raws in buckets.items() if len(raws) == 1}
+
+
+def _rescue_by_spelling(
+    left_tagged: pd.DataFrame,
+    missed_ids: np.ndarray,
+    right: pd.DataFrame,
+    left_on: List[str],
+    right_on: List[str],
+    right_suffix: str,
+    matched_columns: List[str],
+) -> Tuple[Optional[pd.DataFrame], List[Dict[str, str]]]:
+    """Re-match rows an exact join missed, ignoring case, spacing and punctuation.
+
+    The rescued rows take the *right* side's spelling before being merged, for two
+    reasons. It makes this a second exact merge, so the resulting columns, suffixes
+    and dtypes are identical to the first by construction rather than by inspection.
+    And it means a later group-by on the key produces one bar rather than two - the
+    file being joined to is treated as holding the reference spelling.
+    """
+    right_map = _unambiguous_key_map(right, right_on)
+    if not right_map:
+        return None, []
+
+    # The left census runs over the whole left frame, not just the missed rows, so a
+    # value that already matched exactly still counts as a distinct spelling. It is
+    # exempted when it appears verbatim on the right, though: a left file holding
+    # both "GTX Pro" and "GTXPro" would otherwise block its own rescue, which is
+    # precisely the case with the clearest evidence.
+    right_raw = set(right_map.values())
+    left_map = _unambiguous_key_map(left_tagged, left_on, ignore_raw=right_raw)
+    if not left_map:
+        return None, []
+
+    remap = {
+        left_raw: right_map[norm]
+        for norm, left_raw in left_map.items()
+        if norm in right_map and left_raw != right_map[norm]
+    }
+    if not remap:
+        return None, []
+
+    candidates = left_tagged.iloc[missed_ids]
+    keys = list(zip(*(candidates[col].astype(object) for col in left_on)))
+    replacements = [remap.get(key) for key in keys]
+    keep = [i for i, r in enumerate(replacements) if r is not None]
+    if not keep:
+        return None, []
+
+    rewritten = candidates.iloc[keep].copy()
+    for col_pos, col in enumerate(left_on):
+        rewritten[col] = [replacements[i][col_pos] for i in keep]
+
+    rescued = rewritten.merge(
+        right, left_on=left_on, right_on=right_on, how="inner",
+        suffixes=("", right_suffix),
+    )
+
+    # A rescue is an enhancement; a bug in it must never fail a report that would
+    # otherwise have built, so a surprise here skips rather than raises.
+    if set(rescued.columns) != set(matched_columns):
+        print("[ReportBuilder] Join key rescue changed the column set - skipping it")
+        return None, []
+    rescued = rescued[matched_columns]
+
+    pairs = []
+    for key in dict.fromkeys(keys[i] for i in keep):
+        pairs.append({"left": str(key[0]), "right": str(remap[key][0])})
+    return rescued, pairs
 
 
 def _execute_sort(df: pd.DataFrame, operation: Dict[str, Any]) -> pd.DataFrame:

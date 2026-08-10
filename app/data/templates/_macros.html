@@ -57,6 +57,19 @@
 
 
 {#
+  Which rows the report is about, next to its title - same placement and same
+  wording as the dashboard. A definition, not a warning: the filter is what the
+  report means, so it takes no chip and no amber.
+#}
+{% macro scope_line(r) -%}
+{% set s = r.stats or {} %}
+{% if s.scope_text %}
+<p class="scope">{{ s.scope_text }}</p>
+{% endif %}
+{%- endmacro %}
+
+
+{#
   The same bits, in the same order, as the Provenance strip on screen. A reader
   who checked the numbers in the app has to be able to confirm this is the same
   run - which means the file list, the row count and the timestamp, not a
@@ -102,8 +115,8 @@
   {% if s.available %}
     {% set measure = s.measure_label or 'value' %}
     {{ kpi_cell(s.headline_label or measure, s.headline_value | compact, s.headline_sublabel) }}
-    {{ kpi_cell('Peak', s.peak_value | compact, s.peak_label or ('highest ' ~ measure)) }}
-    {{ kpi_cell('Low', s.trough_value | compact, s.trough_label or ('lowest ' ~ measure)) }}
+    {{ kpi_cell('Highest', s.peak_value | compact, s.peak_label or ('highest ' ~ measure)) }}
+    {{ kpi_cell('Lowest', s.trough_value | compact, s.trough_label or ('lowest ' ~ measure)) }}
     {% if 'trend' in (s.blocks or []) %}
       {{ kpi_cell('Trend', s.trend_pct_change | signed_pct,
                   (s.trend_strength ~ ' · R² ' ~ s.trend_r2) if s.trend_strength else None) }}
@@ -188,10 +201,18 @@
     {% endif %}
   {% endcall %}
 
+  {# The model's caveat is not shown here, matching the dashboard: it is written
+     from whole-file null counts before this report's filters and joins run, so it
+     warns about rows the report already excluded and contradicts the measured line
+     above it. Rows an inner join dropped are measured, and are already in
+     quality_text.
+
+     s.join_rescue_rows is deliberately not in the warn test below: a rescued row is
+     in the report and its number is right, and its sentence already rides inside
+     quality_text. #}
   {% call finding_body('Data quality',
-                       'warn' if (s.null_count or r.schema_warning) else '') %}
-    <p>{{ s.quality_text or 'No completeness issues found in the charted measure.' }}</p>
-    {% if s.llm_caveat %}{{ ai_note(s.llm_caveat) }}{% endif %}
+                       'warn' if (s.null_count or s.join_loss_rows or r.schema_warning) else '') %}
+    <p>{{ s.quality_text or 'No issues found.' }}</p>
   {% endcall %}
 
   {{ finding_block('What to check next', s.recommendation_text, variant='good') }}
@@ -232,10 +253,128 @@
 
 {# ------------------------------------------------------------- distribution #}
 
+{#
+  The screen's three-zone distribution card, for the HTML target only.
+
+  Absolutely positioned marks, which xhtml2pdf cannot lay out at all - it has no
+  flex, no grid and no positioning. So the PDF keeps distribution_table below and
+  loses nothing by it: that table is exactly what the dashboard's "Show all
+  statistics" disclosure opens, and the two badge sentences ride along as text.
+
+  Both badges are rendered from strings report_stats.py authored. Three surfaces
+  render these bands now - here, the PDF, and the dashboard - and three copies of a
+  threshold drift apart.
+#}
+{% macro distribution_card(r) -%}
+{% set s = r.stats or {} %}
+{% if s.available %}
+<h2 class="h2">Distribution <span class="h2__chip">{{ chip('computed', 'computed') }}</span></h2>
+<table class="dist" width="100%">
+  <tr>
+    <td class="dist__cell" width="50%">
+      <div class="dist__label">Range</div>
+      {% set span = s.max - s.min %}
+      {% if span > 0 %}
+      <div class="bp">
+        <div class="bp__track">
+          <div class="bp__whisker"></div>
+          <div class="bp__cap" style="left: 0"></div>
+          <div class="bp__cap" style="left: 100%"></div>
+          {# Fences and outlier dots, same as BoxPlotBar.jsx. Both are filtered to the
+             plotted range: a Tukey fence routinely falls outside min..max, and one
+             pinned to an edge would read as a threshold the data actually reached. #}
+          {% for f in [s.fence_low, s.fence_high] %}
+            {% if f is not none and f > s.min and f < s.max %}
+          <div class="bp__fence" style="left: {{ ((f - s.min) / span * 100) | round(2) }}%"></div>
+            {% endif %}
+          {% endfor %}
+          <div class="bp__box"
+               style="left: {{ ((s.p25 - s.min) / span * 100) | round(2) }}%;
+                      width: {{ ((s.p75 - s.p25) / span * 100) | round(2) }}%"></div>
+          <div class="bp__median"
+               style="left: {{ ((s.median - s.min) / span * 100) | round(2) }}%"></div>
+          {% for a in s.anomalies or [] %}
+            {% if a.value is not none and a.value >= s.min and a.value <= s.max %}
+          <div class="bp__anomaly" style="left: {{ ((a.value - s.min) / span * 100) | round(2) }}%"
+               title="{{ a.label }}: {{ a.value | compact }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <div class="bp__ends">
+          <span>min {{ s.min | compact }}</span>
+          <span>max {{ s.max | compact }}</span>
+        </div>
+        {# No median value on the bar: the Centre cell prints it at full precision, and
+           compact() would state the same number a second time at a coarser rounding. #}
+        <div class="bp__quartiles">p25 {{ s.p25 | compact }} &middot; p75 {{ s.p75 | compact }}</div>
+      </div>
+      {% else %}
+      <div class="bp__quartiles">every value is {{ s.median | compact }} &mdash; no spread to plot</div>
+      {% endif %}
+    </td>
+
+    <td class="dist__cell" width="25%">
+      <div class="dist__label-row">
+        <div class="dist__label">Centre</div>
+        {% if s.skew_label %}<div class="dist__badge">{{ s.skew_label }}</div>{% endif %}
+      </div>
+      {# exact, not compact: this cell exists to show the gap between the two, and
+         compact() closes it - 1,046,332 and 1,032,891 both render as "1M". #}
+      <div class="dist__pair"><span>mean</span> <strong>{{ s.mean | exact }}</strong></div>
+      <div class="dist__pair"><span>median</span> <strong>{{ s.median | exact }}</strong></div>
+    </td>
+
+    <td class="dist__cell dist__cell--last" width="25%">
+      <div class="dist__label-row">
+        <div class="dist__label">Spread</div>
+        {% if s.variance_level %}
+        <div class="dist__badge dist__badge--{{ s.variance_level }}">{{ s.variance_label }}</div>
+        {% else %}
+        <div class="dist__badge">Variance &mdash;</div>
+        {% endif %}
+      </div>
+      {% if s.variance_level %}
+      <div class="meter meter--{{ s.variance_level }}">
+        <div class="meter__fill" style="width: {{ [s.cv, 100] | min | round(2) }}%"></div>
+      </div>
+      {% endif %}
+      {% set std_title = 'Standard deviation (σ) — about ' ~ s.pct_within_1sd ~ '% of values fall within this distance of the average.' if s.pct_within_1sd is not none else 'Standard deviation (σ) — the typical distance of a value from the average.' %}
+      {% set iqr_title = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.' %}
+      <div class="dist__pair dist__pair--spread" title="{{ std_title }}">
+        <span>Average variation</span> <strong>{{ s.std | compact }}</strong>
+      </div>
+      <div class="dist__pair dist__pair--spread" title="{{ iqr_title }}">
+        <span>Range of middle 50%</span> <strong>{{ s.iqr | compact }}</strong>
+      </div>
+    </td>
+  </tr>
+</table>
+
+<h3 class="h3">All statistics</h3>
+{{ distribution_strip(s) }}
+{% endif %}
+{%- endmacro %}
+
+
 {% macro distribution_table(r) -%}
 {% set s = r.stats or {} %}
 {% if s.available %}
 <h2 class="h2">Distribution <span class="h2__chip">{{ chip('computed', 'computed') }}</span></h2>
+{{ distribution_strip(s) }}
+{% if s.skew_label or s.variance_label %}
+<p class="dist__prose">
+  {%- if s.variance_label %}{{ s.variance_label }}{% endif -%}
+  {%- if s.variance_label and s.skew_label %} &middot; {% endif -%}
+  {%- if s.skew_label %}{{ s.skew_label }}{% endif -%}
+</p>
+{% endif %}
+{% endif %}
+{%- endmacro %}
+
+
+{# The ten raw figures. Shared: the PDF's whole distribution section, and the tail of
+   the HTML's card - the same content the dashboard's disclosure opens. #}
+{% macro distribution_strip(s) -%}
 <table class="strip" width="100%">
   <tr>
     {% for label, value in [
@@ -257,7 +396,6 @@
     {% endfor %}
   </tr>
 </table>
-{% endif %}
 {%- endmacro %}
 
 
@@ -474,6 +612,7 @@
 {% macro report_overview(r) -%}
 {{ page_header(r) }}
 {{ ai_question(r) }}
+{{ scope_line(r) }}
 {{ provenance_strip(r) }}
 {{ warning_banner(r.schema_warning) }}
 {{ kpi_table(r) }}
@@ -481,8 +620,10 @@
 {%- endmacro %}
 
 
-{% macro report_analysis(r) -%}
+{# `rich` is the HTML target saying it can lay out positioned marks. The PDF cannot,
+   so it takes the numeric table - see distribution_card. #}
+{% macro report_analysis(r, rich=false) -%}
 {{ findings(r) }}
-{{ distribution_table(r) }}
+{{ distribution_card(r) if rich else distribution_table(r) }}
 {{ ai_rationale(r) }}
 {%- endmacro %}

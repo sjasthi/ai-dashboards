@@ -55,6 +55,8 @@
 
   /* ---------- provenance / banners ---------- */
   .provenance { font-size: 8pt; color: #6B7280; margin-bottom: 8pt; }
+  /* Scope qualifies the numbers; it is not a warning, so it stays grey. */
+  .scope { font-size: 8pt; color: #6B7280; margin: 0 0 6pt; }
   .banner { padding: 5pt 7pt; font-size: 8.5pt; margin-bottom: 8pt;
             border: 1px solid #DEE2E6; }
   .banner--warn { border-color: #D97706; color: #92400E; background-color: #FFFBEB; }
@@ -98,6 +100,10 @@
   .strip__cell { padding: 5pt 3pt; text-align: center; border-right: 1px solid #DEE2E6; }
   .strip__label { font-size: 7pt; text-transform: uppercase; color: #6B7280; }
   .strip__value { font-size: 9.5pt; font-weight: bold; padding-top: 1pt; }
+  /* The variance and skew bands as a sentence. On screen and in the HTML export these
+     are a meter and a badge; xhtml2pdf has no positioning to draw either, so the same
+     two strings - authored in report_stats.py, not here - are set as text. */
+  .dist__prose { font-size: 8.5pt; color: #6B7280; margin-top: 5pt; }
 
   /* ---------- data / matrix tables ---------- */
   .data, .matrix { border: 1px solid #DEE2E6; }

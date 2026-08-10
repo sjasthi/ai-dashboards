@@ -3,8 +3,9 @@ import HomeDashboard from './components/Homedashboard';
 import UploadDashboard from './components/Uploaddashboard';
 import AnalysisDashboard from './components/Analysisdashboard';
 import ReportsDashboard from './components/Reportsdashboard';
-import SettingsDashboard from './components/Settingsdashboard';
-import { REPORT_TYPE_LETTERS, generateReport } from './api';
+import NavStats from './components/ui/NavStats';
+import { REPORT_TYPE_LETTERS, fetchStats, generateReport, sendEvents } from './api';
+import { isNewVisit } from './clientId';
 
 /**
  * The developer session browser, behind two independent gates.
@@ -27,9 +28,13 @@ const DEV_TAB_ENABLED = !!DevReportBrowser
   && new URLSearchParams(window.location.search).has('dev');
 
 export default function App() {
-  // Home is the landing tab: arriving on Upload gave no answer to "what is this",
-  // and the visit counter has nowhere to be recorded from otherwise.
+  // Home is the landing tab: arriving on Upload gave no answer to "what is this".
   const [activeTab, setActiveTab] = useState('home');
+
+  // The usage counters shown in the nav. Held here rather than in the page that
+  // used to own them because the nav outlives every tab: read once per page load,
+  // not once per tab click.
+  const [stats, setStats] = useState(null);
 
   // Raw File objects picked in the Upload tab
   const [files, setFiles] = useState([]);
@@ -42,6 +47,25 @@ export default function App() {
   const [inspections, setInspections] = useState({});
   const [selections, setSelections] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
+
+  // Read once, on arrival. The visit is reported before the counters are read, so
+  // the person arriving is included in the number they are about to see rather
+  // than showing up on someone else's next page load.
+  useEffect(() => {
+    let cancelled = false;
+
+    const arrival = isNewVisit()
+      ? sendEvents([{ event: 'visit_started' }])
+      : Promise.resolve(null);
+
+    arrival
+      .then(() => fetchStats())
+      .then(data => { if (!cancelled) setStats(data); })
+      // A missing counter is not worth an error message in the nav bar.
+      .catch(() => { if (!cancelled) setStats(null); });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Populated once /api/analyze-full succeeds
   const [sessionId, setSessionId] = useState(null);
@@ -191,19 +215,21 @@ export default function App() {
   }, []);
 
   /**
-   * The Reports page's letter switcher while a replay is open.
+   * Build one letter of the open replay, if it isn't built or building already.
+   *
+   * Split out from `requestReplayReport` so the background prefetch below can call
+   * it without also stealing the active tab out from under whichever letter the
+   * developer is actually looking at.
    *
    * Deliberately without ensureReport's generation counter and in-flight map: those
    * exist because a background queue and a user click race for the same letter, and
    * because a new upload can invalidate a request already in the air. Neither
-   * happens here - every request starts from a click, and a replay is never
-   * replaced underneath itself. The one guard that is still needed is against a
-   * response arriving after the developer left the replay or opened a different
-   * session, which is what the session id check does.
+   * happens here - every request starts from a click or this one prefetch effect,
+   * and a replay is never replaced underneath itself. The one guard that is still
+   * needed is against a response arriving after the developer left the replay or
+   * opened a different session, which is what the session id check does.
    */
-  const requestReplayReport = useCallback((letter) => {
-    setActiveReportType(letter);
-
+  const ensureReplayReport = useCallback((letter) => {
     const active = replayRef.current;
     if (!active || active.reports[letter] || active.generating.has(letter)) return;
 
@@ -242,6 +268,34 @@ export default function App() {
       });
   }, []);
 
+  /** The Reports page's letter switcher while a replay is open. */
+  const requestReplayReport = useCallback((letter) => {
+    setActiveReportType(letter);
+    ensureReplayReport(letter);
+  }, [ensureReplayReport]);
+
+  /**
+   * Build every other letter of an opened replay in the background, same as the
+   * live prefetch queue below does for `sessionId`/`recommendations`. The developer
+   * browser only rebuilds the one letter it opens with (openReport in
+   * DevReportBrowser.jsx costs one request, not three, to list-then-peek quickly),
+   * so without this A/B/C only finished generating one at a time, on click, same as
+   * the live page used to.
+   */
+  useEffect(() => {
+    const sid = replay?.sessionId;
+    const recList = replay?.recommendations?.recommendations;
+    if (!sid || !recList?.length) return;
+
+    recList
+      .map((_, i) => REPORT_TYPE_LETTERS[i])
+      .filter(Boolean)
+      .forEach((letter) => ensureReplayReport(letter));
+    // Re-runs only when a *different* session is opened, not on every report
+    // that streams in - ensureReplayReport reads live state off replayRef itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replay?.sessionId, ensureReplayReport]);
+
   const startNewSession = useCallback(() => {
     // A new upload invalidates every report built from the previous one. Requests
     // already in the air aren't cancellable, but bumping the generation makes
@@ -267,9 +321,8 @@ export default function App() {
    * user spends a while reading the recommendations before picking one. Building
    * them during that time means the report is usually already there on click.
    *
-   * One at a time, in rank order: the server is a single uvicorn worker and pandas
-   * holds the GIL, so three at once finish no sooner but triple peak memory and
-   * compete with whatever the user actually clicks.
+   * All three fire at once so A/B/C are ready together rather than trickling in
+   * rank order.
    */
   useEffect(() => {
     const recList = recommendations?.recommendations;
@@ -279,21 +332,9 @@ export default function App() {
       .map((_, i) => REPORT_TYPE_LETTERS[i])
       .filter(Boolean);
 
-    // Checked between reports, not just at the start: a new upload begins ~7s
-    // before its session id exists, and this queue should stop the moment the user
-    // kicks one off rather than keep building reports for data they've replaced.
-    const gen = generation.current;
-    let cancelled = false;
-    (async () => {
-      for (const letter of letters) {
-        if (cancelled || generation.current !== gen) return;
-        // Resolves rather than rejects, and returns the in-flight promise if the
-        // user got to this letter first, so the queue never double-requests.
-        await ensureReport(letter, sessionId);
-      }
-    })();
-
-    return () => { cancelled = true; };
+    // ensureReport resolves rather than rejects, and returns the in-flight promise
+    // if the user got to this letter first, so firing all three never double-requests.
+    letters.forEach((letter) => { ensureReport(letter, sessionId); });
   }, [sessionId, recommendations, ensureReport]);
 
   const getTabStyle = (tab) => ({
@@ -313,42 +354,45 @@ export default function App() {
           inline styles beat media queries, so anything that has to change at a
           breakpoint can't be set on the element. */}
       <nav className="app-nav" style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         background: 'white',
         borderBottom: '1px solid #e2e8f0'
       }}>
-        <div className="app-nav__brand" style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{
-            width: '34px',
-            height: '34px',
-            borderRadius: '8px',
-            background: '#2563eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="12" width="4" height="9" rx="1" fill="white" />
-              <rect x="10" y="7" width="4" height="14" rx="1" fill="white" />
-              <rect x="17" y="3" width="4" height="18" rx="1" fill="white" />
-            </svg>
-          </div>
-          <span style={{ fontWeight: 700, fontSize: '1.25rem', color: '#1e293b' }}>
-            AI-Dashboard
-          </span>
-        </div>
-
-        <div className="app-nav__tabs" style={{ display: 'flex' }}>
-          {['home', 'upload', 'analysis', 'reports', 'settings',
-            ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
-            <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+        {/* Bounded to the same max-width as the page content below (dashboard.css),
+            so the brand/tabs/stats align with the content column instead of hugging
+            the raw viewport edges on wide screens - the bar itself stays full-bleed. */}
+        <div className="app-nav__inner">
+          <div className="app-nav__brand" style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="12" width="4" height="9" rx="1" fill="white" />
+                <rect x="10" y="7" width="4" height="14" rx="1" fill="white" />
+                <rect x="17" y="3" width="4" height="18" rx="1" fill="white" />
+              </svg>
             </div>
-          ))}
-        </div>
+            <span style={{ fontWeight: 700, fontSize: '1.25rem', color: '#1e293b' }}>
+              AI-Dashboard
+            </span>
+          </div>
 
+          <div className="app-nav__tabs" style={{ display: 'flex' }}>
+            {['home', 'upload', 'analysis', 'reports',
+              ...(DEV_TAB_ENABLED ? ['dev'] : [])].map(tab => (
+              <div key={tab} style={getTabStyle(tab)} onClick={() => setActiveTab(tab)}>
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          <NavStats stats={stats} />
+        </div>
       </nav>
 
       <main className="app-main">
@@ -410,7 +454,6 @@ export default function App() {
             onExitReplay={replay ? () => setReplay(null) : null}
           />
         )}
-        {activeTab === 'settings' && <SettingsDashboard />}
         {/* Hands back a saved session for `replay` above - a slot the prefetch
             effect doesn't watch. Writing one into sessionId/recommendations instead
             would build every remaining letter for a session someone only wanted to

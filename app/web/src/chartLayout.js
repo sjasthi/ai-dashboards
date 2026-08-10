@@ -3,14 +3,21 @@
  *
  * The figure itself is built server-side (app/data/chart_builder.py). This module only
  * dresses it: recessive chrome, and a small number of *selective* direct labels driven
- * by the computed statistics. Never a value on every point - a label beside every dot
- * is chaos and goes unread; the axis, the tooltip and the table carry the rest.
+ * by the computed statistics. A label beside every point is chaos and goes unread on a
+ * line or scatter, so those still only get their two extremes; a bar chart is the
+ * exception, because it's rarely more than a handful of categories and each one's share
+ * of the total is exactly the reading a bar chart exists to give.
  *
  * Plotly takes literal colours, so these mirror tokens.css. Keep them in step.
  */
 const INK = '#111827';
 const INK_SECONDARY = '#6B7280';
 const INK_MUTED = '#9CA3AF';
+// Shared by axis ticks/titles and the direct value labels (percentages,
+// min/max). Both need to read clearly at small sizes, where INK_SECONDARY
+// goes washed-out gray - but full INK (near-black) reads as harsh, especially
+// bolded, so this settles a step short of it rather than at it.
+const STRONG_TEXT = '#374151';
 const SURFACE = '#FFFFFF';
 const GRID = '#EEF0F2';
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
@@ -23,6 +30,10 @@ export const PLOT_CONFIG = {
   displayModeBar: false,
   // Tooltips enhance, they never gate: every value is also in the table view.
   displaylogo: false,
+  // dragmode: false (below, in buildLayout) already stops the rubber-band zoom;
+  // this stops double-click from doing anything either, so there's no leftover
+  // gesture on these charts at all.
+  doubleClick: false,
 };
 
 export function buildLayout(chart, stats, { compact = false } = {}) {
@@ -35,6 +46,12 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
   // below that points at a measure - the median line, the min/max labels - has to
   // follow it across.
   const horizontal = trace?.orientation === 'h';
+  // A pie's slices ARE its identity, not a magnitude - color is the only thing that
+  // says "this is red", so unlike a single-series bar/line (title already names the
+  // one thing plotted) it needs the dependable identity channel a legend gives.
+  // The compact compare-card thumbnail skips it: there's no room, and its own card
+  // heading names the report.
+  const isPie = traceType === 'pie';
 
   const axis = {
     gridcolor: GRID,
@@ -43,8 +60,8 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     gridwidth: 1,
     zeroline: false,
     linecolor: GRID,
-    tickfont: { size: compact ? 9 : 11, color: INK_SECONDARY },
-    title: { font: { size: compact ? 10 : 12, color: INK_SECONDARY } },
+    tickfont: { size: compact ? 10 : 12, color: STRONG_TEXT },
+    title: { font: { size: compact ? 11 : 13, color: STRONG_TEXT, weight: 700 } },
   };
 
   const layout = {
@@ -64,8 +81,29 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     // The card's own heading already names the chart; repeating it inside the plot
     // wastes the vertical space the axis band needs.
     title: undefined,
-    showlegend: false,
+    showlegend: isPie && !compact,
+    // Plotly's default drag gesture is a rubber-band zoom, undone only by a
+    // double-click most people never discover - they drag by accident (a click
+    // that moves a pixel or two is enough to trigger it), the chart zooms into a
+    // sliver of itself, and it reads as broken rather than "zoomed in". These
+    // charts have no need for interactive zoom, so the gesture is off entirely
+    // rather than swapped for pan.
+    dragmode: false,
   };
+
+  if (isPie && !compact) {
+    // Sits in the margin Plotly auto-expands for it (margin.autoexpand defaults
+    // true), clear of the wedges - text tokens, not a series colour, per the
+    // legend/label rule: identity comes from the swatch beside the name.
+    layout.legend = {
+      font: { size: 12, color: STRONG_TEXT, family: FONT },
+      bgcolor: 'rgba(0,0,0,0)',
+      bordercolor: 'transparent',
+      itemsizing: 'constant',
+      yanchor: 'middle',
+      y: 0.5,
+    };
+  }
 
   if (!NON_CARTESIAN.has(traceType)) {
     // `axis` only carries title *font* styling, while base.xaxis/yaxis (built server-side
@@ -109,9 +147,17 @@ export function buildLayout(chart, stats, { compact = false } = {}) {
     if (shape) layout.shapes = [...(base.shapes || []), shape.line];
     if (shape?.annotation) layout.annotations = [...(base.annotations || []), shape.annotation];
 
-    const extremes = extremeLabels(chart, traceType, horizontal);
-    if (extremes.length) {
-      layout.annotations = [...(layout.annotations || []), ...extremes];
+    // A bar chart gets a percent-of-total label on every bar instead of the
+    // min/max value labels: with only a handful of categories (the common case
+    // for a bar chart here) a share of the whole reads faster than an absolute
+    // number, and labelling every point costs nothing extra to scan when there
+    // are this few of them. Line/scatter/histogram keep the two extreme labels -
+    // "percent of total" isn't a meaningful reading of a trend over time.
+    const pointLabels = traceType === 'bar'
+      ? percentLabels(chart, horizontal)
+      : extremeLabels(chart, traceType, horizontal);
+    if (pointLabels.length) {
+      layout.annotations = [...(layout.annotations || []), ...pointLabels];
     }
   }
 
@@ -202,33 +248,70 @@ function extremeLabels(chart, traceType, horizontal = false) {
   ];
 }
 
+/**
+ * Percent-of-total for every bar, placed just past the bar's own end.
+ *
+ * Same anchor as `barEndLabel`/`pointLabel` below (past the tip, outside the
+ * fill) so the label never sits on top of the bar's own colour - a value drawn
+ * inside a solid bar has to fight the fill for contrast, and Plotly's own
+ * `text`/`textposition` puts every label inside the bar with no per-point escape
+ * hatch for the short ones. Reading straight off the plotted arrays, not off
+ * `stats`, keeps this in step with whatever chart_builder actually drew
+ * (it re-sorts and can cap categories before this runs).
+ */
+function percentLabels(chart, horizontal = false) {
+  const trace = chart?.data?.[0];
+  const measures = horizontal ? trace?.x : trace?.y;
+  const categories = horizontal ? trace?.y : trace?.x;
+  if (!Array.isArray(measures) || !Array.isArray(categories)) return [];
+
+  const total = measures.reduce((sum, v) => (
+    typeof v === 'number' && Number.isFinite(v) ? sum + v : sum
+  ), 0);
+  if (!total) return [];
+
+  const labels = [];
+  for (let i = 0; i < measures.length; i += 1) {
+    const v = measures[i];
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const pct = `<b>${((v / total) * 100).toFixed(1)}%</b>`;
+    labels.push(horizontal
+      ? barEndLabel(v, categories[i], pct)
+      : pointLabel(categories[i], v, 'bottom', pct));
+  }
+  return labels;
+}
+
 /** Shared type treatment for both orientations' value labels. */
 const LABEL_STYLE = {
   showarrow: false,
   // Text wears text tokens, never the series colour - the mark beside it already
-  // carries identity, and a light hue is illegible as type.
-  font: { size: 11, color: INK_SECONDARY, family: FONT },
-  bgcolor: 'rgba(255,255,255,0.85)',
+  // carries identity, and a light hue is illegible as type. STRONG_TEXT rather
+  // than the secondary tone: these are the numbers a reader is meant to catch
+  // at a glance, not a recessive annotation - but full INK (near-black) bolded
+  // reads as too harsh, so this stops a step short of it.
+  font: { size: 12, color: STRONG_TEXT, family: FONT },
+  bgcolor: 'rgba(255,255,255,0.95)',
   borderpad: 2,
 };
 
-function pointLabel(x, y, yanchor) {
+function pointLabel(x, y, yanchor, text) {
   return {
     ...LABEL_STYLE,
     x,
     y,
-    text: formatTick(y),
+    text: text ?? formatTick(y),
     yanchor,
     yshift: yanchor === 'bottom' ? 8 : -8,
   };
 }
 
-function barEndLabel(value, category) {
+function barEndLabel(value, category, text) {
   return {
     ...LABEL_STYLE,
     x: value,
     y: category,
-    text: formatTick(value),
+    text: text ?? formatTick(value),
     xanchor: 'left',
     xshift: 6,
   };

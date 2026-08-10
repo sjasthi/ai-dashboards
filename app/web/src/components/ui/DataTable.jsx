@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import Card from './Card';
 import { cellValue, humanizeColumn } from '../../format';
 
 /**
@@ -51,15 +50,11 @@ export default function DataTable({ columns, rows, totalRows, truncated }) {
   };
 
   if (!columns.length || !rows.length) {
-    return (
-      <Card>
-        <div className="empty-state">No rows to show for this report.</div>
-      </Card>
-    );
+    return <div className="empty-state">No rows to show for this report.</div>;
   }
 
   return (
-    <Card>
+    <>
       <div className="table-wrap">
         <table className="data-table">
           <caption className="sr-only">Report data, sortable by column</caption>
@@ -113,6 +108,6 @@ export default function DataTable({ columns, rows, totalRows, truncated }) {
           The full report is held server-side.
         </div>
       )}
-    </Card>
+    </>
   );
 }

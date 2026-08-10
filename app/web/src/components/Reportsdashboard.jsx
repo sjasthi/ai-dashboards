@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import RangeSummary from './ui/RangeSummary';
 import Card from './ui/Card';
 import DataTable from './ui/DataTable';
+import Meter from './ui/Meter';
 import Plot from './ui/Plot';
 import Section from './ui/Section';
+import SkewGlyph from './ui/SkewGlyph';
 import StatTile from './ui/StatTile';
-import { clockTime, compactNumber, signedPercent } from '../format';
+import { compactMeasure, deltaVsAverage, compactNumber, directionGlyph, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
 import { collectChartImages, triggerDownload } from '../export';
 
@@ -14,11 +17,13 @@ import { collectChartImages, triggerDownload } from '../export';
  * Laid out as an inverted pyramid: computed headline numbers, then the chart with its
  * findings, then the distribution summary, then the rows themselves.
  *
- * Every claim on this page is labelled with where it came from. Statistics computed
- * from the report's own rows carry a "computed" chip; the model's pre-execution text
- * is kept as context and marked as such. Before this, the model's *question* was
- * displayed as the top insight and its guess about data quality was rendered as a
- * detected anomaly - neither had ever been checked against the data.
+ * Model-authored text on this page is labelled as such - the AI question above the
+ * report, the AI note inside Data quality - and everything unlabelled is computed
+ * from the report's own rows. Marking the computed side too was the original
+ * design, but a chip on all four insight cards distinguished nothing. Before this,
+ * the model's *question* was displayed as the top insight and its guess about data
+ * quality was rendered as a detected anomaly - neither had ever been checked
+ * against the data.
  */
 export default function ReportsDashboard({
   reports = {},
@@ -33,12 +38,14 @@ export default function ReportsDashboard({
   onExitReplay = null,
 }) {
   const [showTable, setShowTable] = useState(false);
+  const [showSpecs, setShowSpecs] = useState(false);
   const [comparing, setComparing] = useState(false);
 
   const inFlight = generating || new Set();
   const report = reports[activeType];
   const activeError = errors[activeType];
   const recList = recommendations?.recommendations || [];
+  const rec = recList[activeType.charCodeAt(0) - 65];
   const stats = report?.stats;
   const hasStats = !!stats?.available;
 
@@ -125,38 +132,20 @@ export default function ReportsDashboard({
 
           <div className="results-grid">
             <ChartPanel report={report} stats={stats} />
-            <InsightRail report={report} stats={stats} hasStats={hasStats} />
+            <InsightRail report={report} stats={stats} hasStats={hasStats} rec={rec} />
           </div>
 
-          {hasStats && <DistributionStrip stats={stats} />}
+          {hasStats && <DistributionCard stats={stats} report={report} />}
 
-          <Section
-            title="Report data"
-            subtitle={<Provenance report={report} fileProfiles={fileProfiles} />}
-            actions={
-              <button className="table-toggle" onClick={() => setShowTable((s) => !s)}>
-                {showTable ? 'Hide table' : 'Show table'}
-                <span aria-hidden="true">{showTable ? '▲' : '▼'}</span>
-              </button>
-            }
-          >
-            {showTable ? (
-              <DataTable
-                columns={report.data_columns || []}
-                rows={report.rows || []}
-                totalRows={report.report_rows || 0}
-                truncated={!!report.rows_truncated}
-              />
-            ) : (
-              <Card>
-                <div className="empty-state" style={{ padding: '20px' }}>
-                  {(report.report_rows || 0).toLocaleString()} rows ·{' '}
-                  {(report.data_columns || []).length} columns. Every value in the chart
-                  is readable here as text.
-                </div>
-              </Card>
-            )}
-          </Section>
+          <ReportDataCard
+            report={report}
+            fileProfiles={fileProfiles}
+            scopeText={stats?.scope_text}
+            showSpecs={showSpecs}
+            onToggleSpecs={() => setShowSpecs((s) => !s)}
+            showTable={showTable}
+            onToggleTable={() => setShowTable((s) => !s)}
+          />
         </>
       )}
 
@@ -203,6 +192,18 @@ function ReplayBanner({ sessionId, onExit }) {
 
 /* ------------------------------------------------------------------ header */
 
+/**
+ * Two lines shorter than it was, to buy the distribution card its height.
+ *
+ * Gone: the pattern eyebrow (COMPOSITION / RANKING / TREND). It named a branch of the
+ * pipeline, not anything about the reader's data, and the report's own title says what
+ * the report is.
+ *
+ * Gone too: the scope sentence, which now rides in the provenance line under "Report
+ * data". It still has to be on the page - it is what stops someone reading the
+ * headline number as a total for the whole file - but the provenance line already
+ * wraps, so it costs no height there.
+ */
 function ReportHeader({
   report, recList, activeType, onSelectType, inFlight,
   comparing, onToggleCompare,
@@ -215,9 +216,6 @@ function ReportHeader({
     <header className="report-header">
       <div className="report-header__top">
         <div className="report-header__text">
-          <span className="eyebrow">
-            {report?.pattern_used || rec?.pattern_used || 'Report'}
-          </span>
           <h1 className="report-header__title">
             {report?.report_name || rec?.report_name || `Report ${activeType}`}
           </h1>
@@ -270,10 +268,14 @@ function ReportHeader({
  * to tell a fresh result from a stale one, or to check that the pipeline filtered
  * what they thought it filtered.
  */
-function Provenance({ report, fileProfiles }) {
+function Provenance({ report, fileProfiles, scopeText }) {
   if (!report) return null;
 
   const bits = [];
+  // Moved down from beside the title, which the page needed the height back from.
+  // Still first in the line, and still stated as a definition rather than as rows
+  // lost: the filter is the report, and phrasing it as an exclusion reads as a fault.
+  if (scopeText) bits.push(scopeText);
   const files = report.source_files?.length
     ? report.source_files
     : (fileProfiles || []).map((f) => f.name);
@@ -281,8 +283,6 @@ function Provenance({ report, fileProfiles }) {
   if (report.report_rows != null) bits.push(`${report.report_rows.toLocaleString()} data points`);
   if (report.data_columns?.length) bits.push(`${report.data_columns.length} columns`);
   if (report.chart_type) bits.push(`${report.chart_type} chart`);
-  const time = clockTime(report.generated_at);
-  if (time) bits.push(`generated ${time}`);
 
   return (
     <div className="provenance">
@@ -294,6 +294,74 @@ function Provenance({ report, fileProfiles }) {
       ))}
       {report.operations?.map((op) => <code key={op}>{op}</code>)}
     </div>
+  );
+}
+
+/**
+ * "Report data - Specifications" plus "Show table", laid out as bordered cells the
+ * same way DistributionCard is - one head row of controls, then a stack of
+ * disclosure content below it - rather than a title with a wrapping subtitle.
+ *
+ * That switch is what keeps "Show table" pinned in place: it used to sit in a
+ * flex row that centered against the title *and* the provenance line beneath it,
+ * so opening "specifications" (which can wrap to two lines) visibly shifted the
+ * button. Two toggles that both open a block below the head row can't do that -
+ * the head row's own height never changes.
+ */
+function ReportDataCard({
+  report, fileProfiles, scopeText, showSpecs, onToggleSpecs, showTable, onToggleTable,
+}) {
+  const rows = report.report_rows || 0;
+  const columns = (report.data_columns || []).length;
+
+  return (
+    <Card className="report-data-card">
+      <div className="report-data-card__head">
+        <div className="report-data-card__title">
+          <span className="eyebrow">Report data –</span>
+          <button
+            type="button"
+            className="build-details__toggle"
+            aria-expanded={showSpecs}
+            onClick={onToggleSpecs}
+          >
+            Specifications
+            <span aria-hidden="true">{showSpecs ? '▲' : '▼'}</span>
+          </button>
+        </div>
+        <button
+          type="button"
+          className="link-btn"
+          aria-expanded={showTable}
+          onClick={onToggleTable}
+        >
+          {showTable ? 'Hide table' : 'Show table'}{' '}
+          <span aria-hidden="true">{showTable ? '▲' : '▼'}</span>
+        </button>
+      </div>
+
+      {showSpecs && (
+        <div className="report-data-card__cell">
+          <Provenance report={report} fileProfiles={fileProfiles} scopeText={scopeText} />
+        </div>
+      )}
+
+      <div className="report-data-card__cell">
+        {showTable ? (
+          <DataTable
+            columns={report.data_columns || []}
+            rows={report.rows || []}
+            totalRows={report.report_rows || 0}
+            truncated={!!report.rows_truncated}
+          />
+        ) : (
+          <div className="empty-state">
+            Report contains: {rows.toLocaleString()} rows · {columns} columns.
+            Select <strong className="report-data-card__cta">Show table</strong> to view report data.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -320,48 +388,60 @@ function KpiRow({ stats, report }) {
   }
 
   const measure = stats.measure_label || 'value';
+  const isCurrency = !!stats.measure_is_currency;
+  const outlierChip = (
+    <span className="chip chip--warn" title="Flagged as a statistical outlier - see Distribution below">
+      ⚠ outlier
+    </span>
+  );
 
   return (
     <div className="kpi-row">
       <StatTile
         label={stats.headline_label || measure}
-        value={stats.headline_value}
-        sublabel={stats.headline_sublabel}
+        value={compactMeasure(stats.headline_value, isCurrency)}
+        note={stats.headline_sublabel}
       />
       <StatTile
-        label="Peak"
-        value={stats.peak_value}
-        sublabel={stats.peak_label || `highest ${measure}`}
+        label="Highest"
+        value={compactMeasure(stats.peak_value, isCurrency)}
+        name={stats.peak_label}
+        delta={deltaVsAverage(stats.peak_value, stats.mean)}
+        chip={stats.peak_is_outlier ? outlierChip : null}
       />
       <StatTile
-        label="Low"
-        value={stats.trough_value}
-        sublabel={stats.trough_label || `lowest ${measure}`}
+        label="Lowest"
+        value={compactMeasure(stats.trough_value, isCurrency)}
+        name={stats.trough_label}
+        delta={deltaVsAverage(stats.trough_value, stats.mean)}
+        chip={stats.trough_is_outlier ? outlierChip : null}
       />
       {stats.blocks?.includes('trend') ? (
+        /* No sparkline: the chart directly below plots the same series at full
+           size, so a thumbnail of it cost tile height to repeat what the reader
+           was about to see anyway. R² rides in the hover title rather than the
+           visible text - the same move SkewGlyph makes for skewTitle below. */
         <StatTile
           label="Trend"
           value={signedPercent(stats.trend_pct_change)}
-          delta={{
-            direction: stats.trend_direction,
-            pct: stats.trend_pct_change,
-            note: stats.trend_strength
-              ? `${stats.trend_strength} · R² ${stats.trend_r2}`
-              : null,
-          }}
-          sparkline={stats.sparkline}
+          note={
+            <span title={stats.trend_r2 != null ? `R² ${stats.trend_r2} — how well a straight line fits this trend` : undefined}>
+              {directionGlyph(stats.trend_direction)}{' '}
+              {stats.trend_direction === 'flat' ? 'steady' : `${stats.trend_strength || ''} trend`.trim()}
+            </span>
+          }
         />
       ) : stats.blocks?.includes('concentration') ? (
         <StatTile
-          label="Concentration"
+          label="Top categories"
           value={`${stats.top3_share}%`}
-          sublabel={`top ${Math.min(3, stats.n_categories)} of ${stats.n_categories} categories`}
+          note={(stats.top_labels || []).join(', ')}
         />
       ) : (
         <StatTile
           label="Spread"
           value={stats.cv != null ? `${stats.cv}%` : null}
-          sublabel={`variation around a mean of ${compactNumber(stats.mean)}`}
+          note={stats.variance_tier_label}
         />
       )}
     </div>
@@ -377,6 +457,9 @@ function ChartPanel({ report, stats }) {
     <Card className="chart-card">
       <div className="chart-card__head">
         <h2 className="chart-card__title">{title}</h2>
+        {/* Sample size rides here rather than taking a cell in the distribution card.
+            It qualifies everything on the page - how much data every figure below is
+            drawn from - so it belongs beside what is being measured. */}
         {stats?.available && stats.measure_label && (
           <span className="eyebrow">{stats.measure_label}</span>
         )}
@@ -398,11 +481,24 @@ function ChartPanel({ report, stats }) {
 
 /* ------------------------------------------------------------ insight rail */
 
-function InsightRail({ report, stats, hasStats }) {
+/**
+ * Two findings in one card, ruled apart by a hairline.
+ *
+ * Used to be four. Outliers and data quality moved into the distribution card's
+ * "show all statistics" disclosure - they're measurements about the same numbers
+ * that card already summarises, not a separate reading of the report - and "what
+ * to check next" is gone outright, it never told a reader anything the key finding
+ * hadn't already said. What replaced that space is the model's own rationale for
+ * recommending this report: the same two bullets shown on the Analysis page,
+ * carried over so a reader who jumped straight here still gets them.
+ */
+function InsightRail({ report, stats, hasStats, rec }) {
+  const bullets = (rec?.rationale_bullets || []).slice(1, 3);
+
   if (!hasStats) {
     return (
-      <div className="insight-rail">
-        <Card className="insight-card">
+      <Card className="insight-rail">
+        <div className="insight-row">
           <div className="insight-card__head">
             <span className="insight-card__title">No statistics available</span>
           </div>
@@ -411,72 +507,56 @@ function InsightRail({ report, stats, hasStats }) {
               'This report has no numeric measure to compute statistics from.'}
           </div>
           {stats?.llm_caveat && <AiNote text={stats.llm_caveat} />}
-        </Card>
-      </div>
+        </div>
+        {bullets.length > 0 && <AiInsightsCard bullets={bullets} />}
+      </Card>
     );
   }
 
-  const outliers = stats.anomalies || [];
-  const outlierCount = stats.anomaly_count || 0;
-
   return (
-    <div className="insight-rail">
-      <InsightCard title="Key finding" chip>
+    <Card className="insight-rail">
+      <InsightCard title="Key finding">
         {stats.top_insight_text}
       </InsightCard>
 
-      {/* Amber only when something was actually detected. A warning card that always
-          looks like a warning stops being read as one. */}
-      <InsightCard
-        title={outlierCount ? `Outliers (${outlierCount})` : 'Outliers'}
-        icon={outlierCount ? '⚠' : null}
-        variant={outlierCount ? 'warn' : undefined}
-        chip
-      >
-        {stats.anomaly_text}
-        {outliers.length > 0 && (
-          <ul className="outlier-list">
-            {outliers.slice(0, 5).map((a, i) => (
-              <li key={i}>
-                <span className="outlier-list__label">{a.label}</span>
-                <span className="outlier-list__value">
-                  {compactNumber(a.value)}
-                  {a.score != null && ` · z ${a.score > 0 ? '+' : ''}${a.score}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </InsightCard>
-
-      <InsightCard
-        title="Data quality"
-        variant={stats.null_count || report.schema_warning ? 'warn' : undefined}
-        chip
-      >
-        {stats.quality_text || 'No completeness issues found in the charted measure.'}
-        {stats.llm_caveat && <AiNote text={stats.llm_caveat} />}
-      </InsightCard>
-
-      <InsightCard title="What to check next" icon="✓" variant="good" chip>
-        {stats.recommendation_text}
-      </InsightCard>
-    </div>
+      {bullets.length > 0 && <AiInsightsCard bullets={bullets} />}
+    </Card>
   );
 }
 
-function InsightCard({ title, icon, variant, chip, children }) {
+/** The model's own rationale for this report - why it expects this and how to use it. */
+function AiInsightsCard({ bullets }) {
   return (
-    <Card className={`insight-card${variant ? ` insight-card--${variant}` : ''}`}>
+    <InsightCard title="AI insights">
+      <ul className="ai-insights-list">
+        {bullets.map((b, i) => <li key={i}>{b}</li>)}
+      </ul>
+    </InsightCard>
+  );
+}
+
+/**
+ * One finding: a ruled row inside the rail, no longer a card of its own.
+ *
+ * Every one of these used to carry a "computed" chip. When all four say the same
+ * thing the chip stops distinguishing anything - what marks model-authored text is
+ * the AI note inside the row, which is where the distinction is actually load-bearing.
+ *
+ * The amber variant survives the merge as a tinted row rather than a tinted card. It
+ * still has to be able to shout: it is the only thing on the page that says a number
+ * above it is standing on a hole in the data.
+ */
+function InsightCard({ title, icon, variant, children }) {
+  return (
+    <div className={`insight-row${variant ? ` insight-row--${variant}` : ''}`}>
       <div className="insight-card__head">
         <span className="insight-card__title">
           {icon && <span aria-hidden="true">{icon}</span>}
           {title}
         </span>
-        {chip && <span className="chip chip--computed">computed</span>}
       </div>
       <div className="insight-card__body">{children}</div>
-    </Card>
+    </div>
   );
 }
 
@@ -492,7 +572,138 @@ function AiNote({ text }) {
 
 /* ---------------------------------------------------- distribution summary */
 
-function DistributionStrip({ stats }) {
+/**
+ * Ten numbers, grouped by the three jobs they actually do.
+ *
+ * This was a flat strip of ten equal cells. Every statistic got the same weight, and
+ * the five-number summary - which is one shape - was five separate figures the reader
+ * had to hold in their head and compare. Now the summary is drawn on a shared scale,
+ * the two measures of centre sit together with the skew between them, and the three
+ * measures of spread sit under one meter.
+ *
+ * The ten cells are still here, behind the disclosure. Nothing the card visualises is
+ * reachable only by hovering a mark: the exact figures are one click away, and the
+ * chart's own values are in the table below. A tooltip enhances, it never gates.
+ */
+function DistributionCard({ stats, report }) {
+  const [showAll, setShowAll] = useState(false);
+
+  const skewTitle = stats.skew_ratio != null
+    ? `The mean sits ${Math.abs(stats.skew_ratio)} interquartile ranges ` +
+      `${stats.skew_ratio > 0 ? 'above' : 'below'} the median.`
+    : undefined;
+
+  const stdTitle = stats.pct_within_1sd != null
+    ? `Standard deviation (σ) — about ${stats.pct_within_1sd}% of values fall within this distance of the average.`
+    : 'Standard deviation (σ) — the typical distance of a value from the average.';
+  const iqrTitle = 'Interquartile range (IQR) — the span of the middle 50% of values, unaffected by outliers.';
+  const meanTitle = 'Mean — the sum of all values divided by how many there are. Sensitive to outliers.';
+  const medianTitle = 'Median — the middle value when all values are sorted. Unaffected by outliers.';
+
+  return (
+    <Card className="dist-card">
+      <div className="dist-card__head">
+        <span className="eyebrow">Distribution</span>
+        <button
+          type="button"
+          className="link-btn"
+          aria-expanded={showAll}
+          onClick={() => setShowAll((s) => !s)}
+        >
+          {showAll ? 'Hide all statistics' : 'Show all statistics'}{' '}
+          <span aria-hidden="true">{showAll ? '▲' : '▼'}</span>
+        </button>
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label">Range</div>
+        <RangeSummary
+          min={stats.min}
+          p25={stats.p25}
+          median={stats.median}
+          p75={stats.p75}
+          max={stats.max}
+          fenceLow={stats.fence_low}
+          fenceHigh={stats.fence_high}
+          anomalies={stats.anomalies || []}
+          measureLabel={stats.measure_label}
+          iqrTitle={iqrTitle}
+        />
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label-row">
+          <div className="dist-card__cell-label">Center</div>
+          {/* Neutral, not a status colour: a skewed series is a shape, not a
+              problem. What it does tell the reader is which of the two figures
+              below to trust as the typical value. Alongside the section label
+              rather than under the numbers, so it reads as a property of "center"
+              being described, not a third stat competing with mean/median. */}
+          {stats.skew_label && (
+            <span className="chip chip--neutral" title={skewTitle}>{stats.skew_label}</span>
+          )}
+        </div>
+        <SkewGlyph
+          skewLevel={stats.skew_level}
+          skewRatio={stats.skew_ratio}
+          medianTitle={medianTitle}
+          meanTitle={meanTitle}
+        />
+        <div className="dist-card__pair">
+          <span className="dist-card__pair-label" title={meanTitle}>Average</span>
+          <span className="dist-card__pair-value" title={meanTitle}>{compactNumber(stats.mean)}</span>
+          <span className="dist-card__pair-label" title={medianTitle}>Midpoint</span>
+          <span className="dist-card__pair-value" title={medianTitle}>{compactNumber(stats.median)}</span>
+        </div>
+      </div>
+
+      <div className="dist-card__cell">
+        <div className="dist-card__cell-label-row">
+          <div className="dist-card__cell-label">Spread</div>
+          {/* CV has no upper bound, so the meter saturates at 100% and two very
+              different extremes fill the same bar. That is why the badge beside the
+              label prints the figure rather than leaving the bar to carry it: the
+              meter shows the band, the badge shows the number. */}
+          <span
+            className={`chip chip--${VARIANCE_CHIP[stats.variance_level] || 'neutral'}`}
+            title="Coefficient of variation — the spread of the values relative to their average."
+          >
+            {stats.variance_label || 'Variance —'}
+          </span>
+        </div>
+        <Meter
+          value={stats.cv}
+          level={stats.variance_level}
+          label={stats.variance_label || 'Variance not measurable'}
+        />
+        <div className="dist-card__pair dist-card__pair--spread">
+          <span className="dist-card__pair-label" title={stdTitle}>Average variation</span>
+          <span className="dist-card__pair-value" title={stdTitle}>{compactNumber(stats.std)}</span>
+          <span className="dist-card__pair-label" title={iqrTitle}>Range of middle 50%</span>
+          <span className="dist-card__pair-value" title={iqrTitle}>{compactNumber(stats.iqr)}</span>
+        </div>
+      </div>
+
+      {showAll && <DistributionStrip stats={stats} report={report} />}
+    </Card>
+  );
+}
+
+/* A wide spread is a property of the data, not a fault, so the top band is amber and
+   never red - red on this page means something went wrong. */
+const VARIANCE_CHIP = { low: 'good', moderate: 'neutral', high: 'warn' };
+
+/**
+ * The ten raw figures, plus outliers and data quality. No longer the page's
+ * distribution summary - it is what DistributionCard's disclosure opens - but
+ * still the place every exact value lives, and still what the PDF export renders.
+ *
+ * Outliers and data quality used to be their own cards beside the chart. They
+ * moved here because they're both measurements about the same numbers this strip
+ * already lays out, not a separate reading of the report - and putting them
+ * behind the same disclosure keeps the default view to what most readers need.
+ */
+function DistributionStrip({ stats, report }) {
   const items = [
     ['n', stats.count?.toLocaleString()],
     ['min', compactNumber(stats.min)],
@@ -506,15 +717,55 @@ function DistributionStrip({ stats }) {
     ['CV', stats.cv != null ? `${stats.cv}%` : '—'],
   ].filter(([, v]) => v !== undefined && v !== null);
 
+  const outliers = stats.anomalies || [];
+  const outlierCount = stats.anomaly_count || 0;
+  // Same reasoning as the insight rail used to carry in its comment: a join loss
+  // or a schema warning is a real hole in the numbers above and earns the amber
+  // tint; a filter's excluded rows are scope, not a fault, and live elsewhere.
+  const qualityWarn = !!(stats.null_count || stats.join_loss_rows || report?.schema_warning);
+
   return (
-    <Card className="stat-strip">
-      {items.map(([label, value]) => (
-        <div className="stat-strip__item" key={label}>
-          <div className="stat-strip__label">{label}</div>
-          <div className="stat-strip__value">{value}</div>
+    <>
+      <div className="stat-strip dist-card__all">
+        {items.map(([label, value]) => (
+          <div className="stat-strip__item" key={label}>
+            <div className="stat-strip__label">{label}</div>
+            <div className="stat-strip__value">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="dist-card__all dist-card__meta">
+        <div className={`dist-card__meta-col${outlierCount ? ' dist-card__meta-col--warn' : ''}`}>
+          <div className="dist-card__meta-label">
+            {outlierCount ? `⚠ Outliers (${outlierCount})` : 'Outliers'}
+          </div>
+          <div className="dist-card__meta-body">
+            {stats.anomaly_text}
+            {outliers.length > 0 && (
+              <ul className="outlier-list">
+                {outliers.slice(0, 5).map((a, i) => (
+                  <li key={i}>
+                    <span className="outlier-list__label">{a.label}</span>
+                    <span className="outlier-list__value">
+                      {compactNumber(a.value)}
+                      {a.score != null && ` · z ${a.score > 0 ? '+' : ''}${a.score}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-      ))}
-    </Card>
+
+        <div className={`dist-card__meta-col${qualityWarn ? ' dist-card__meta-col--warn' : ''}`}>
+          <div className="dist-card__meta-label">
+            {qualityWarn ? '⚠ Data quality' : 'Data quality'}
+          </div>
+          <div className="dist-card__meta-body">{stats.quality_text || 'No issues found.'}</div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -661,14 +912,15 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
 
   if (!generated.length) {
     return (
-      <Section title="Export">
-        <Card>
-          <div className="empty-state" style={{ padding: '24px' }}>
-            Generate a report first — then you can download it as a PDF or an HTML
-            file, or email it.
-          </div>
-        </Card>
-      </Section>
+      <Card className="export-panel">
+        <div className="export-panel__head">
+          <span className="eyebrow">Export</span>
+        </div>
+        <div className="empty-state" style={{ padding: '24px' }}>
+          Generate a report first — then you can download it as a PDF or an HTML
+          file, or email it.
+        </div>
+      </Card>
     );
   }
 
@@ -719,9 +971,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
   });
 
   return (
-    <Section
-      title="Export"
-      actions={
+    <Card className="export-panel">
+      <div className="export-panel__head">
+        <span className="eyebrow">Export</span>
         <div className="export-panel__links">
           <button
             className="link-btn"
@@ -738,9 +990,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             Clear
           </button>
         </div>
-      }
-    >
-      <Card className="export-panel">
+      </div>
+
+      <div className="export-panel__body">
         <div className="export-panel__choices">
           {letters.map((letter) => {
             const report = reports[letter];
@@ -795,7 +1047,7 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             id="export-email"
             type="text"
             className="export-panel__input"
-            placeholder="you@example.com, teammate@example.com"
+            placeholder="recipient@example.com"
             value={recipients}
             disabled={disabled || emailConfigured === false}
             onChange={(e) => { setRecipients(e.target.value); setStatus(null); }}
@@ -836,7 +1088,7 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
             {status.text}
           </div>
         )}
-      </Card>
-    </Section>
+      </div>
+    </Card>
   );
 }

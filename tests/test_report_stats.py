@@ -143,6 +143,68 @@ def test_symmetric_data_has_no_skew_flag():
 
 
 # ---------------------------------------------------------------------------
+# Band labels - the words the distribution card and both exports render
+# ---------------------------------------------------------------------------
+
+def test_skew_label_names_the_direction():
+    stats = build_report_stats(daily_report([1, 1, 2, 2, 2, 3, 3, 4, 50, 60]), cfg())
+    assert stats["skew_level"] == "right"
+    assert stats["skew_label"] == "Right-skewed"
+
+
+def test_symmetric_data_is_labelled_symmetric_not_left_blank():
+    # skew_flag is None here, but a ratio *was* computed and came back near zero.
+    # "Symmetric" is a finding; a blank badge would read as "not measured".
+    stats = build_report_stats(daily_report([10, 20, 30, 40, 50]), cfg())
+    assert stats["skew_flag"] is None
+    assert stats["skew_level"] == "symmetric"
+    assert stats["skew_label"] == "Symmetric"
+
+
+def test_unmeasurable_skew_has_no_label():
+    # Every value identical: the scale collapses, so nothing was measured and the
+    # card must show no badge rather than claim symmetry.
+    stats = build_report_stats(daily_report([7, 7, 7, 7, 7]), cfg())
+    assert stats["skew_ratio"] is None
+    assert stats["skew_level"] is None
+    assert stats["skew_label"] is None
+
+
+@pytest.mark.parametrize(
+    "values, level, word",
+    [
+        # CV ~4%: tight cluster.
+        ([100, 101, 99, 102, 98, 100], "low", "Low variance"),
+        # CV ~30%.
+        ([50, 100, 150, 100, 75, 125], "moderate", "Moderate variance"),
+        # CV ~120%: one spike dwarfs the rest.
+        ([1, 2, 3, 4, 5, 60], "high", "High variance"),
+    ],
+)
+def test_variance_bands(values, level, word):
+    stats = build_report_stats(daily_report(values), cfg())
+    assert stats["variance_level"] == level
+    assert stats["variance_label"] == f"{word} ({stats['cv']}%)"
+
+
+def test_variance_band_boundaries_are_inclusive_at_the_top():
+    from app.data.report_stats import _CV_LOW, _CV_MODERATE
+
+    # Guards the comparison operators rather than any particular dataset: `moderate`
+    # owns both edges, so neither boundary value can fall through to a neighbouring
+    # band or to no band at all.
+    assert _CV_LOW < _CV_MODERATE
+
+
+def test_variance_label_absent_when_cv_undefined():
+    # CV is undefined at a mean of zero, and an undefined ratio is not a low one.
+    stats = build_report_stats(daily_report([-10, 10, -20, 20]), cfg())
+    assert stats["cv"] is None
+    assert stats["variance_level"] is None
+    assert stats["variance_label"] is None
+
+
+# ---------------------------------------------------------------------------
 # The `sum` gate - the bug where means got added up
 # ---------------------------------------------------------------------------
 
@@ -514,6 +576,30 @@ def test_granularity_flows_into_peak_label():
     assert stats["peak_label"] == "2022"
 
 
+def test_year_month_label_strings_infer_monthly_granularity_without_a_hint():
+    """A derived column (e.g. regex_extract("close_date", "^(\\d{4}-\\d{2})") ->
+    "close_month") isn't in any file profile, so the caller can't pass a granularity
+    hint for it - _axis_granularity's exact-name lookup misses and passes None.
+    pd.to_datetime still happily parses "2023-06" as 2023-06-01, so without inferring
+    monthly-ness from the strings themselves, the peak label would fabricate a "1"
+    day-of-month: "1 Jun 2023" instead of "Jun 2023"."""
+    df = pd.DataFrame({
+        "close_month": ["2023-03", "2023-04", "2023-05", "2023-06"],
+        "sales_sum": [10, 90, 20, 30],
+    })
+    stats = build_report_stats(df, cfg(x="close_month", y="sales_sum"))
+    assert stats["peak_label"] == "Apr 2023"
+
+
+def test_year_label_strings_infer_yearly_granularity_without_a_hint():
+    df = pd.DataFrame({
+        "sale_year": ["2021", "2022", "2023", "2024"],
+        "sales_sum": [10, 90, 20, 30],
+    })
+    stats = build_report_stats(df, cfg(x="sale_year", y="sales_sum"))
+    assert stats["peak_label"] == "2022"
+
+
 # ---------------------------------------------------------------------------
 # Ordered-axis detection
 # ---------------------------------------------------------------------------
@@ -634,7 +720,7 @@ def test_quality_block_present_even_when_stats_unavailable():
 def test_clean_data_reports_no_missing_values():
     stats = build_report_stats(daily_report([1, 2, 3, 4]), cfg())
     assert stats["null_count"] == 0
-    assert "No missing values" in stats["quality_text"]
+    assert "No missing data in this chart." in stats["quality_text"]
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,9 @@ Usage (in api.py, inside generate_report_endpoint, after `chart = build_chart_fi
 """
 
 import math
+import re
 import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -60,6 +62,43 @@ _R2_MODERATE = 0.2
 # report - enough of them and the headline categories aren't really the story.
 _TAIL_SHARE = 0.01
 
+# CV bands behind the variance badge. A bare "CV: 88%" tells a reader who doesn't know
+# the statistic nothing at all, so the band is named in words and the number rides
+# along in parentheses.
+#
+# The wording stays neutral on purpose. A wide spread is not a fault - it is a property
+# of the data - so the badge says "High variance", never "poor" or "unstable", and the
+# top band is amber rather than red. Red in this app means something went wrong.
+_CV_LOW = 15.0
+_CV_MODERATE = 50.0
+
+# Authored here rather than in the UI because three places render them - the dashboard,
+# the HTML export and the PDF export - and three copies of a threshold drift.
+_VARIANCE_LABELS = {
+    "low": "Low variance",
+    "moderate": "Moderate variance",
+    "high": "High variance",
+}
+
+_SKEW_LABELS = {
+    "right": "Right-skewed",
+    "left": "Left-skewed",
+    "symmetric": "Symmetric",
+}
+
+# A keyword match on the un-suffixed column name, not a schema fact - no column in
+# this pipeline is ever typed as currency. Mirrors the money-measure vocabulary
+# recommendation_requester.py already uses to steer the LLM ("revenue, cost,
+# freight...", recommendation_requester.py:184) rather than inventing a second list.
+# Deliberately excludes generic words like "total" that name an aggregation rather
+# than a unit of money.
+_MONEY_WORDS = {
+    "revenue", "cost", "costs", "price", "prices", "value", "sales", "amount",
+    "budget", "spend", "salary", "salaries", "income", "profit", "profits",
+    "freight", "fee", "fees", "expense", "expenses", "payment", "payments",
+    "earnings", "wage", "wages", "margin", "fare",
+}
+
 _STRFTIME_BY_GRANULARITY = {
     "yearly": "%Y",
     "monthly": "%b %Y",
@@ -75,6 +114,7 @@ def build_report_stats(
     granularity: Optional[str] = None,
     llm_caveat: Optional[str] = None,
     schema_warning: Optional[str] = None,
+    row_ledger: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute descriptive, trend, concentration and outlier statistics from a report
@@ -89,7 +129,7 @@ def build_report_stats(
     (`top_insight_text` / `anomaly_text` / `recommendation_text` / `quality_text`),
     so callers can drop it into a response without extra branching.
     """
-    quality = _quality_block(df, plotly_config, llm_caveat, schema_warning)
+    quality = _quality_block(df, plotly_config, llm_caveat, schema_warning, row_ledger)
 
     if df is None or df.empty or not plotly_config:
         return _unavailable_result("The report returned no rows to analyze.", quality)
@@ -127,6 +167,10 @@ def build_report_stats(
         parsed = _as_datetime(labels)
         if parsed is not None:
             display_labels = parsed
+
+    # The label values themselves can only narrow granularity, never widen it - see
+    # _label_granularity for why this has to override the file-profile-derived value.
+    granularity = _label_granularity(labels) or granularity
 
     result: Dict[str, Any] = {
         "available": True,
@@ -216,6 +260,36 @@ def _as_datetime(labels: Optional[pd.Series]) -> Optional[pd.Series]:
         parsed = pd.to_datetime(labels, errors="coerce")
     # All-or-nothing: a column where only some values parse is not a date axis.
     return parsed if parsed.notna().all() else None
+
+
+_YEAR_RE = re.compile(r"^\d{4}$")
+_YEAR_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _label_granularity(labels: Optional[pd.Series]) -> Optional[str]:
+    """Granularity implied by the label strings themselves, e.g. a "close_month"
+    column produced by regex-extracting "2017-06" out of a daily close_date.
+
+    _axis_granularity (api.py) looks up granularity by column name against the
+    *original* file profile, so a derived column like that - present in the report's
+    dataframe but not in any uploaded file - always misses and falls back to
+    day-precision formatting. pd.to_datetime happily parses "2017-06" as
+    2017-06-01, so the miss doesn't surface as a missing value; it surfaces as a
+    fabricated "1" day-of-month in every date this axis prints. Checking the raw
+    strings catches it regardless of what the derived column happens to be named,
+    and can only make the result coarser - a "YYYY-MM" string can't carry day
+    precision no matter what granularity the source column was profiled at.
+    """
+    if labels is None:
+        return None
+    non_null = labels.dropna().astype(str)
+    if non_null.empty:
+        return None
+    if non_null.str.match(_YEAR_MONTH_RE).all():
+        return "monthly"
+    if non_null.str.match(_YEAR_RE).all():
+        return "yearly"
+    return None
 
 
 def _is_ordered_axis(labels: pd.Series) -> bool:
@@ -319,6 +393,35 @@ def _descriptive_block(
         out["skew_ratio"] = None
         out["skew_flag"] = None
 
+    # skew_flag is None both when the data is symmetric and when the scale collapsed and
+    # nothing could be measured. Those are different claims, so the badge only says
+    # "Symmetric" for the first: a ratio was computed and it came back near zero.
+    if out["skew_flag"]:
+        out["skew_level"] = out["skew_flag"]
+    elif out["skew_ratio"] is not None:
+        out["skew_level"] = "symmetric"
+    else:
+        out["skew_level"] = None
+    out["skew_label"] = _SKEW_LABELS.get(out["skew_level"])
+
+    cv = out["cv"]
+    if cv is None:
+        out["variance_level"] = None
+        out["variance_label"] = None
+        out["variance_tier_label"] = None
+    else:
+        if cv < _CV_LOW:
+            out["variance_level"] = "low"
+        elif cv <= _CV_MODERATE:
+            out["variance_level"] = "moderate"
+        else:
+            out["variance_level"] = "high"
+        out["variance_tier_label"] = _VARIANCE_LABELS[out["variance_level"]]
+        # Kept for anywhere still spelling out the number (PDF/HTML export prose);
+        # the KPI tile shows the number in its own value slot and only needs the
+        # bare tier word above.
+        out["variance_label"] = f"{out['variance_tier_label']} ({cv}%)"
+
     peak_pos = int(values.values.argmax())
     trough_pos = int(values.values.argmin())
     out["peak_value"] = float(values.iloc[peak_pos])
@@ -397,6 +500,9 @@ def _trend_block(data: pd.DataFrame, values: pd.Series, label_col: str) -> Dict[
     return out
 
 
+_CONCENTRATION_TOP_N = 3
+
+
 def _concentration_block(
     values: pd.Series, labels: pd.Series, granularity: Optional[str]
 ) -> Optional[Dict[str, Any]]:
@@ -404,6 +510,14 @@ def _concentration_block(
 
     Only meaningful for non-negative additive measures - a share of a total that
     mixes positive and negative values isn't a share of anything.
+
+    Also only meaningful when the top `_CONCENTRATION_TOP_N` categories are a real
+    subset of the data, not most or all of it: "top 3 of 3" (or of 4, of 5) is
+    mechanically ~100% no matter how the values are distributed, so it isn't a
+    finding. Requiring the excluded tail to be at least as large as the shown head
+    (n_cat >= 2 * top N) is the same reasoning market-concentration ratios like CR4
+    use - a fixed-count share ratio only carries information once N meaningfully
+    exceeds the count being summed.
     """
     if (values < 0).any():
         return None
@@ -411,20 +525,23 @@ def _concentration_block(
     if total <= 0:
         return None
 
+    n_cat = int(labels.nunique(dropna=True))
+    if n_cat < 2 * _CONCENTRATION_TOP_N:
+        return None
+
     # Rank by position rather than index label, so this holds regardless of what the
     # upstream pipeline left the index looking like. One row per category is the norm
     # here (these axes come out of a groupby), so a row share is a category share.
     order = np.argsort(-values.to_numpy())
     shares = values.to_numpy()[order] / total
-    n_cat = int(labels.nunique(dropna=True))
 
-    top_labels = [_fmt_label(labels.iloc[int(pos)], granularity) for pos in order[:3]]
+    top_labels = [_fmt_label(labels.iloc[int(pos)], granularity) for pos in order[:_CONCENTRATION_TOP_N]]
 
     return {
         "total": _round(total),
         "n_categories": n_cat,
         "top1_share": _round(float(shares[0]) * 100),
-        "top3_share": _round(float(shares[:3].sum()) * 100),
+        "top3_share": _round(float(shares[:_CONCENTRATION_TOP_N].sum()) * 100),
         "top_labels": top_labels,
         "tail_count": int((shares < _TAIL_SHARE).sum()),
     }
@@ -440,7 +557,11 @@ def _outlier_block(
     """
     n = len(values)
     if n < 4:
-        return {"anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None}
+        return {
+            "anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None,
+            "fence_low": None, "fence_high": None,
+            "peak_is_outlier": False, "trough_is_outlier": False,
+        }
 
     median = float(values.median())
     mad = float((values - median).abs().median())
@@ -478,7 +599,11 @@ def _outlier_block(
         scores = pd.Series(np.nan, index=values.index)
         flagged = deviations > 0
     else:
-        return {"anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None}
+        return {
+            "anomalies": [], "anomaly_count": 0, "anomaly_method": None, "anomaly_threshold": None,
+            "fence_low": None, "fence_high": None,
+            "peak_is_outlier": False, "trough_is_outlier": False,
+        }
 
     anomalies: List[Dict[str, Any]] = []
     for pos in np.flatnonzero(flagged.to_numpy()):
@@ -498,6 +623,14 @@ def _outlier_block(
 
     anomalies.sort(key=lambda a: a["deviation"] or 0, reverse=True)
 
+    # The dataset's max/min always carry the largest deviation on their side, so if
+    # either is flagged at all it's flagged here - checked against the full list,
+    # before the sidebar-sized slice below, so a truncated `shown` can never hide it.
+    peak_value = float(values.max())
+    trough_value = float(values.min())
+    peak_is_outlier = any(a["direction"] == "high" and a["value"] == peak_value for a in anomalies)
+    trough_is_outlier = any(a["direction"] == "low" and a["value"] == trough_value for a in anomalies)
+
     # A wide report can flag more points than any sidebar can show. Send the most
     # extreme few and report the true count alongside, so the UI never implies the
     # list is complete.
@@ -510,6 +643,8 @@ def _outlier_block(
         "anomaly_threshold": threshold,
         "fence_low": _round(lo_fence) if iqr > 0 else None,
         "fence_high": _round(hi_fence) if iqr > 0 else None,
+        "peak_is_outlier": peak_is_outlier,
+        "trough_is_outlier": trough_is_outlier,
     }
 
 
@@ -518,12 +653,23 @@ def _quality_block(
     plotly_config: Optional[Dict[str, Any]],
     llm_caveat: Optional[str],
     schema_warning: Optional[str],
+    row_ledger: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Completeness measured on the report itself, plus any warning carried in.
 
     The LLM's caveat is kept but kept *separate* - it is a guess made before the data
     was aggregated, and the frontend labels it as such rather than mixing it in with
     measured null counts.
+
+    Two facts come from the builder's row ledger and are deliberately not merged:
+
+    - Rows a *filter* removed are the report's scope. "Won deals only, 4,238 of
+      8,800 rows" describes what the report covers; calling those rows excluded
+      would read as data going missing when nothing went wrong.
+    - Rows an inner *join* dropped are a defect. They met the user's scope and were
+      removed anyway, usually because the same thing is spelled two ways in two
+      files, and the report's totals come out short with nothing else on the page
+      saying so. Only this half becomes a warning.
     """
     null_pct = None
     null_count = None
@@ -534,13 +680,37 @@ def _quality_block(
             null_count = int(df[col].isna().sum())
             null_pct = _round(null_count / len(df) * 100)
 
-    text_parts: List[str] = []
+    ledger = row_ledger or {}
+    join_losses = ledger.get("join_losses") or []
+    join_loss_rows = sum(int(loss.get("rows") or 0) for loss in join_losses)
+    join_rescues = ledger.get("join_rescues") or []
+    join_rescue_rows = sum(int(r.get("rows") or 0) for r in join_rescues)
+
+    # The join loss leads: it is the one statement here that means a number on the
+    # chart is wrong, so it should not sit behind a null count of zero.
+    warning_parts: List[str] = [_join_loss_sentence(loss) for loss in join_losses]
     if null_count:
-        text_parts.append(f"{null_count} of {len(df)} rows ({null_pct}%) have no measured value.")
-    elif null_count == 0:
-        text_parts.append("No missing values in the charted measure.")
+        warning_parts.append(f"{null_count} of {len(df)} rows ({null_pct}%) are missing data.")
     if schema_warning:
-        text_parts.append(f"Schema: {schema_warning}")
+        warning_parts.append(f"Schema: {schema_warning}")
+
+    text_parts = list(warning_parts)
+
+    # The all-clear only when that is the whole story. Appended to a dropped-rows
+    # warning it reads as a contradiction - the rows that went missing are exactly
+    # the ones no longer there to be counted. Keyed on the warnings rather than on
+    # text_parts so a rescue-only report keeps the line: a rescue is not a
+    # completeness finding and must not stand in for one.
+    #
+    # "in this chart" rather than "in the charted measure": both sentences describe
+    # the one column the chart plots, but the reader has no reason to know the word
+    # measure, and the card is titled Data quality already.
+    if not warning_parts and null_count == 0:
+        text_parts.append("No missing data in this chart.")
+
+    # Rescues last, and never part of warning_parts: nothing is missing and nothing
+    # needs fixing in the report, so this must not set the card's warning tone.
+    text_parts.extend(_join_rescue_sentence(r) for r in join_rescues)
 
     return {
         "null_count": null_count,
@@ -548,7 +718,113 @@ def _quality_block(
         "schema_warning": schema_warning,
         "llm_caveat": llm_caveat,
         "quality_text": " ".join(text_parts) if text_parts else None,
+        "join_losses": join_losses,
+        "join_loss_rows": join_loss_rows,
+        "join_rescues": join_rescues,
+        "join_rescue_rows": join_rescue_rows,
+        "scope_text": _scope_sentence(ledger),
     }
+
+
+def _join_rescue_sentence(rescue: Dict[str, Any]) -> str:
+    """A repair stated as a fact, not a warning.
+
+    These rows are in the report and their numbers are right. What the reader needs
+    is to know the two files spell the same thing differently, because that is a
+    fact about their data they will meet again - and because a silent repair would
+    remove any reason to fix the source.
+    """
+    rows = int(rescue.get("rows") or 0)
+    noun = "row" if rows == 1 else "rows"
+    key = rescue.get("key") or "the join key"
+    where = _display_filename(rescue.get("file"))
+    sentence = (
+        f"{rows:,} {noun} matched on {key} in {where} by ignoring case, spacing "
+        f"and punctuation."
+    )
+
+    pairs = [
+        p for p in (rescue.get("pairs") or [])
+        if str(p.get("left", "")).strip() and str(p.get("right", "")).strip()
+    ]
+    if pairs:
+        shown = ", ".join(f"“{p['left']}” matched “{p['right']}”" for p in pairs[:3])
+        sentence += f" {shown}."
+    return sentence
+
+
+def _join_loss_sentence(loss: Dict[str, Any]) -> str:
+    """One dropped-rows warning, naming the values that failed to match.
+
+    The example values are the point: an unmatched key is nearly always readable as
+    a typo the moment it is shown next to the file it failed against.
+    """
+    rows = int(loss.get("rows") or 0)
+    where = _display_filename(loss.get("file"))
+    noun = "row" if rows == 1 else "rows"
+    sentence = (
+        f"{rows:,} {noun} had no matching entry in {where} and are not included "
+        f"in this report."
+    )
+
+    examples = [str(e) for e in (loss.get("examples") or []) if str(e).strip()]
+    if examples:
+        shown = ", ".join(f"“{e}”" for e in examples[:3])
+        sentence += f" Unmatched {loss.get('key') or 'key'} values include {shown}."
+    return sentence
+
+
+def _scope_sentence(ledger: Dict[str, Any]) -> Optional[str]:
+    """What the report covers, stated as a definition rather than as a loss.
+
+    None when nothing was filtered - a report over every row has no scope worth
+    stating, and "8,800 of 8,800 rows" is noise.
+    """
+    scope = ledger.get("scope") or []
+    if not scope:
+        return None
+
+    source_rows = ledger.get("source_rows")
+    rows_after = scope[-1].get("rows_after")
+    if source_rows is None or rows_after is None or rows_after == source_rows:
+        return None
+
+    conditions = [
+        f"{c.get('column')} {c.get('condition')}".strip()
+        for step in scope for c in (step.get("conditions") or [])
+        if c.get("column")
+    ]
+    where = f"Filtered to {', '.join(conditions)}" if conditions else "Filtered"
+    return f"{where} — {rows_after:,} of {source_rows:,} rows."
+
+
+def _display_filename(name: Optional[str]) -> str:
+    """A file name a reader recognises.
+
+    Sheets from a workbook arrive as "products (whole workbook name).xlsx"; the
+    workbook is the same one for every sheet in the report, so it identifies
+    nothing and only makes the sentence hard to read. The leading sheet name is
+    what the reader picked in the Upload tab.
+    """
+    if not name:
+        return "the joined file"
+    stem = Path(str(name)).stem
+    return stem.split(" (")[0].strip() or stem
+
+
+def _looks_like_currency(base_column: str, agg: Optional[str]) -> bool:
+    """Whether this measure reads as a dollar amount rather than a plain count.
+
+    COUNT/NUNIQUE never qualifies, whatever the base name looks like - "color_count"
+    is a count of rows, not money, no matter that "color" or any other base name
+    might otherwise coincide with a money word. Everything else (sum, mean, a raw
+    pass-through column) is a real aggregate of the underlying values, so a money
+    base name still means money.
+    """
+    if agg in ("count", "nunique"):
+        return False
+    words = re.split(r"[_\s]+", base_column.lower())
+    return any(w in _MONEY_WORDS for w in words)
 
 
 def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
@@ -560,6 +836,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
     """
     base, agg = split_agg_suffix(value_col)
     base_label = humanize_column(value_col)
+    is_currency = _looks_like_currency(base, agg)
 
     if agg in ADDITIVE_AGGS:
         total = _round(stats["_sum_raw"])
@@ -569,6 +846,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
             "headline_sublabel": f"across {stats['count']:,} data points",
             "sum": total,
             "sum_is_meaningful": True,
+            "measure_is_currency": is_currency,
         }
 
     return {
@@ -577,6 +855,7 @@ def _headline(stats: Dict[str, Any], value_col: str) -> Dict[str, Any]:
         "headline_sublabel": f"± {stats['std']} std dev",
         "sum": None,
         "sum_is_meaningful": False,
+        "measure_is_currency": is_currency,
     }
 
 

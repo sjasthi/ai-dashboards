@@ -382,9 +382,12 @@ export default function DevReportBrowser({ onLoadSession }) {
 function TokenGate({ onSubmit }) {
   const [value, setValue] = useState('');
   return (
-    <div className="dev-browser" style={{ maxWidth: 460 }}>
+    // Same width cap as Home/Upload/Analysis's centred column, not the 460px this
+    // used to carry on its own - that squeezed the token-source sentence into three
+    // ragged lines and left the card narrower than every other page's content.
+    <div className="dev-browser" style={{ maxWidth: 'var(--content-max)' }}>
       <Card>
-        <div style={{ padding: 4 }}>
+        <div style={{ padding: 32 }}>
           <span className="eyebrow">Developer tool</span>
           <h2 style={{ margin: '6px 0 8px', fontSize: '1.15rem' }}>Admin token</h2>
           <p style={{ fontSize: 14, color: '#64748b', marginTop: 0 }}>
