@@ -9,7 +9,7 @@ import SkewGlyph from './ui/SkewGlyph';
 import StatTile from './ui/StatTile';
 import { compactMeasure, deltaVsAverage, compactNumber, directionGlyph, signedPercent } from '../format';
 import { emailReports, exportReports, fetchExportStatus } from '../api';
-import { collectChartImages, triggerDownload } from '../export';
+import { collectChartImages, collectDistImages, triggerDownload } from '../export';
 
 /**
  * STEP 3 — RESULTS.
@@ -38,7 +38,7 @@ export default function ReportsDashboard({
   onExitReplay = null,
 }) {
   const [showTable, setShowTable] = useState(false);
-  const [showSpecs, setShowSpecs] = useState(false);
+  const [showBuildInfo, setShowBuildInfo] = useState(false);
   const [comparing, setComparing] = useState(false);
 
   const inFlight = generating || new Set();
@@ -141,8 +141,8 @@ export default function ReportsDashboard({
             report={report}
             fileProfiles={fileProfiles}
             scopeText={stats?.scope_text}
-            showSpecs={showSpecs}
-            onToggleSpecs={() => setShowSpecs((s) => !s)}
+            showBuildInfo={showBuildInfo}
+            onToggleBuildInfo={() => setShowBuildInfo((s) => !s)}
             showTable={showTable}
             onToggleTable={() => setShowTable((s) => !s)}
           />
@@ -199,10 +199,10 @@ function ReplayBanner({ sessionId, onExit }) {
  * pipeline, not anything about the reader's data, and the report's own title says what
  * the report is.
  *
- * Gone too: the scope sentence, which now rides in the provenance line under "Report
+ * Gone too: the scope sentence, which now leads the build-info block under "Report
  * data". It still has to be on the page - it is what stops someone reading the
- * headline number as a total for the whole file - but the provenance line already
- * wraps, so it costs no height there.
+ * headline number as a total for the whole file - but that block is a disclosure
+ * behind its own toggle, so it costs no height here.
  */
 function ReportHeader({
   report, recList, activeType, onSelectType, inFlight,
@@ -262,54 +262,56 @@ function ReportHeader({
 }
 
 /**
- * Where these numbers came from and when.
+ * How this report was built, in plain language rather than raw pipeline tokens
+ * run together - "Built from X · N data points" plus each step as its own bullet,
+ * the same shape the exported document uses (see report_method_block in
+ * _macros.html), instead of one squeezed line of <code> fragments with no room
+ * to breathe.
  *
  * Dashboards get trusted or ignored on this: without provenance a reader has no way
  * to tell a fresh result from a stale one, or to check that the pipeline filtered
- * what they thought it filtered.
+ * what they thought it filtered. scopeText carries that filtered-rows count and
+ * leads the block for the same reason it used to lead the provenance line: it is
+ * what stops someone reading the headline number as a total for the whole file.
  */
-function Provenance({ report, fileProfiles, scopeText }) {
+function BuildInfo({ report, fileProfiles, scopeText }) {
   if (!report) return null;
 
-  const bits = [];
-  // Moved down from beside the title, which the page needed the height back from.
-  // Still first in the line, and still stated as a definition rather than as rows
-  // lost: the filter is the report, and phrasing it as an exclusion reads as a fault.
-  if (scopeText) bits.push(scopeText);
   const files = report.source_files?.length
     ? report.source_files
     : (fileProfiles || []).map((f) => f.name);
-  if (files?.length) bits.push(files.join(', '));
-  if (report.report_rows != null) bits.push(`${report.report_rows.toLocaleString()} data points`);
-  if (report.data_columns?.length) bits.push(`${report.data_columns.length} columns`);
-  if (report.chart_type) bits.push(`${report.chart_type} chart`);
 
   return (
-    <div className="provenance">
-      {bits.map((bit, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <span className="provenance__sep" aria-hidden="true">·</span>}
-          <span>{bit}</span>
-        </React.Fragment>
-      ))}
-      {report.operations?.map((op) => <code key={op}>{op}</code>)}
+    <div className="build-info">
+      {scopeText && <p className="build-info__scope">{scopeText}</p>}
+      {files?.length > 0 && (
+        <p className="build-info__sources">
+          Built from {files.join(', ')}
+          {report.report_rows != null && ` · ${report.report_rows.toLocaleString()} data points`}.
+        </p>
+      )}
+      {report.operations?.length > 0 && (
+        <ul className="build-info__steps">
+          {report.operations.map((op) => <li key={op}>{op}</li>)}
+        </ul>
+      )}
     </div>
   );
 }
 
 /**
- * "Report data - Specifications" plus "Show table", laid out as bordered cells the
+ * "Report data - Build info" plus "Show table", laid out as bordered cells the
  * same way DistributionCard is - one head row of controls, then a stack of
  * disclosure content below it - rather than a title with a wrapping subtitle.
  *
  * That switch is what keeps "Show table" pinned in place: it used to sit in a
  * flex row that centered against the title *and* the provenance line beneath it,
- * so opening "specifications" (which can wrap to two lines) visibly shifted the
+ * so opening "build info" (which can wrap to two lines) visibly shifted the
  * button. Two toggles that both open a block below the head row can't do that -
  * the head row's own height never changes.
  */
 function ReportDataCard({
-  report, fileProfiles, scopeText, showSpecs, onToggleSpecs, showTable, onToggleTable,
+  report, fileProfiles, scopeText, showBuildInfo, onToggleBuildInfo, showTable, onToggleTable,
 }) {
   const rows = report.report_rows || 0;
   const columns = (report.data_columns || []).length;
@@ -322,11 +324,11 @@ function ReportDataCard({
           <button
             type="button"
             className="build-details__toggle"
-            aria-expanded={showSpecs}
-            onClick={onToggleSpecs}
+            aria-expanded={showBuildInfo}
+            onClick={onToggleBuildInfo}
           >
-            Specifications
-            <span aria-hidden="true">{showSpecs ? '▲' : '▼'}</span>
+            Build info
+            <span aria-hidden="true">{showBuildInfo ? '▲' : '▼'}</span>
           </button>
         </div>
         <button
@@ -340,9 +342,9 @@ function ReportDataCard({
         </button>
       </div>
 
-      {showSpecs && (
+      {showBuildInfo && (
         <div className="report-data-card__cell">
-          <Provenance report={report} fileProfiles={fileProfiles} scopeText={scopeText} />
+          <BuildInfo report={report} fileProfiles={fileProfiles} scopeText={scopeText} />
         </div>
       )}
 
@@ -933,14 +935,17 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
     });
   };
 
-  /** Rasterise the selected charts, then hand the payload to `send`. */
+  /** Rasterise the selected charts and skew curves, then hand the payload to `send`. */
   const withPayload = async (verb, send) => {
     setBusy(true);
     setStatus({ kind: 'info', text: 'Rendering charts…' });
     try {
-      const chartImages = await collectChartImages(reports, chosen);
+      const [chartImages, distImages] = await Promise.all([
+        collectChartImages(reports, chosen),
+        collectDistImages(reports, chosen),
+      ]);
       setStatus({ kind: 'info', text: `${verb}…` });
-      await send(chartImages);
+      await send(chartImages, distImages);
     } catch (err) {
       setStatus({ kind: 'error', text: err.message || 'Something went wrong.' });
       refreshStatus();  // a 503 here means the server's view of .env has changed
@@ -951,9 +956,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
 
   const download = (format) => withPayload(
     `Building the ${format.toUpperCase()}`,
-    async (chartImages) => {
+    async (chartImages, distImages) => {
       const { blob, filename } = await exportReports(sessionId, {
-        reportTypes: chosen, format, chartImages,
+        reportTypes: chosen, format, chartImages, distImages,
       });
       const name = filename || `ai-dashboard-reports-${chosen.join('').toLowerCase()}.${format}`;
       triggerDownload(blob, name);
@@ -961,9 +966,9 @@ function ExportPanel({ sessionId, reports, recList, inFlight }) {
     },
   );
 
-  const sendEmail = () => withPayload('Sending', async (chartImages) => {
+  const sendEmail = () => withPayload('Sending', async (chartImages, distImages) => {
     const result = await emailReports(sessionId, {
-      reportTypes: chosen, format: emailFormat, chartImages,
+      reportTypes: chosen, format: emailFormat, chartImages, distImages,
       recipients: [recipients],
     });
     setStatus({ kind: 'ok', text: `Sent to ${result.recipients.join(', ')}.` });

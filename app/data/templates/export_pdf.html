@@ -30,12 +30,13 @@
   .eyebrow { font-size: 7.5pt; letter-spacing: 0.6pt; text-transform: uppercase;
              color: #6B7280; font-weight: bold; }
   .title { font-size: 19pt; font-weight: bold; margin: 2pt 0 6pt 0; color: #111827; }
+  /* -pdf-keep-with-next is an xhtml2pdf-specific extension (unlike
+     page-break-inside, this one is reliably honoured) - it stops a heading being
+     stranded alone at the bottom of a page with its section starting fresh below. */
   .h2 { font-size: 11.5pt; font-weight: bold; margin: 16pt 0 6pt 0; color: #111827;
-        border-bottom: 1px solid #DEE2E6; padding-bottom: 3pt; }
-  .h2__chip { font-weight: normal; }
+        border-bottom: 1px solid #DEE2E6; padding-bottom: 3pt;
+        -pdf-keep-with-next: true; }
   p { margin: 0 0 6pt 0; }
-  code { font-family: Courier, monospace; font-size: 8pt; background-color: #F8F9FA;
-         color: #6B7280; padding: 1pt 3pt; }
   .footnote { font-size: 8pt; color: #6B7280; margin-top: 4pt; }
   .caption { font-size: 8.5pt; color: #6B7280; margin-top: 5pt; }
   .caption--lead { border-left: 2pt solid #D97706; padding: 4pt 7pt; margin: 0 0 6pt 0;
@@ -48,14 +49,11 @@
           padding: 1pt 4pt; border: 1px solid #DEE2E6; color: #6B7280; }
   .chip--computed { color: #16A34A; border-color: #16A34A; }
   .chip--ai { color: #2563EB; border-color: #2563EB; }
+  .chip--warn { color: #D97706; border-color: #D97706; }
 
-  .legend { margin-top: 4pt; }
-  .legend td { vertical-align: top; padding: 0 6pt 0 0; font-size: 8pt; }
-  .legend__text { color: #6B7280; display: block; margin-top: 2pt; }
-
-  /* ---------- provenance / banners ---------- */
-  .provenance { font-size: 8pt; color: #6B7280; margin-bottom: 8pt; }
-  /* Scope qualifies the numbers; it is not a warning, so it stays grey. */
+  /* ---------- meta / banners ---------- */
+  /* Shared by the single-report "Generated ..." line and (historically) the scope
+     line - small grey text under a title, not a warning, so it stays grey. */
   .scope { font-size: 8pt; color: #6B7280; margin: 0 0 6pt; }
   .banner { padding: 5pt 7pt; font-size: 8.5pt; margin-bottom: 8pt;
             border: 1px solid #DEE2E6; }
@@ -66,9 +64,14 @@
   .kpi__cell { vertical-align: top; padding: 6pt 8pt; border: 1px solid #DEE2E6; }
   .kpi__label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.45pt;
                 color: #6B7280; }
+  /* No flexbox here (xhtml2pdf has none) - the outlier chip is just a span after
+     the label text, wrapping onto its own line if the cell is too narrow. */
+  .kpi__label-row .chip { margin-left: 3pt; }
   .kpi__value { font-size: 15pt; font-weight: bold; color: #111827; padding: 2pt 0; }
+  .kpi__name-row { margin-top: 1pt; }
+  .kpi__name { font-size: 8pt; font-weight: bold; color: #111827; }
+  .kpi__delta { font-size: 8pt; color: #6B7280; margin-left: 5pt; }
   .kpi__sub { font-size: 7.5pt; color: #6B7280; }
-  .kpi__chip { padding-top: 3pt; }
 
   /* ---------- chart ---------- */
   .chart { margin: 4pt 0 8pt 0; }
@@ -92,18 +95,76 @@
   .mini__value { text-align: right; font-weight: bold; }
   .mini__z { color: #6B7280; font-weight: normal; }
 
-  .ai-note { border: 1px dotted #2563EB; background-color: #EFF6FF; padding: 5pt 7pt;
+  /* page-break-inside: avoid keeps a bordered box from splitting at a page
+     boundary, which otherwise draws its border around each fragment separately -
+     harmless on a one-line box, but the "Why the model proposed this report" note
+     (a border plus a multi-item bullet list) is tall enough to land right on a
+     boundary often enough to matter. */
+  .finding, .ai-note, .banner, .kpi__cell, .method {
+    page-break-inside: avoid;
+  }
+
+  /* Two elements share this look: a plain div (ai_note()) and a single-cell table
+     (ai_rationale - a table so xhtml2pdf keeps it whole across a page break, see
+     the macro comment). Padding is qualified by element so a table doesn't get it
+     twice (once from .ai-note, once from .ai-note td). */
+  .ai-note { border: 1px dotted #2563EB; background-color: #EFF6FF;
              font-size: 8.5pt; margin-top: 5pt; }
+  div.ai-note { padding: 5pt 7pt; }
+  table.ai-note td { padding: 5pt 7pt; }
 
   /* ---------- distribution ---------- */
   .strip { border: 1px solid #DEE2E6; }
   .strip__cell { padding: 5pt 3pt; text-align: center; border-right: 1px solid #DEE2E6; }
   .strip__label { font-size: 7pt; text-transform: uppercase; color: #6B7280; }
   .strip__value { font-size: 9.5pt; font-weight: bold; padding-top: 1pt; }
-  /* The variance and skew bands as a sentence. On screen and in the HTML export these
-     are a meter and a badge; xhtml2pdf has no positioning to draw either, so the same
-     two strings - authored in report_stats.py, not here - are set as text. */
+  /* Fallback sentence for when a graphic panel has no badge to show (s.available
+     but skew_level/variance_level came back None) - see distribution_graphics_pdf
+     in _macros.html for the panels themselves. */
   .dist__prose { font-size: 8.5pt; color: #6B7280; margin-top: 5pt; }
+
+  /* Range/Centre/Spread graphics - see the distribution_graphics_pdf macro comment
+     for why Range and Spread are plain tables (no xhtml2pdf `position` needed for
+     adjacent cells at computed widths) while Centre embeds a PNG the browser
+     rasterised (its curve is inline SVG, which xhtml2pdf cannot draw at all). */
+  .dist-graphics td.dist__cell { vertical-align: top; padding-right: 10pt; }
+  .dist-graphics td.dist__cell--last { padding-right: 0; }
+  .dist__label { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.4pt;
+                 color: #6B7280; }
+  .dist__label-row .dist__badge { font-size: 7pt; border: 1px solid #DEE2E6;
+                                   padding: 1pt 4pt; margin-left: 4pt; color: #6B7280; }
+  .dist__lead { font-size: 8pt; margin: 3pt 0 4pt 0; }
+  .dist__ends { font-size: 7.5pt; color: #6B7280; margin: 2pt 0 0 0; }
+
+  /* A box-and-whisker as five adjacent cells at computed % widths. The whisker
+     line is a zero-height div centred by the cell's vertical-align: middle -
+     the standard way to fake a thin centred rule in a table-based renderer. */
+  .bp-native { margin: 2pt 0; }
+  .bp-native td { height: 9pt; vertical-align: middle; padding: 0; }
+  .bp-native__line { border-top: 1pt solid #94A3B8; }
+  .bp-native__box { background-color: #BFDBFE; height: 9pt; }
+  .bp-native__tick { width: 2pt; background-color: #1D4ED8; height: 9pt; }
+
+  /* A percentage width here (matching the web target's 100%) makes xhtml2pdf's
+     image sizing throw "getSize: Not a float '100%'" - confirmed by rendering,
+     the same unwidthed-element issue as .brand, just on an <img> instead of a
+     <table>. A fixed pt width, no height (so it scales proportionally), is the
+     same fix already used for .chart__img. */
+  .skew-glyph-img { width: 130pt; margin: 3pt 0 6pt 0; }
+
+  /* A fill bar as two adjacent cells, same trick as the box plot's box segment -
+     the same reason every "row of tiles" elsewhere in this file is a table. */
+  .meter-native { margin: 2pt 0 6pt 0; }
+  .meter-native td { height: 6pt; }
+  .meter-native__fill { background-color: #2563EB; }
+  .meter-native--low .meter-native__fill { background-color: #16A34A; }
+  .meter-native--high .meter-native__fill { background-color: #D97706; }
+  .meter-native__rest { background-color: #DBEAFE; }
+
+  .dist__pair-grid-pdf { margin-top: 4pt; }
+  .dist__pair-grid-pdf td { width: 50%; padding: 0 4pt 0 0; }
+  .dist__pair-label { font-size: 7pt; color: #6B7280; }
+  .dist__pair-value { font-size: 9pt; font-weight: bold; color: #111827; }
 
   /* ---------- data / matrix tables ---------- */
   .data, .matrix { border: 1px solid #DEE2E6; }
@@ -117,6 +178,19 @@
   .matrix__row--emphasis td { font-weight: bold; background-color: #EFF6FF; }
   .matrix__absent { color: #9CA3AF; font-style: italic; }
 
+  /* ---------- brand ---------- */
+  /* Matches App.jsx's .app-nav__brand (same PNG data URI as the web shell - see the
+     macro comment on why it's a raster, not inline SVG, in a target that has none
+     of either, and why this is a table rather than inline elements with a margin). */
+  /* Unlike a browser, xhtml2pdf does not shrink an unwidthed table to its content -
+     it stretches to the full available width and splits the columns apart
+     (confirmed by rendering). A fixed pt width keeps it a compact lockup instead. */
+  .brand { width: 150pt; margin-bottom: 5pt; }
+  .brand td { vertical-align: middle; padding: 0; }
+  .brand__icon-cell { width: 26pt; padding-right: 6pt; }
+  .brand__icon { width: 20pt; height: 20pt; }
+  .brand__word { font-size: 15pt; font-weight: bold; color: #1e293b; white-space: nowrap; }
+
   /* ---------- cover / sections ---------- */
   .cover__title { font-size: 26pt; font-weight: bold; margin: 4pt 0; }
   .cover__sub { font-size: 10pt; color: #6B7280; margin-bottom: 14pt; }
@@ -127,11 +201,16 @@
   .cover__name { font-weight: bold; font-size: 10pt; }
   .cover__meta { font-size: 8pt; color: #6B7280; }
 
-  .exec td { padding: 3pt 0; vertical-align: top; font-size: 9pt; }
-  .exec__letter { font-weight: bold; color: #2563EB; width: 22pt; }
+  .exec { border: 1px solid #DEE2E6; }
+  .exec td { padding: 5pt 6pt; vertical-align: top; font-size: 9pt;
+             border-bottom: 1px solid #EEF0F2; }
+  .exec__letter { font-weight: bold; color: #2563EB; width: 20pt; }
 
   .method { margin-bottom: 8pt; }
   .method__head { font-weight: bold; font-size: 9.5pt; margin-bottom: 2pt; }
+  .method__sources { font-size: 8pt; color: #6B7280; margin: 0 0 4pt; }
+  .method__steps { margin: 3pt 0 0 12pt; padding: 0; font-size: 8pt; color: #6B7280; }
+  .method__steps li { margin-bottom: 2pt; }
 
   .footer { font-size: 7.5pt; color: #9CA3AF; border-top: 1px solid #DEE2E6;
             padding-top: 3pt; }
@@ -147,8 +226,7 @@
 
 {% if combined %}
 
-  {# 1. Cover, with the label legend - the export gets forwarded, so the reader
-       who opens it never saw the chips explained in the app. #}
+  {# 1. Cover #}
   {{ m.cover({'reports': reports, 'session_id': session_id,
               'generated_at': generated_at, 'all_source_files': all_source_files}) }}
 
@@ -173,11 +251,6 @@
   {% endfor %}
 
   {# 6 #}
-  <div class="break">
-    {{ m.recommendations_section({'reports': reports}) }}
-  </div>
-
-  {# 7 #}
   {% if include_appendix %}
     {% for r in reports %}
       {% if r.appendix %}<div class="break">{{ m.data_table(r) }}</div>{% endif %}
@@ -187,13 +260,14 @@
 {% else %}
   {% set r = reports[0] %}
 
-  {{ m.report_overview(r) }}
-
-  <div class="break">
-    {{ m.report_analysis(r) }}
-    <h2 class="h2">How to read the labels</h2>
-    {{ m.label_legend() }}
-  </div>
+  {{ m.brand_header() }}
+  {{ m.report_overview(r, generated_at=r.generated_at) }}
+  {# No wrapping break here: report_analysis puts its own break immediately before
+     Findings, so Distribution stays on this page with the KPI tiles and chart, and
+     only Findings/AI notes jump to a fresh one - see the macro comment. #}
+  {{ m.report_analysis(r) }}
+  <h2 class="h2">How this report was built</h2>
+  {{ m.report_method_block(r, show_head=false) }}
 
   {% if r.appendix %}<div class="break">{{ m.data_table(r) }}</div>{% endif %}
 {% endif %}

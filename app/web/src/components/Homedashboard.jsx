@@ -12,19 +12,19 @@ const STEPS = [
   {
     title: 'Upload',
     subtitle: 'Drop in your files.',
-    body: "Upload your CSV or Excel spreadsheets and choose the worksheets you want to use. We'll take it from there.",
+    body: "Upload your CSV or Excel files and choose the worksheets you want to use. We'll take it from there.",
   },
   {
-    title: 'Let AI do the thinking',
+    title: 'Let AI do the work',
     subtitle: "We'll find what matters.",
-    body: 'Your data is analyzed automatically, and AI figures out which insights, charts, and reports are most useful.',
+    body: 'AI analyzes your data, identifies what matters most, and decides how to build your reports.',
   },
   {
     title: 'Get your reports',
     subtitle: 'Ready to use.',
     body: [
-      'Your reports are built from your data with useful charts, key numbers, and a variety of other metrics.',
-      "Once you're done download them as a PDF or HTML. You can even share them by email!",
+      'Your reports are built with useful charts, key numbers, and insightful information from your data.',
+      "When they're ready, download or share your reports as PDF or HTML.",
     ]
   },
 ];
@@ -40,11 +40,11 @@ export default function HomeDashboard({ onStart }) {
             Just upload it. We'll take it from here.
           </h1>
           <p className="home-hero__body">
-            Simply upload your spreadsheet and let AI do the rest.
-            Your data is analyzed, the most useful insights are identified, and a set of reports is built for you.
+            Upload your spreadsheet and let AI do the rest. 
+            Your data is analyzed, the most useful information is identified, and your reports are built for you.
           </p>
           <p className="home-hero__emphasis">
-            We'll figure out what matters. No additional steps. Just upload and go.
+            We'll figure out what matters. No extra steps. Just upload and go.
           </p>
         </div>
       </div>

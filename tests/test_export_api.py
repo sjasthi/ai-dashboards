@@ -158,16 +158,20 @@ def test_html_download_is_self_contained(client, monkeypatch):
 
 
 def test_export_carries_the_provenance_labelling(client, monkeypatch):
-    """Computed statistics and the model's own words must stay distinguishable once
-    the document leaves the app - it has no chips legend of its own otherwise."""
+    """The model's pre-execution reasoning must stay distinguishable from a measured
+    fact once the document leaves the app. As of the 2026-08-10 declutter pass the
+    export no longer chip-labels every computed statistic or every question (the
+    reader is trusted to tell a stated fact from a finding by context) - the "AI
+    notes" section and its "Note:" label are what survive, because that text is
+    genuinely at risk of being mistaken for a measured result."""
     sid, _, rec = make_session(monkeypatch)
     generate(client, sid, "A")
 
     html = export(client, sid, ["A"], "html").text
 
-    assert "computed" in html
-    assert "AI question" in html
-    assert "AI note" in html
+    assert "Question asked" in html
+    assert "AI notes" in html
+    assert "Note:" in html
     # The model's rationale is present, but not under a findings heading.
     assert rec["rationale_bullets"][0] in html
     assert "Key Insights" not in html
@@ -208,7 +212,7 @@ def test_combined_export_compares_the_selected_reports(client, monkeypatch):
 
     assert "Comparative Report" in html
     assert "Comparison" in html
-    assert "Executive summary" in html
+    assert "Key findings per report" in html
     # The hazard warning has to be present, and above the numbers it warns about.
     assert "comparable across columns" in html
     assert html.index("comparable across columns") < html.index("Chart type")
@@ -484,14 +488,13 @@ def test_email_html_format_attaches_html(client, monkeypatch, fake_smtp):
 
 
 def test_email_body_explains_the_labels(client, monkeypatch, fake_smtp):
-    """The recipient never saw the app, so the chips need explaining in the mail."""
+    """The recipient never saw the app, so the AI notes section needs explaining in the mail."""
     sid, _, _ = make_session(monkeypatch)
     generate(client, sid, "A")
     email(client, sid)
 
     body = fake_smtp.sent[0].get_body(preferencelist=("plain",)).get_content()
-    assert "computed" in body
-    assert "AI note" in body
+    assert "AI notes" in body
     assert sid in body
 
 

@@ -133,6 +133,47 @@ def fmt_signed_pct(value: Any) -> str:
     return f"{sign}{abs(n):.1f}%"
 
 
+def fmt_measure(value: Any, is_currency: Any = False) -> str:
+    """"$4.2M" when `is_currency`, "4.2M" otherwise. Mirrors format.js compactMeasure.
+
+    Unlike compactMeasure this returns the placeholder dash directly rather than
+    passing a missing value through unformatted: the JS version leans on that to let
+    StatTile's own null check apply its muted "empty" styling, but every Jinja call
+    site here just wants a string to print.
+    """
+    formatted = fmt_compact(value)
+    return f"${formatted}" if is_currency and formatted != "—" else formatted
+
+
+_DIRECTION_GLYPHS = {"up": "▲", "down": "▼"}
+
+
+def fmt_direction_glyph(direction: Any) -> str:
+    """▲ / ▼ / — matched to a trend direction. Mirrors format.js directionGlyph."""
+    return _DIRECTION_GLYPHS.get(direction, "—")
+
+
+def delta_vs_average(value: Any, mean: Any) -> Optional[Dict[str, str]]:
+    """How far a single value sits from the series mean, as a compact inline badge.
+
+    Mirrors format.js deltaVsAverage. Returns None when there's no mean to compare
+    against, or the value doesn't differ from it at whole-percent resolution -
+    "+0% vs avg" beside an up/down arrow would claim a direction that isn't there.
+    """
+    try:
+        v = float(value)
+        m = float(mean)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v) or not math.isfinite(m) or m == 0:
+        return None
+    pct = round(((v - m) / abs(m)) * 100)
+    if pct == 0:
+        return None
+    sign = "+" if pct > 0 else "−"
+    return {"direction": "up" if pct > 0 else "down", "text": f"{sign}{abs(pct)}% vs avg"}
+
+
 def fmt_clock(iso: Any) -> str:
     """An ISO timestamp as a readable local date and time.
 
@@ -235,6 +276,36 @@ _env.filters["signed_pct"] = fmt_signed_pct
 _env.filters["clock"] = fmt_clock
 _env.filters["cell"] = fmt_cell
 _env.filters["human"] = fmt_human
+_env.filters["measure"] = fmt_measure
+_env.filters["direction_glyph"] = fmt_direction_glyph
+_env.globals["delta_vs_average"] = delta_vs_average
+
+# The nav bar's brand mark (App.jsx's `.app-nav__brand`: a 34px #2563eb rounded
+# square holding a white three-bar icon, next to "AI-Dashboard" in bold) baked to a
+# PNG data URI. xhtml2pdf has no inline-SVG support (confirmed by rendering, not
+# assumed - see docs/EXPORT_LIVE_SYNC.md), so unlike the rest of this module's icons
+# this one can't be markup-ported live; it's a fixed raster instead, generated once
+# to match the live component's exact geometry.
+_BRAND_ICON_DATA_URL = "data:image/png;base64," + (
+    "iVBORw0KGgoAAAANSUhEUgAAARAAAAEQCAYAAAB4CisVAAAEgklEQVR42u3diXXiQBBAwZ55hGBCgMQgLJOYCQFywBHYSOiYqyoA"
+    "HtYun+6Rd5ViAKfL4xWws/vtmHr/GZNQgLAMGRDBQFAERDSg0Zgk0QAx6TIgwgF1hySJBohJ8wERDmgvJFk8INyBbHECEQ5oexpJ"
+    "wgFC0swKIx7Qz2criweISNUrjHBAnytNFg8wjVQZEPGAviOSxQNEpKqAiAeMEZEkHBAOV0tPIOIB400j2eUEigbE9AFjTiFZPEBE"
+    "igREPGDsiGTxABHZNSDiASLiLgwQu64wpg8whXwUEPEAEfkoIOIBIuIMBIhdz0BMH2AKMYEA+04gpg8whXwUEPEAEbHCAPuuMKYP"
+    "4F0LTCCA/5EMqCQg1hdgShNMIMB6E4jpA5g6hZhAAIeoQOGAWF+AOWuMCQSwwgAFA2J9AeauMSYQwAoDCAjQWkCcfwDxwTmICQSw"
+    "wgACAggIICAA/0juwAAmEEBAAAEBBARAQAABAQQEEBBAQAAEBBAQQEAAAQEQEEBAAAEBBAQQEAABAQQEEBBAQAAEBBAQoA4Hl4AW"
+    "/Hx/LX6N8/XpQppAEI+yr4OAMFg8RERAEA8RERAo/yEXEQEBBAQQEEBAAAQEEBBAQAABARAQQEAAAQEEBBAQAAEBBAQQEEBAAAQE"
+    "EBAgPBeG8LwVTCB43goCgniICAKC560gIHjeCgICCAiAgAACAggIICCAgAAICCAggIAAAgIIiEsACAggIICAAAICICCAgAACAggI"
+    "ICAAAgIICCAggIAA/OHgEoSn3oMJxFPvQUDEQ0QQEPEQEQQET70HAQEEBBAQQEAAAQEQEEBAAAEBBARAQAABAQQEEBBAQAAEBBAQ"
+    "QEAAAQEQEEBAAAEBBAQQEAABAQQEEBBAQAAEBBAQQEAAAQEEBEBAAAEBBAQQEAABAQQEEBBAQAABARAQQEAAAQEEBEBAAAGpx/n6"
+    "bOL1vc99Xl9AqOYv5dqv632Kh4AMEhEf9jbep4BgjPc+mSmdLo+XywCYQAABAQQEEBAAAQEEBBAQQEAAAQEQEEBAAAEBBARAQAAB"
+    "AQQEEBBAQAAEBBAQQEAAAQEQEGC9gNxvx+QyAHPdb8dkAgGsMICAAAICCAjAu4C4EwPEzDswJhDACgMICNBqQJyDADHj/MMEAlhh"
+    "gAoCYo0Bpq4vJhDACgNUEhBrDDBlfTGBAOuvMKYQYEoTTCCAQ1SgooBYY4B3LTCBANusMKYQMH0sOgMRERAPKwxQ5i6MKQRMHyYQ"
+    "oMzvgZhCwPSxaAIRERCPRSuMiIB4OAMBosi/hTGFgOlj0QQiIjB2PBavMCIC48ZjlTMQEYEx47HaIaqIwHjxcBcGqCMgphAYa/qI"
+    "iNjkQ3+6PF7+mKDfcGy6wphGoP94bHoGIiLQdzw2P0QVEeg3HrvchRER6DMeERsdoobDVeg6HEV+D8Q0An19xnLvPyCIRycrjJUG"
+    "+vpSrmIaEBJoc5rPLgSIR9MTiGkE2vyyrfqbX0yg7gm9idVBSBAOARET6Ow8sOnDSzFBNAREUBAMAREWGO3XE34B2hx/HQ/pyA4A"
+    "AAAASUVORK5CYII="
+)
+_env.globals["brand_icon_data_url"] = _BRAND_ICON_DATA_URL
 
 
 # ============================================================================
@@ -375,12 +446,19 @@ def _report_context(
     letter: str,
     *,
     chart_images: Optional[Dict[str, str]],
+    dist_images: Optional[Dict[str, str]],
     include_appendix: bool,
     appendix_row_limit: int,
 ) -> Dict[str, Any]:
     """One report, flattened for the templates."""
     report = ((session.get("reports") or {}).get(letter)) or {}
     image = _sanitize_data_url((chart_images or {}).get(letter))
+    # Same idea as chart_image, same sanitizer, but for the Distribution card's
+    # Center-cell skew curve: xhtml2pdf cannot draw the inline SVG SkewGlyph.jsx
+    # uses, so the browser rasterises it (export.js's skewGlyphPngDataUrl) and
+    # POSTs it up like the chart. Only ever consumed by the PDF shell - the HTML
+    # export draws the real SVG itself, see distribution_card() in _macros.html.
+    dist_image = _sanitize_data_url((dist_images or {}).get(letter))
 
     return {
         "letter": letter,
@@ -390,6 +468,7 @@ def _report_context(
         "rationale_bullets": report.get("rationale_bullets") or [],
         "chart_type": report.get("chart_type"),
         "chart_image": image,
+        "dist_image": dist_image,
         "report_rows": report.get("report_rows"),
         "data_columns": report.get("data_columns") or [],
         "stats": report.get("stats") or {},
@@ -418,10 +497,9 @@ def _comparison_rows(reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     the value?". A report with no ordered axis has no trend - not a trend of zero -
     and a matrix that renders the two the same way invites a false comparison.
     """
-    def row(label, fn, chip=None, emphasis=False):
+    def row(label, fn, emphasis=False):
         return {
             "label": label,
-            "chip": chip,
             "emphasis": emphasis,
             "cells": [fn(r, r.get("stats") or {}) for r in reports],
         }
@@ -457,48 +535,44 @@ def _comparison_rows(reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         method = s.get("anomaly_method")
         return _cell(f"{n}" + (f" ({method})" if method else ""))
 
-    def stat(key, formatter=fmt_compact):
+    def stat(key, formatter=None):
         def get(r, s):
             if not s.get("available") or s.get(key) is None:
                 return _cell("not measured", absent=True)
-            return _cell(formatter(s[key]))
+            fmt = formatter or (lambda v: fmt_measure(v, s.get("measure_is_currency")))
+            return _cell(fmt(s[key]))
         return get
 
     return [
         row("Report name", lambda r, s: _cell(r["report_name"])),
         row("Pattern", lambda r, s: _cell(r.get("pattern_used"))),
-        row("Question the model asked", lambda r, s: _cell(r.get("question_answered")),
-            chip="AI question"),
+        row("Question asked", lambda r, s: _cell(r.get("question_answered"))),
         row("Source files", lambda r, s: _cell(", ".join(r.get("source_files") or []))),
-        row("Rows analysed", lambda r, s: _cell(f"{r.get('report_rows') or 0:,}"),
-            chip="computed"),
-        row("Measure", lambda r, s: _cell(s.get("measure_label")),
-            chip="computed", emphasis=True),
+        row("Rows analysed", lambda r, s: _cell(f"{r.get('report_rows') or 0:,}")),
+        row("Measure", lambda r, s: _cell(s.get("measure_label")), emphasis=True),
         row("Headline",
             lambda r, s: _cell("not measured", absent=True) if not s.get("available")
-            else _cell(f"{s.get('headline_label') or ''}: {fmt_compact(s.get('headline_value'))}".strip(": ")),
-            chip="computed"),
+            else _cell(f"{s.get('headline_label') or ''}: "
+                       f"{fmt_measure(s.get('headline_value'), s.get('measure_is_currency'))}".strip(": "))),
         row("Peak",
             lambda r, s: _cell("not measured", absent=True) if not s.get("available")
-            else _cell(f"{fmt_compact(s.get('peak_value'))}"
-                       + (f" at {s['peak_label']}" if s.get("peak_label") else "")),
-            chip="computed"),
+            else _cell(f"{fmt_measure(s.get('peak_value'), s.get('measure_is_currency'))}"
+                       + (f" at {s['peak_label']}" if s.get("peak_label") else ""))),
         row("Low",
             lambda r, s: _cell("not measured", absent=True) if not s.get("available")
-            else _cell(f"{fmt_compact(s.get('trough_value'))}"
-                       + (f" at {s['trough_label']}" if s.get("trough_label") else "")),
-            chip="computed"),
-        row("Median", stat("median"), chip="computed"),
+            else _cell(f"{fmt_measure(s.get('trough_value'), s.get('measure_is_currency'))}"
+                       + (f" at {s['trough_label']}" if s.get("trough_label") else ""))),
+        row("Median", stat("median")),
         row("Mean ± std",
             lambda r, s: _cell("not measured", absent=True) if not s.get("available")
-            else _cell(f"{fmt_compact(s.get('mean'))} ± {fmt_compact(s.get('std'))}"),
-            chip="computed"),
-        row("IQR", stat("iqr"), chip="computed"),
-        row("Spread (CV)", stat("cv", lambda v: f"{v}%"), chip="computed"),
-        row("Trend", trend, chip="computed"),
-        row("Concentration", concentration, chip="computed"),
-        row("Outliers", outliers, chip="computed"),
-        row("Missing values", missing, chip="computed"),
+            else _cell(f"{fmt_measure(s.get('mean'), s.get('measure_is_currency'))} "
+                       f"± {fmt_measure(s.get('std'), s.get('measure_is_currency'))}")),
+        row("IQR", stat("iqr")),
+        row("Spread (CV)", stat("cv", lambda v: f"{v}%")),
+        row("Trend", trend),
+        row("Concentration", concentration),
+        row("Outliers", outliers),
+        row("Missing values", missing),
         row("Chart type", lambda r, s: _cell(r.get("chart_type"))),
     ]
 
@@ -508,6 +582,7 @@ def build_export_context(
     report_types: Sequence[str],
     *,
     chart_images: Optional[Dict[str, str]] = None,
+    dist_images: Optional[Dict[str, str]] = None,
     include_appendix: bool = True,
     appendix_row_limit: int = MAX_APPENDIX_ROWS,
 ) -> Dict[str, Any]:
@@ -517,6 +592,7 @@ def build_export_context(
         _report_context(
             session, letter,
             chart_images=chart_images,
+            dist_images=dist_images,
             include_appendix=include_appendix,
             appendix_row_limit=appendix_row_limit,
         )
