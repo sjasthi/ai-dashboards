@@ -1,0 +1,16 @@
+store_id,store_name,city,district,region,opening_year,size_sqm,store_type
+1,Lotus Cairo Festival City,Cairo,New Cairo,Greater Cairo,2018,420,Flagship
+2,Lotus Mall of Egypt,Giza,Sheikh Zayed,Greater Cairo,2019,380,Flagship
+3,Lotus City Stars,Cairo,Nasr City,Greater Cairo,2017,350,Flagship
+4,Lotus Alexandria City Centre,Alexandria,Smouha,Alexandria,2020,290,Standard
+5,Lotus San Stefano,Alexandria,San Stefano,Alexandria,2016,310,Standard
+6,Lotus Mansoura Mega Mall,Mansoura,El Mansoura,Nile Delta,2021,220,Standard
+7,Lotus Tanta Stars,Tanta,El Tanta,Nile Delta,2022,180,Small
+8,Lotus Aswan Plaza,Aswan,El Aswan,Upper Egypt,2019,150,Small
+9,Lotus Luxor Mall,Luxor,El Luxor,Upper Egypt,2020,140,Small
+10,Lotus Hurghada Waterfront,Hurghada,El Mamsha,Red Sea,2018,200,Standard
+11,Lotus Suez Canal Mall,Suez,El Arbain,Canal Zone,2021,170,Small
+12,Lotus Port Said Mega,Port Said,El Manakh,Canal Zone,2017,190,Small
+13,Lotus Ismailia Festival,Ismailia,El Hay El Awel,Canal Zone,2022,160,Small
+14,Lotus Zagazig Stars,Zagazig,El Zagazig,Nile Delta,2020,175,Small
+15,Lotus Sharm Plaza,Sharm El Sheikh,Nabq Bay,South Sinai,2019,210,Standard
